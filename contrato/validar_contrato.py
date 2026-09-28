@@ -1,4 +1,4 @@
-"""Prueba de formato JSON y validación de telemetría entrante (HU-05, HU-15).
+"""Prueba de formato JSON y validación de telemetría y eventos entrantes (HU-05, HU-13, HU-15).
 
 Valida los payloads que genera el CÓDIGO REAL del firmware
 (ColdCare1023/IoT: `scripts/generar_ejemplos_msvc.cmd` → `docs/ejemplos/`) contra el
@@ -19,7 +19,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).parent))
-from telemetria_v1 import TelemetriaV1, parsear_telemetria  # noqa: E402
+from telemetria_v1 import EventoV1, TelemetriaV1, parsear_telemetria  # noqa: E402
 
 EJEMPLOS = Path(__file__).parent / "ejemplos"
 
@@ -39,10 +39,14 @@ def _rechaza(datos: dict) -> bool:
 # ── Casos positivos: lo que el firmware emite debe pasar ─────────────────────
 
 def test_todos_los_ejemplos_del_firmware_son_validos():
-    archivos = sorted(EJEMPLOS.glob("telemetria_*.json"))
+    archivos = sorted(EJEMPLOS.glob("*.json"))
     assert archivos, "No hay ejemplos: copiarlos de ColdCare1023/IoT docs/ejemplos"
     for ruta in archivos:
-        parsear_telemetria(ruta.read_bytes())
+        cuerpo = ruta.read_bytes()
+        if ruta.name.startswith("telemetria_"):
+            parsear_telemetria(cuerpo)
+        else:
+            EventoV1.model_validate_json(cuerpo)
 
 
 def test_falla_ds18b20_no_produce_temperatura_para_reglas():

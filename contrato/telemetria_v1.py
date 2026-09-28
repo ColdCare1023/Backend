@@ -1,4 +1,4 @@
-"""Esquema Pydantic v2 del contrato de telemetría nodo → backend, v1.0 (HU-15).
+"""Esquema Pydantic v2 del contrato de mensajes nodo → backend, v1.0 (HU-15, HU-13).
 
 Espejo exacto de `src/core/Payload.cpp` y `docs/contrato_payload_v1.md` del repositorio
 ColdCare1023/IoT. Pensado para que Diego lo
@@ -97,6 +97,33 @@ class TelemetriaV1(BaseModel):
         if self.ds18b20_status != "OK" or self.simulated:
             return None
         return self.temp_ds18b20
+
+
+class EventoV1(BaseModel):
+    """Mensaje de `farmacias/<device_id>/eventos` (incluido el LWT)."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    schema_version: Literal["1.0"]
+    device_id: str = Field(pattern=DEVICE_ID_PATRON)
+    event_type: Literal[
+        "arranque", "online", "lwt_offline", "buffer_80", "buffer_saturado",
+        "registros_en_cuarentena", "wifi_reconexion_prolongada", "credencial_rotada",
+        "conmutacion_respaldo", "suministro_restablecido", "respaldo_autonomia_critica",
+        "estado_nodo",
+    ]
+    # El LWT lo publica el broker: no lleva boot_id, hora ni detalle.
+    boot_id: int | None = Field(default=None, ge=0, le=UINT32)
+    occurred_at: datetime | None = None
+    time_quality: Literal["sntp_synced", "sntp_backfilled", "unsynced"] | None = None
+    uptime_s: int | None = Field(default=None, ge=0, le=UINT32)
+    detail: dict | None = None
+
+    @model_validator(mode="after")
+    def _lwt_minimo(self) -> "EventoV1":
+        if self.event_type != "lwt_offline" and (self.boot_id is None or self.time_quality is None):
+            raise ValueError("los eventos del nodo llevan boot_id y time_quality")
+        return self
 
 
 def parsear_telemetria(cuerpo: bytes | str) -> TelemetriaV1:
