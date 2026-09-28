@@ -1,4 +1,4 @@
-"""Esquema Pydantic v2 del contrato de mensajes nodo → backend, v1.0 (HU-15, HU-13).
+"""Esquema Pydantic v2 del contrato de mensajes nodo ↔ backend, v1.0 (HU-07, HU-13, HU-15).
 
 Espejo exacto de `src/core/Payload.cpp` y `docs/contrato_payload_v1.md` del repositorio
 ColdCare1023/IoT. Pensado para que Diego lo
@@ -97,6 +97,17 @@ class TelemetriaV1(BaseModel):
         if self.ds18b20_status != "OK" or self.simulated:
             return None
         return self.temp_ds18b20
+
+
+class AckLogicoV1(BaseModel):
+    """Mensaje que el backend publica en `farmacias/<device_id>/ack` tras el COMMIT."""
+
+    model_config = ConfigDict(extra="allow")
+
+    device_id: str = Field(pattern=DEVICE_ID_PATRON)
+    boot_id: int = Field(ge=0, le=UINT32)
+    seq_no: int = Field(ge=1, le=UINT32)
+    status: Literal["committed", "duplicate", "rejected"]
 
 
 class EventoV1(BaseModel):
