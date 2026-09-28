@@ -1,4 +1,4 @@
-"""Simulador de backend con acuse lógico para probar el nodo (HU-07, HU-15).
+"""Simulador de backend para el banco de pruebas del nodo (HU-07, HU-11, HU-15).
 
 Hace de "FastAPI + PostgreSQL" mínimo: se suscribe a farmacias/+/lecturas,
 valida cada mensaje con el esquema Pydantic v1.0, lo "persiste" en SQLite con
@@ -48,10 +48,13 @@ class Almacen:
         self._db.execute(
             "CREATE TABLE IF NOT EXISTS lecturas (device_id TEXT, boot_id INTEGER, seq_no INTEGER, "
             "captured_at TEXT, received_at TEXT, payload TEXT, UNIQUE(device_id, boot_id, seq_no))")
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS conflictos (device_id TEXT, boot_id INTEGER, seq_no INTEGER, "
+            "recibido TEXT, payload_nuevo TEXT)")
         self._db.commit()
 
     def guardar(self, t, crudo: str) -> str:
-        """Devuelve 'committed' o 'duplicate'."""
+        """Devuelve 'committed' o 'duplicate'. Conflicto de payload → se audita."""
         with self._lock:
             ahora = datetime.now(timezone.utc).isoformat()
             try:
@@ -61,11 +64,19 @@ class Almacen:
                 self._db.commit()  # el acuse se publica DESPUÉS de este COMMIT
                 return "committed"
             except sqlite3.IntegrityError:
+                previo = self._db.execute(
+                    "SELECT payload FROM lecturas WHERE device_id=? AND boot_id=? AND seq_no=?",
+                    (t.device_id, t.boot_id, t.seq_no)).fetchone()[0]
+                if json.loads(previo) != json.loads(crudo):
+                    self._db.execute("INSERT INTO conflictos VALUES (?,?,?,?,?)",
+                                     (t.device_id, t.boot_id, t.seq_no, ahora, crudo))
+                    self._db.commit()
                 return "duplicate"
 
     def resumen(self) -> str:
         n = self._db.execute("SELECT COUNT(*) FROM lecturas").fetchone()[0]
-        return f"{n} lecturas persistidas"
+        c = self._db.execute("SELECT COUNT(*) FROM conflictos").fetchone()[0]
+        return f"{n} lecturas persistidas, {c} conflictos auditados"
 
 
 def main(argv: list[str] | None = None) -> int:
