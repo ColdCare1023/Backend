@@ -1,0 +1,10 @@
+# Backend simulado: lee lecturas y eventos de todos, publica acuses.
+user backend_qa
+topic read farmacias/+/lecturas
+topic read farmacias/+/eventos
+topic write farmacias/+/ack
+
+# Cada nodo (usuario = device_id) solo publica en SUS tópicos y solo lee SU acuse (HU-10 esc. 3).
+pattern write farmacias/%u/lecturas
+pattern write farmacias/%u/eventos
+pattern read farmacias/%u/ack
