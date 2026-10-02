@@ -153,6 +153,7 @@ class ConsumidorMQTT:
 
 from sse_broadcaster import sse_router, broadcaster_global
 from auth import auth_router
+from grafica_service import grafica_router
 
 consumidor_global = ConsumidorMQTT()
 
@@ -169,6 +170,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="ColdCare Telemetry API", version="1.0.0", lifespan=lifespan)
 app.include_router(sse_router)
 app.include_router(auth_router)
+app.include_router(grafica_router)
+
 
 
 
