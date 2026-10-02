@@ -119,7 +119,7 @@ class EventoV1(BaseModel):
     device_id: str = Field(pattern=DEVICE_ID_PATRON)
     event_type: Literal[
         "arranque", "online", "lwt_offline", "buffer_80", "buffer_saturado",
-        "registros_en_cuarentena", "wifi_reconexion_prolongada", "credencial_rotada",
+        "registros_en_cuarentena", "wifi_reconexion_prolongada", "credencial_rotada", "puerta",
         "conmutacion_respaldo", "suministro_restablecido", "respaldo_autonomia_critica",
         "estado_nodo",
     ]
