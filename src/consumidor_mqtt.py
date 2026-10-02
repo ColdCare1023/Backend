@@ -104,7 +104,7 @@ class ConsumidorMQTT:
             return {
                 "status": "rejected",
                 "ident": ident,
-                "reason": str(err).splitlines()[0],
+                "reason": str(err),
                 "processed_at": now_iso,
             }
 
