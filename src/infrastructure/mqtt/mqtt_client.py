@@ -29,14 +29,17 @@ RECONEXION_ESPERA_MAXIMA_SEGUNDOS = 60.0
 MensajeHandler = Callable[[aiomqtt.Client, aiomqtt.Message], Awaitable[None]]
 
 
-def build_ssl_context(tls_enabled: bool) -> ssl.SSLContext | None:
+def build_ssl_context(tls_enabled: bool, ca_file: str = "") -> ssl.SSLContext | None:
     """Contexto TLS 1.2/1.3 con verificación del certificado del broker (RNF-05).
 
     `create_default_context()` exige certificado válido y comprobación del
     nombre de host. Devolver None deshabilita TLS por completo; solo tiene
-    sentido contra un broker local de desarrollo.
+    sentido contra un broker local de desarrollo. `ca_file` añade una CA
+    privada (banco local) sin relajar la verificación.
     """
-    return ssl.create_default_context() if tls_enabled else None
+    if not tls_enabled:
+        return None
+    return ssl.create_default_context(cafile=ca_file or None)
 
 
 def build_client(settings: Settings) -> aiomqtt.Client:
@@ -53,7 +56,7 @@ def build_client(settings: Settings) -> aiomqtt.Client:
         username=settings.mqtt_username,
         password=settings.mqtt_password,
         identifier=settings.mqtt_client_id,
-        tls_context=build_ssl_context(settings.mqtt_tls_enabled),
+        tls_context=build_ssl_context(settings.mqtt_tls_enabled, settings.mqtt_ca_file),
         keepalive=60,
     )
 

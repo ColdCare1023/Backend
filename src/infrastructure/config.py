@@ -124,6 +124,9 @@ class Settings(BaseSettings):
     mqtt_password: str = "token_seguro"
     mqtt_client_id: str = "backend-farmacia-cdl"
     mqtt_tls_enabled: bool = True
+    # CA privada del broker (banco local). Vacío = almacén del sistema, que es
+    # lo correcto con EMQX Cloud (Let's Encrypt).
+    mqtt_ca_file: str = ""
     mqtt_enabled: bool = True
 
     # Solo se aceptan entornos con semántica de seguridad conocida. Un valor
