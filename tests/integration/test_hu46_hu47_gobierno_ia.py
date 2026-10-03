@@ -1,6 +1,8 @@
 """HU-46 (gobierno y versionado del modelo IA) y HU-47 (consulta de
 trazabilidad de la inferencia) del backlog de 51 HU finales."""
 
+from datetime import datetime, timedelta, timezone
+
 from tests.conftest import auth_header
 
 DEVICE_ID = "FARM-HU46-01"
@@ -99,12 +101,15 @@ def test_registro_y_activacion_quedan_encadenados(client, token_admin):
 
 def test_consultar_inferencia_de_lectura_devuelve_evidencia(client, token_tecnico, token_farmaceutico):
     # Dos lecturas previas para que la tercera SÍ tenga inferencia completa.
+    # Relativas a "ahora": el backend rechaza lecturas de más de 48 h, así que
+    # una fecha fija hacía fallar la prueba dos días después de escribirla.
+    base = datetime.now(timezone.utc).replace(second=0, microsecond=0) - timedelta(minutes=20)
     for minutos, temp in ((10, 5.0), (5, 5.0)):
         client.post(
             "/api/lecturas",
             json={
                 "device_id": DEVICE_ID,
-                "timestamp": f"2026-09-02T00:{minutos:02d}:00Z",
+                "timestamp": (base + timedelta(minutes=minutos)).isoformat(),
                 "temperatura_interna": temp,
                 "temperatura_ambiental": 21.0,
                 "humedad_ambiental": 55.0,
@@ -117,7 +122,7 @@ def test_consultar_inferencia_de_lectura_devuelve_evidencia(client, token_tecnic
         "/api/lecturas",
         json={
             "device_id": DEVICE_ID,
-            "timestamp": "2026-09-02T00:15:00Z",
+            "timestamp": (base + timedelta(minutes=15)).isoformat(),
             "temperatura_interna": 5.0,
             "temperatura_ambiental": 21.0,
             "humedad_ambiental": 55.0,
