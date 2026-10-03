@@ -1,6 +1,7 @@
 # Entorno local ColdCare (sin nube)
 
-PostgreSQL 16 + EMQX 5.8 con TLS en 8883 + backend, en Docker. CA propia de prueba.
+PostgreSQL 16 + EMQX 5.8 (TLS 8883, sin 1883, usuario = `device_id`, ACL por tópico) + backend, en Docker.
+CA propia de prueba. Permite probar el nodo ColdCare1023/IoT real, el backend y el frontend en una sola PC.
 
 ## Primera vez
 
@@ -12,19 +13,48 @@ docker compose exec backend python -m scripts.seed_dev   # usuarios demo
 ```
 
 `init.sh` genera `certs/` (CA, certificado del broker y certificados para los casos negativos de HU-09),
-`.env` con secretos aleatorios y los tokens MQTT. Todo ignorado por git.
+`.env` con secretos aleatorios, `emqx/bootstrap_users.csv` y `secrets/*.token`. Todo ignorado por git.
 
 | Servicio | Acceso |
 |---|---|
-| EMQX MQTT/TLS | `<IP_LAN>:8883` |
+| EMQX MQTT/TLS | `<IP_LAN>:8883` (usuario = device_id) |
 | EMQX dashboard | http://localhost:18083 (admin / `EMQX_DASHBOARD_PASSWORD` de `.env`) |
 | Backend | http://localhost:8000/docs |
 | PostgreSQL | `localhost:5433` |
 
+## Nodo real (firmware ColdCare1023/IoT)
+
+```bash
+WIFI_SSID="MiRed" WIFI_PASS="clave" ./scripts/flash_coldcare.sh COM6 ESP32_FARMACIA_01
+```
+
+Da de alta el dispositivo en EMQX, copia la CA a `data/certs/root_ca.pem` del firmware, sube LittleFS
+y el firmware, y aprovisiona Wi-Fi/host/token por la consola serie (`nvs set …`). `uploadfs` borra el
+buffer offline; `SOLO_APP=1` lo evita. Ver variables en la cabecera del script.
+
+## Verificar
+
+Con el venv del backend activo (`httpx`, `aiomqtt`):
+
+```bash
+python scripts/smoke_test.py          # HU-09/10/14: TLS, token, CA ajena, host distinto, ACL, 1883
+python scripts/publicar_caso.py '{}'  # una telemetría v1.0 válida → acuse "committed"
+python scripts/hu12_hu19_carga.py     # HU-12/19: 5 nodos simultáneos, API en paralelo, latencia SSE
+python scripts/espiar_lecturas.py 3   # captura mensajes crudos de lecturas/eventos
+docker compose logs -f emqx           # evidencia HU-10: bad_username_or_password, authorization denied
+```
+
+`capturar_serial.py` guarda el monitor serie con hora local sin reiniciar el nodo (abre el puerto con
+DTR/RTS bajos). Requiere `pyserial`.
+
 ## Notas
 
 - El ESP32 (mbedTLS 2.x) valida el host contra entradas DNS del certificado: la IP va como `DNS:` e `IP:`.
-  Si cambia la IP de la PC: `./scripts/init.sh <nueva_IP> --force`.
-- El backend confía en la CA privada con `MQTT_CA_FILE`; sin ella usa el almacén del sistema (EMQX Cloud).
+  Si cambia la IP de la PC: `./scripts/init.sh <nueva_IP> --force` y reaprovisionar el nodo.
 - Certificados válidos 365 días.
-- Parar: `docker compose down`. Borrar datos: `docker compose down -v`.
+- `DEVICE_REGISTRY_ESTRICTO=false`: el backend registra el nodo con su primera lectura. Con `true` hay
+  que darlo de alta antes (HU-43).
+- Expiración de sesión (HU-39): `JWT_EXPIRE_MIN=1 docker compose --profile backend up -d backend`.
+- Windows: `aiomqtt` no funciona con el loop Proactor; por eso el backend va en contenedor y los scripts
+  usan `SelectorEventLoop`.
+- Parar: `docker compose down`. Borrar datos y usuarios MQTT: `docker compose down -v`.
