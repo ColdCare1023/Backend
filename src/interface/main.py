@@ -103,7 +103,11 @@ async def _publicar_ack_lectura(
             "reading_id": reading_id,
             "timestamp": timestamp.isoformat(),
             "estado": estado,
-        }
+        },
+        # Compacto a propósito: el firmware extrae `reading_id` con una búsqueda de
+        # texto plano (`"reading_id":"..."`, core::extraerCampoString) y no tolera el
+        # espacio tras los dos puntos que emite json.dumps por defecto.
+        separators=(",", ":"),
     )
     try:
         await client.publish(_topico_ack(device_id), payload=cuerpo, qos=1)

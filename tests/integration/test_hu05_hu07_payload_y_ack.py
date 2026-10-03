@@ -205,3 +205,20 @@ async def test_dispositivo_no_autorizado_tambien_recibe_ack(entorno, monkeypatch
     assert qos == 1
     assert cuerpo["reading_id"] == "esp32-no-autorizado-01"
     assert cuerpo["estado"] == "dispositivo_no_autorizado"
+
+
+# ── HU-07: el firmware parsea el acuse con búsqueda de texto plano ────────
+
+
+async def test_acuse_usa_json_compacto_para_el_parser_del_firmware():
+    """core::extraerCampoString busca `"reading_id":"<valor>"` sin espacios; con el
+    formato por defecto de json.dumps (`": "`) el nodo nunca reconocía su acuse."""
+    crudos: list[str] = []
+
+    class _Crudo:
+        async def publish(self, topic, payload=None, qos=0, **_kw):
+            crudos.append(payload)
+
+    await main._publicar_ack_lectura(_Crudo(), DEVICE_ID, "esp32-0001", datetime.now(tz=timezone.utc))
+
+    assert '"reading_id":"esp32-0001"' in crudos[0]
