@@ -317,6 +317,41 @@ class DispositivoResponse(BaseModel):
     responsable_telefono: str | None = None
 
 
+class SensorIoTResponse(BaseModel):
+    modelo: Literal["DS18B20", "SHT31", "MC-38"]
+    estado: Literal["ok", "error", "no_instalado"]
+    campo_telemetria: str
+
+
+class IncidenteOperativoResponse(BaseModel):
+    """Incidente operativo (sin datos), separado del riesgo térmico y de la IA."""
+
+    id: str
+    device_id: str
+    tipo: Literal["sin_datos"]
+    estado: Literal["activo", "resuelto"]
+    detectado_en: datetime
+    ultimo_reporte_en: datetime | None
+    umbral_silencio_segundos: int
+    recuperado_en: datetime | None = None
+
+
+class EstadoOperativoResponse(DispositivoResponse):
+    """HU-33: estado operativo del nodo a partir de su última lectura recibida.
+
+    Es independiente de la clasificación térmica: un nodo puede estar
+    OPERATIVO con la temperatura fuera de rango, o en FALLA_SENSOR sin que eso
+    sea una excursión.
+    """
+
+    ultimo_reporte_en: datetime | None = None
+    intervalo_reporte_segundos: int
+    umbral_sin_datos_segundos: int
+    estado_operativo: Literal["OPERATIVO", "SIN_DATOS", "FALLA_SENSOR"]
+    sensores: list[SensorIoTResponse] = Field(default_factory=list)
+    incidencias_operativas: list[IncidenteOperativoResponse] = Field(default_factory=list)
+
+
 class DispositivoBajaRequest(_PeticionEstricta):
     motivo: str = Field(min_length=1, max_length=50)
     descripcion: str | None = Field(default=None, max_length=2000)

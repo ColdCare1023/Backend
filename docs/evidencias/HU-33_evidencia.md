@@ -1,28 +1,18 @@
-# Evidencia de QA y Validación — HU-33: Tarjetas de KPI (Estado Actual y Tolerancia a Fallo)
+# Evidencia — HU-33: Tarjetas KPI
 
-## 1. Resumen de la Historia de Usuario
-- **ID**: HU-33
-- **Título**: Tarjetas de KPI (Estado Actual y Tolerancia a Fallo)
-- **Responsable**: Diego Soto
-- **Objetivo**: Renderizar en el dashboard web el último valor exacto de temperatura (°C) y humedad relativa (% HR) de forma clara e intuitiva. Si el flujo de telemetría indica que un sensor particular está en falla (`null` + `SENSOR_FAULT`), la tarjeta muestra explícitamente "Falla de sensor" o "Sin lectura disponible", impidiendo que valores numéricos inventados o 0.0 engañen al personal. Asimismo, si no se reciben datos durante más de 5 minutos, la tarjeta visualiza una advertencia de dato desactualizado por corte de red.
+Entorno: `infra-local/` (PostgreSQL 16, EMQX 5.8.6 con TLS 8883 y CA propia, backend FastAPI en Docker), nodo ESP32 DevKitC real con firmware ColdCare1023/IoT `develop` (v1.2.0) salvo donde se indique, frontend ColdCare1023/Frontend `main`. Fechas: 2–3 de octubre de 2026.
 
----
+> Reemplaza la evidencia anterior de esta HU, que se apoyaba en pruebas sobre módulos simulados (cliente MQTT sin conexión real, broker y navegador falsos en Python) y no ejercitaba el sistema real.
+## Defectos corregidos
+- `GET /api/dispositivos/estado-operativo` no existía (404): se implementa (OPERATIVO / SIN_DATOS /
+  FALLA_SENSOR a partir de la última lectura recibida; `?todos=true` para el selector de equipo).
+- La tarjeta tomaba el estado de un id fijo de demo (`FARM-01-CDL`) y la última lectura de cualquier nodo;
+  ahora usa el equipo seleccionado.
 
-## 2. Checklist de Verificación y Resultados
+## Resultados (frontend real + ESP32)
+| Tarea | Resultado |
+|---|---|
+| [FE] Estado actual con datos reales | ✅ 24,6 °C con "Excursión crítica" (sensor a temperatura ambiente), puerta, conexión, 25,5 °C y 70 % HR |
+| [FE] Estado de falla de sensor | ✅ DS18B20 desconectado: "—" y "No hay lectura de temperatura. Revisa el sensor."; sin repetir el último valor ni marcar excursión; ambiente y humedad siguen visibles |
 
-| Tarea | Rol | Criterio Verificado | Estado | Evidencia |
-|---|---|---|---|---|
-| **Verificar estado actual con datos reales** | `[FE]` | Muestra valores numéricos exactos en pantalla (ej. "4.25 °C" y "58.50 % HR") con datos vigentes y estado visual normal. | **PASS** | `test_hu33_fe_estado_actual_con_datos_reales` |
-| **Verificar estado de falla de sensor** | `[FE]` | Si el sensor reporta `null` y `SENSOR_FAULT`, el KPI muestra texto explícito ("Falla de sensor") y alerta visual, evitando desplegar ceros o información falsa. | **PASS** | `test_hu33_fe_estado_de_falla_de_sensor` |
-| **Registrar evidencia** | `[QA]` | Comprobación de 3 estados de la interfaz: vigente, desactualizado por antigüedad de red (> 300 s) y falla de sensor. | **PASS** | `test_hu33_qa_lectura_desactualizada_por_red` |
-
----
-
-## 3. Logs de Ejecución
-
-```text
-backend/tests/test_hu33_tarjetas_kpi.py::test_hu33_fe_estado_actual_con_datos_reales PASSED
-backend/tests/test_hu33_tarjetas_kpi.py::test_hu33_fe_estado_de_falla_de_sensor PASSED
-backend/tests/test_hu33_tarjetas_kpi.py::test_hu33_qa_lectura_desactualizada_por_red PASSED
-============================== 3 passed in 0.40s ===============================
-```
+Prueba backend: `tests/integration/test_hu33_estado_operativo.py`.

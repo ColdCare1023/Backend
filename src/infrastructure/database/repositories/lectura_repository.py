@@ -115,6 +115,18 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
         result = await self._session.execute(stmt)
         return [_to_entity(m) for m in result.scalars().all()]
 
+    async def ultima_recibida_por_device(self, device_id: str) -> LecturaTermica | None:
+        """Última lectura que LLEGÓ al backend (por `received_at`, no por la hora
+        declarada): es la que dice si el nodo sigue reportando."""
+        stmt = (
+            select(ThermalReadingModel)
+            .where(ThermalReadingModel.device_id == device_id)
+            .order_by(ThermalReadingModel.received_at.desc().nulls_last(), ThermalReadingModel.timestamp.desc())
+            .limit(1)
+        )
+        model = (await self._session.execute(stmt)).scalar_one_or_none()
+        return _to_entity(model) if model else None
+
     async def listar_recientes_por_device(self, device_id: str, limite: int) -> list[LecturaTermica]:
         stmt = (
             select(ThermalReadingModel)

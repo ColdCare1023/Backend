@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
@@ -20,6 +20,7 @@ from src.domain.exceptions import DomainError, RecursoNoEncontradoError
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.database.repositories.audit_log_repository import SQLAlchemyAuditLogRepository
 from src.infrastructure.database.repositories.device_repository import SQLAlchemyDeviceRepository
+from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
 from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
@@ -33,11 +34,14 @@ from src.interface.api.schemas import (
     DispositivoAltaRequest,
     DispositivoBajaRequest,
     DispositivoResponse,
+    EstadoOperativoResponse,
     HistorialConfiguracionResponse,
+    IncidenteOperativoResponse,
     InstalacionDispositivoRequest,
     ResponsableDispositivoRequest,
     RevocarCredencialRequest,
     RotarCredencialRequest,
+    SensorIoTResponse,
 )
 
 router = APIRouter(prefix="/api/dispositivos", tags=["dispositivos"])
@@ -90,6 +94,85 @@ async def dar_de_alta(
     )
     await session.commit()
     return DispositivoResponse(**dispositivo)
+
+
+# HU-33: cadencia de lectura del nodo y silencio tolerado antes de declarar
+# SIN_DATOS (3 ciclos perdidos: una reconexión breve no dispara la alarma).
+INTERVALO_REPORTE_SEGUNDOS = 30
+UMBRAL_SIN_DATOS_SEGUNDOS = 3 * INTERVALO_REPORTE_SEGUNDOS
+
+
+def _como_utc(instante: datetime | None) -> datetime | None:
+    if instante is None:
+        return None
+    return instante if instante.tzinfo else instante.replace(tzinfo=timezone.utc)
+
+
+def _estado_operativo(device: dict, ultima, ahora: datetime) -> EstadoOperativoResponse:
+    """Clasifica el nodo por su última lectura recibida (no por la IA)."""
+    ultimo_reporte = _como_utc(ultima.received_at or ultima.timestamp) if ultima else None
+    sensores: list[SensorIoTResponse] = []
+    if ultima is not None:
+        sensores = [
+            SensorIoTResponse(modelo="DS18B20", campo_telemetria="temperatura_interna",
+                              estado="ok" if ultima.temperatura_interna is not None else "error"),
+            SensorIoTResponse(
+                modelo="SHT31", campo_telemetria="temperatura_ambiental",
+                estado="ok" if ultima.temperatura_ambiental is not None and ultima.humedad_ambiental is not None
+                else "error",
+            ),
+            SensorIoTResponse(modelo="MC-38", campo_telemetria="apertura_refrigerador",
+                              estado="no_instalado" if ultima.apertura_refrigerador is None else "ok"),
+        ]
+
+    incidencias: list[IncidenteOperativoResponse] = []
+    silencio = (ahora - ultimo_reporte).total_seconds() if ultimo_reporte else None
+    if silencio is None or silencio >= UMBRAL_SIN_DATOS_SEGUNDOS:
+        estado = "SIN_DATOS"
+        detectado = (ultimo_reporte + timedelta(seconds=UMBRAL_SIN_DATOS_SEGUNDOS)) if ultimo_reporte else ahora
+        incidencias.append(IncidenteOperativoResponse(
+            id=f"sin_datos:{device['id']}:{int(detectado.timestamp())}",
+            device_id=device["id"], tipo="sin_datos", estado="activo", detectado_en=detectado,
+            ultimo_reporte_en=ultimo_reporte, umbral_silencio_segundos=UMBRAL_SIN_DATOS_SEGUNDOS,
+        ))
+    elif any(s.estado == "error" for s in sensores):
+        estado = "FALLA_SENSOR"
+    else:
+        estado = "OPERATIVO"
+
+    return EstadoOperativoResponse(
+        **device,
+        ultimo_reporte_en=ultimo_reporte,
+        intervalo_reporte_segundos=INTERVALO_REPORTE_SEGUNDOS,
+        umbral_sin_datos_segundos=UMBRAL_SIN_DATOS_SEGUNDOS,
+        estado_operativo=estado,
+        sensores=sensores,
+        incidencias_operativas=incidencias,
+    )
+
+
+@router.get("/estado-operativo", response_model=list[EstadoOperativoResponse])
+async def estado_operativo(
+    session: DbSessionDep,
+    _usuario=Depends(require_roles(Rol.TECNICO, Rol.FARMACEUTICO, Rol.AUDITOR)),
+    todos: bool = Query(default=False, description="Incluir también los nodos sin incidencias"),
+) -> list[EstadoOperativoResponse]:
+    """HU-33: estado operativo de los nodos activos.
+
+    Por defecto solo los que requieren atención (SIN_DATOS o FALLA_SENSOR), que
+    es lo que el dashboard muestra como incidencias; con `todos=true`, todos los
+    nodos activos (selector de dispositivo del dashboard).
+    """
+    ahora = datetime.now(timezone.utc)
+    lecturas = SQLAlchemyLecturaRepository(session)
+    resultado = []
+    for device in await SQLAlchemyDeviceRepository(session).listar():
+        if not device.get("activo", True):
+            continue
+        estado = _estado_operativo(device, await lecturas.ultima_recibida_por_device(device["id"]), ahora)
+        if todos or estado.estado_operativo != "OPERATIVO":
+            resultado.append(estado)
+    return sorted(resultado, key=lambda e: e.id)
 
 
 @router.get("/calibracion/estado")
