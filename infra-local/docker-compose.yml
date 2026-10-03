@@ -79,6 +79,8 @@ services:
       ENVIRONMENT: development
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      # Solo para probar la expiración de sesión (HU-39): JWT_EXPIRE_MIN=1 docker compose ...
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_EXPIRE_MIN:-60}
       MQTT_ENABLED: "true"
       MQTT_HOST: emqx
       MQTT_PORT: "8883"
