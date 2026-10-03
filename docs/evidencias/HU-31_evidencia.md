@@ -1,31 +1,17 @@
-# Evidencia de QA y Validación — HU-31: Visualización de Tendencia Térmica
+# Evidencia — HU-31: Gráfica de tendencia térmica
 
-## 1. Resumen de la Historia de Usuario
-- **ID**: HU-31
-- **Título**: Visualización de Tendencia Térmica
-- **Responsable**: Diego Soto
-- **Objetivo**: Proveer una gráfica de temperatura interactiva con umbrales fijos de 2 °C a 8 °C (zonas seguras delimitadas visualmente), cargando por defecto las últimas 24 horas con selector de ventana (6h, 12h, 24h, 7d), estado vacío informativo para dispositivos sin historial y muestreo visual (downsampling LTTB) para garantizar fluidez ante miles de registros continuos.
+Entorno: `infra-local/` (PostgreSQL 16, EMQX 5.8.6 con TLS 8883 y CA propia, backend FastAPI en Docker), nodo ESP32 DevKitC real con firmware ColdCare1023/IoT `develop` (v1.2.0) salvo donde se indique, frontend ColdCare1023/Frontend `main`. Fechas: 2–3 de octubre de 2026.
 
----
+> Reemplaza la evidencia anterior de esta HU, que se apoyaba en pruebas sobre módulos simulados (cliente MQTT sin conexión real, broker y navegador falsos en Python) y no ejercitaba el sistema real.
+## Defectos corregidos
+- `GET /api/lecturas?limite=5000` respondía **422** (máximo 1000): la ventana de 24 h por defecto
+  (~2880 lecturas) no cargaba. Límite alineado con el frontend (5000).
+- La gráfica mezclaba lecturas de todos los dispositivos (ColdCare1023/Frontend: filtro y selector de equipo).
 
-## 2. Checklist de Verificación y Resultados
-
-| Tarea | Rol | Criterio Verificado | Estado | Evidencia |
-|---|---|---|---|---|
-| **Verificar ventana de 24 h por defecto** | `[FE]` | Si el técnico no selecciona rango, la consulta carga automáticamente las últimas 24 horas (`hasta - desde == 24 h`). | **PASS** | `test_hu31_fe_ventana_de_24_horas_por_defecto` |
-| **Verificar cambio de ventana** | `[FE]` | La interfaz y el servicio soportan rangos dinámicos configurables (6h, 12h, 48h, 7 días / 168h). | **PASS** | `test_hu31_fe_cambio_de_ventana` |
-| **Probar con datos reales** | `[FE]` | Las lecturas reales se renderizan superpuestas sobre las bandas objetivo de 2.0 a 8.0 °C (verde) y zonas de riesgo de congelación (<2 °C) y calentamiento (>8 °C) en rojo. | **PASS** | `test_hu31_fe_probar_con_datos_reales_y_zonas_2_8` |
-| **Registrar evidencia de escenarios** | `[QA]` | Cobertura de 3 escenarios clave: carga con datos, empty state informativo ante nodo sin transmisiones, y downsampling automático en volúmenes masivos (2000 puntos reducidos a <= 500). | **PASS** | `test_hu31_qa_escenario_sin_datos_empty_state`, `test_hu31_qa_escenario_gran_volumen_downsampling` |
-
----
-
-## 3. Logs de Ejecución
-
-```text
-backend/tests/test_hu31_tendencia_termica.py::test_hu31_fe_ventana_de_24_horas_por_defecto PASSED
-backend/tests/test_hu31_tendencia_termica.py::test_hu31_fe_cambio_de_ventana PASSED
-backend/tests/test_hu31_tendencia_termica.py::test_hu31_fe_probar_con_datos_reales_y_zonas_2_8 PASSED
-backend/tests/test_hu31_tendencia_termica.py::test_hu31_qa_escenario_sin_datos_empty_state PASSED
-backend/tests/test_hu31_tendencia_termica.py::test_hu31_qa_escenario_gran_volumen_downsampling PASSED
-========================= 5 passed in 1.59s =========================
-```
+## Resultados (frontend real + ESP32)
+| Tarea | Resultado |
+|---|---|
+| [FE] Ventana 24 h por defecto | ✅ Botón "24 h" con `aria-pressed=true` al entrar |
+| [FE] Cambio de ventana | ✅ "1 h" pide `desde = ahora − 1 h`; "7 d" pide `desde = ahora − 7 d` |
+| [FE] Datos reales | ✅ Curva del ESP32_FARMACIA_01 (~24,6 °C) con la banda 2–8 °C; el hueco coincide con el DS18B20 desconectado |
+| Varios equipos | ✅ Selector "Equipo"; con otro nodo la petición lleva `device_id` y la curva solo muestra ese nodo |

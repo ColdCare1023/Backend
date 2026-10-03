@@ -143,7 +143,9 @@ async def listar_historial(
     estado_conectividad: str | None = None,
     desde: datetime | None = None,
     hasta: datetime | None = None,
-    limite: int = Query(default=100, ge=1, le=1000),
+    # 5000 = MAX_LECTURAS_EN_MEMORIA del frontend (HU-31): la ventana de 24 h
+    # por defecto a 30 s/lectura son 2880 filas; con 1000 la API respondía 422.
+    limite: int = Query(default=100, ge=1, le=5000),
     offset: int = Query(default=0, ge=0),
 ) -> list[LecturaResponse]:
     # HU-36 criterio 3: la validación de rango invertido no puede depender
