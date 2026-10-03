@@ -265,3 +265,28 @@ async def test_reenvio_identico_no_es_conflicto(entorno):
     await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, cuerpo), _BroadcasterMudo(), cliente)
 
     assert cliente.publicados[1][1]["estado"] == "commit_confirmado"
+
+
+# ── HU-15: rechazo por esquema ────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_payload_fuera_de_contrato_se_acusa_y_no_se_persiste(entorno):
+    """Humedad fuera de 0-100 %: se rechaza sin excepción y con acuse, para que
+    el nodo no reintente ese archivo indefinidamente."""
+    cliente = _ClienteEspia()
+    cuerpo = _payload(reading_id="esp32-humedad-120", humedad_ambiental=120.0)
+
+    await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, cuerpo), _BroadcasterMudo(), cliente)
+
+    assert cliente.publicados[0][1]["estado"] == "payload_rechazado"
+    assert cliente.publicados[0][1]["reading_id"] == "esp32-humedad-120"
+
+
+@pytest.mark.asyncio
+async def test_json_malformado_se_descarta_sin_excepcion(entorno):
+    cliente = _ClienteEspia()
+
+    await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, '{"device_id": "x",'), _BroadcasterMudo(), cliente)
+
+    assert cliente.publicados == []

@@ -241,6 +241,43 @@ async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadc
     )
 
 
+async def _rechazar_payload_invalido(
+    message: aiomqtt.Message, exc: ValidationError, client: aiomqtt.Client | None
+) -> None:
+    """HU-15: un payload que no cumple el contrato se rechaza sin detener la
+    ingesta, queda auditado y —si trae `reading_id`— recibe acuse. Sin acuse el
+    nodo reintentaría ese archivo para siempre y su cola FIFO no avanzaría."""
+    device_id = _device_id_del_topic(str(message.topic))
+    errores = [
+        {"campo": ".".join(str(p) for p in e["loc"]), "tipo": e["type"]} for e in exc.errors()[:10]
+    ]
+    logger.warning("Payload MQTT rechazado en %s: %s", message.topic, errores)
+    if device_id is None:
+        return
+    try:
+        crudo = json.loads(message.payload)
+    except ValueError:
+        crudo = None
+    reading_id = crudo.get("reading_id") if isinstance(crudo, dict) else None
+
+    async with _session_factory() as session:
+        await AuditarAccionCriticaUseCase(
+            SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+        ).execute(
+            usuario_id=None,
+            accion="LECTURA_RECHAZADA_ESQUEMA",
+            recurso="mqtt/lecturas",
+            detalle={"device_id": device_id, "reading_id": reading_id, "errores": errores},
+            ip_origen=None,
+        )
+        await session.commit()
+
+    if isinstance(reading_id, str) and reading_id:
+        await _publicar_ack_lectura(
+            client, device_id, reading_id, datetime.now(timezone.utc), estado="payload_rechazado"
+        )
+
+
 async def _procesar_lectura_mqtt(
     message: aiomqtt.Message, broadcaster: SSEBroadcaster, client: aiomqtt.Client | None = None
 ) -> None:
@@ -257,7 +294,11 @@ async def _procesar_lectura_mqtt(
         )
         return
 
-    payload = LecturaPayload.model_validate_json(message.payload)
+    try:
+        payload = LecturaPayload.model_validate_json(message.payload)
+    except ValidationError as exc:
+        await _rechazar_payload_invalido(message, exc, client)
+        return
     settings = get_settings()
 
     # Anti-suplantación: el device_id declarado en el payload debe coincidir
