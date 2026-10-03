@@ -1,0 +1,25 @@
+[run]
+source = src
+# SQLAlchemy async ejecuta el código del ORM dentro de greenlets y TestClient
+# levanta el ASGI en su propio hilo. Sin declararlo, coverage pierde el rastro
+# de buena parte de los casos de uso y los da por no cubiertos aunque las
+# pruebas los ejerciten (se veía como un 68 % en `autenticar_usuario`, cuyo
+# `execute` recorren todas las pruebas de login).
+concurrency = thread,greenlet
+omit =
+    # Scripts de entrenamiento offline del Random Forest. NO forman parte del
+    # servicio: se ejecutan a mano (`python -m src.infrastructure.ai.train_model_v3`)
+    # para producir el artefacto .pkl que el backend carga, y su salida ya se
+    # valida por otra vía —las métricas del modelo (RNF-04) se comprueban sobre
+    # el artefacto entrenado en tests/unit/test_random_forest_service*.py—.
+    # Contarlos como código no cubierto mezcla dos cosas distintas y oculta la
+    # cobertura real de lo que sí se sirve en producción.
+    src/infrastructure/ai/train_model.py
+    src/infrastructure/ai/train_model_v2.py
+    src/infrastructure/ai/train_model_v3.py
+
+[report]
+exclude_also =
+    if __name__ == .__main__.:
+    raise NotImplementedError
+    \.\.\.$

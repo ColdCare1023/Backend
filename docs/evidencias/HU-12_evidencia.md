@@ -1,48 +1,21 @@
-# Evidencia de QA y Validación — HU-12: Recepción Continua de Telemetría en Backend
+# Evidencia — HU-12: Recepción continua de telemetría
 
-## 1. Resumen de la Historia de Usuario
-- **ID**: HU-12
-- **Título**: Recepción continua de telemetría en backend
-- **Responsable**: Diego Soto
-- **Objetivo**: Garantizar que el backend consuma de forma ininterrumpida la telemetría MQTT con QoS 1, manteniendo client_id fijo (`backend-consumer-prod`) y sesión persistente (`clean_session=False`), soportando múltiples dispositivos concurrentes sin bloqueos y ofreciendo observabilidad mediante el endpoint `/health`.
+Entorno: `infra-local/` (PostgreSQL 16, EMQX 5.8.6 con TLS 8883 y CA propia, backend FastAPI en Docker), nodo ESP32 DevKitC real con firmware ColdCare1023/IoT `develop` (v1.2.0) salvo donde se indique, frontend ColdCare1023/Frontend `main`. Fechas: 2–3 de octubre de 2026.
 
----
+> Reemplaza la evidencia anterior de esta HU, que se apoyaba en pruebas sobre módulos simulados (cliente MQTT sin conexión real, broker y navegador falsos en Python) y no ejercitaba el sistema real.
+## Defecto corregido
+`src/consumidor_mqtt.py` **no se conectaba a MQTT**: no creaba cliente, `start()` solo marcaba
+`is_connected = True` y la reconexión eran métodos `simulate_*`. Se reemplaza por el servicio FastAPI con
+ingesta real (`aiomqtt`), persistencia en PostgreSQL, SSE autenticado y API REST, que es la API que consume
+ColdCare1023/Frontend. Se corrigieron además dependencias faltantes (`httpx`, `greenlet`), la lectura de
+metadatos de la IA en UTF-8 (fallaba en Linux) y la suscripción, que era QoS 0.
 
-## 2. Checklist de Verificación y Resultados
+## Resultados en vivo
+| Tarea | Resultado |
+|---|---|
+| [BE] Suscripción al iniciar | ✅ 8 s tras arrancar: `farmacias/+/lecturas` y `farmacias/+/eventos` en **QoS 1** |
+| [QA] Reconexión tras corte del broker (20 s) | ✅ Backoff 2 → 4 → 8 → 16 s y re-suscripción automática |
+| [QA] Varios dispositivos simultáneos | ✅ 5 nodos × 10 lecturas: 50/50 persistidas y acusadas |
+| [QA] API y MQTT en paralelo | ✅ 29/29 respuestas 200 de `/api/lecturas` durante la ráfaga (p50 22 ms) |
 
-| Tarea | Rol | Criterio Verificado | Estado | Evidencia |
-|---|---|---|---|---|
-| **Verificar suscripción al iniciar el servicio** | `[BE]` | FastAPI inicia el consumidor MQTT en su ciclo de vida (`lifespan`) con `client_id` fijo y `clean_session=False`, suscribiéndose a `farmacias/+/lecturas` con QoS 1. | **PASS** | `test_hu12_be_suscripcion_al_iniciar_servicio` |
-| **Probar varios dispositivos simultáneos** | `[QA]` | Mensajes concurrentes emitidos por múltiples nodos (`ESP32_FARMACIA_01`, `02`, `03`, `DEMO_01`) son procesados en paralelo sin colisiones ni bloqueo entre dispositivos. | **PASS** | `test_hu12_qa_varios_dispositivos_simultaneos` |
-| **Probar reconexión tras corte del broker** | `[QA]` | El consumidor detecta desconexión del broker (estado degradado), reconecta automáticamente con backoff y reanuda el consumo manteniendo sesión persistente sin intervención manual. | **PASS** | `test_hu12_qa_reconexion_tras_corte_del_broker` |
-| **Probar API y consumo MQTT en paralelo** | `[QA]` | Las consultas HTTP a endpoints `/health` y `/api/v1/resumen` responden con éxito (código 200) de forma concurrente mientras el consumidor MQTT procesa ráfagas de telemetría. | **PASS** | `test_hu12_qa_api_y_consumo_mqtt_en_paralelo` |
-
----
-
-## 3. Logs de Ejecución
-
-```text
-backend/tests/test_hu12_consumidor_mqtt.py::test_hu12_be_suscripcion_al_iniciar_servicio PASSED
-backend/tests/test_hu12_consumidor_mqtt.py::test_hu12_qa_varios_dispositivos_simultaneos PASSED
-backend/tests/test_hu12_consumidor_mqtt.py::test_hu12_qa_reconexion_tras_corte_del_broker PASSED
-backend/tests/test_hu12_consumidor_mqtt.py::test_hu12_qa_api_y_consumo_mqtt_en_paralelo PASSED
-========================= 4 passed in 3.99s =========================
-```
-
-### Respuesta del endpoint `/health`:
-```json
-{
-  "status": "healthy",
-  "mqtt_connected": true,
-  "client_id": "backend-consumer-prod",
-  "clean_session": false,
-  "reconnect_count": 0,
-  "last_message_at": "2026-10-02T16:59:45.120Z",
-  "total_received": 50,
-  "total_committed": 50,
-  "total_duplicate": 0,
-  "total_rejected": 0,
-  "active_devices_count": 4,
-  "active_devices": ["ESP32_DEMO_01", "ESP32_FARMACIA_01", "ESP32_FARMACIA_02", "ESP32_FARMACIA_03"]
-}
-```
+Script de carga: `infra-local/scripts/hu12_hu19_carga.py` (contrato v1.0).

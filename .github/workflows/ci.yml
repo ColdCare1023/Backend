@@ -1,0 +1,35 @@
+name: CI
+
+# Sin esto, las 355 pruebas y el linter solo corren si alguien se acuerda de
+# ejecutarlos. Que fallen en el servidor es la única forma de que un cambio no
+# entre roto: el firmware llevaba meses sin compilar precisamente porque nada
+# lo comprobaba.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Instalar dependencias
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Pruebas con cobertura
+        run: pytest --cov=src --cov-report=term
+
+      - name: Vulnerabilidades en dependencias
+        run: |
+          pip install pip-audit
+          pip-audit

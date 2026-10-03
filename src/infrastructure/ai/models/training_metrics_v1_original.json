@@ -1,0 +1,113 @@
+{
+  "metadata": {
+    "model_version": "2.0.0",
+    "trained_at": "2026-07-11T11:39:03.519033+00:00",
+    "sklearn_version": "1.9.0",
+    "python_version": "3.12.13",
+    "random_state": 42,
+    "n_samples": 8000,
+    "feature_names": [
+      "temperatura_ambiental",
+      "humedad_ambiental",
+      "temperatura_interna",
+      "diferencia_sensores",
+      "duracion_fuera_rango",
+      "frecuencia_desviaciones",
+      "tendencia_termica",
+      "apertura_refrigerador",
+      "hora_evento",
+      "estado_conectividad_online"
+    ],
+    "ruido_sensores": {
+      "temperatura_interna_std_c": 0.25,
+      "temperatura_ambiental_std_c": 0.15,
+      "humedad_std_pct": 1.0
+    }
+  },
+  "classes": [
+    "excursion_critica",
+    "normal",
+    "riesgo_preventivo"
+  ],
+  "accuracy": 0.965625,
+  "classification_report": {
+    "excursion_critica": {
+      "precision": 0.9900249376558603,
+      "recall": 0.9730392156862745,
+      "f1-score": 0.9814585908529048,
+      "support": 816.0
+    },
+    "normal": {
+      "precision": 0.8816568047337278,
+      "recall": 0.9675324675324676,
+      "f1-score": 0.9226006191950464,
+      "support": 154.0
+    },
+    "riesgo_preventivo": {
+      "precision": 0.9570747217806042,
+      "recall": 0.9555555555555556,
+      "f1-score": 0.9563145353455124,
+      "support": 630.0
+    },
+    "accuracy": 0.965625,
+    "macro avg": {
+      "precision": 0.9429188213900641,
+      "recall": 0.9653757462580992,
+      "f1-score": 0.9534579151311545,
+      "support": 1600.0
+    },
+    "weighted avg": {
+      "precision": 0.9666203573612229,
+      "recall": 0.965625,
+      "f1-score": 0.9658930392248002,
+      "support": 1600.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      794,
+      0,
+      22
+    ],
+    [
+      0,
+      149,
+      5
+    ],
+    [
+      8,
+      20,
+      602
+    ]
+  ],
+  "cross_validation": {
+    "folds": 5,
+    "scoring": "f1_weighted",
+    "scores": [
+      0.9650660894421016,
+      0.9642698489766094,
+      0.9564402805452955,
+      0.9603863982993708,
+      0.9612139320926459
+    ],
+    "mean": 0.9614753098712046,
+    "std": 0.0030759945970554054
+  },
+  "feature_importances": {
+    "temperatura_ambiental": 0.23852965658815617,
+    "humedad_ambiental": 0.006686509242269628,
+    "temperatura_interna": 0.522091334612453,
+    "diferencia_sensores": 0.02910162171168708,
+    "duracion_fuera_rango": 0.10506988700062293,
+    "frecuencia_desviaciones": 0.03362441645549158,
+    "tendencia_termica": 0.059350763953861636,
+    "apertura_refrigerador": 0.00048692817688786636,
+    "hora_evento": 0.004793309686298172,
+    "estado_conectividad_online": 0.00026557257227192657
+  },
+  "f1_weighted": 0.9658930392248002,
+  "rnf04": {
+    "umbral": 0.85,
+    "cumplido": true
+  }
+}

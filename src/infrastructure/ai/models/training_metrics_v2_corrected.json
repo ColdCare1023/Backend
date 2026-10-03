@@ -1,0 +1,128 @@
+{
+  "metadata": {
+    "model_name": "random_forest_thermal_risk",
+    "model_version": "2.0.0-corrected",
+    "trained_at": "2026-07-23T00:45:15.968021+00:00",
+    "sklearn_version": "1.9.0",
+    "python_version": "3.12.13",
+    "random_state": 42,
+    "n_escenarios": 400,
+    "n_samples": 10076,
+    "n_samples_train": 7926,
+    "n_samples_test": 2150,
+    "feature_names": [
+      "temperatura_ambiental",
+      "humedad_ambiental",
+      "temperatura_interna",
+      "diferencia_sensores",
+      "duracion_fuera_rango",
+      "frecuencia_desviaciones",
+      "tendencia_termica",
+      "apertura_refrigerador",
+      "hora_evento",
+      "estado_conectividad_online"
+    ],
+    "classes": [
+      "normal",
+      "riesgo_preventivo",
+      "excursion_critica"
+    ],
+    "particion": "GroupShuffleSplit + StratifiedGroupKFold, agrupado por escenario_id",
+    "correccion_respecto_v1": "duracion_fuera_rango, frecuencia_desviaciones y tendencia_termica ya no son escalares independientes sin incertidumbre: se derivan de una serie temporal observada con ruido de sensor y pérdida simulada de mensajes MQTT, usando la misma función de producción (ClasificarRiesgoTermicoUseCase._construir_features).",
+    "ruido_sensores": {
+      "temperatura_interna_std_c": 0.25,
+      "temperatura_ambiental_std_c": 0.15,
+      "humedad_std_pct": 1.0,
+      "prob_mensaje_perdido": 0.08
+    },
+    "dataset_hash": "cad04b23818d515aee08029496ad1d5ee54826c58ab78373b97cb5bb9b845cfe:c94fc260bcad61781ed210164b585bdb6bf5ef779015810dafe401bc27cd356c",
+    "model_hash": "e86b4cb0132e921b53b8b2e2a1c677ec1d3738c73a1626c5f9c386d1eb21ed32"
+  },
+  "classes": [
+    "excursion_critica",
+    "normal",
+    "riesgo_preventivo"
+  ],
+  "accuracy": 0.9744186046511628,
+  "classification_report": {
+    "excursion_critica": {
+      "precision": 0.9879518072289156,
+      "recall": 0.9761904761904762,
+      "f1-score": 0.9820359281437125,
+      "support": 252.0
+    },
+    "normal": {
+      "precision": 0.9916666666666667,
+      "recall": 0.9791139240506329,
+      "f1-score": 0.9853503184713376,
+      "support": 1580.0
+    },
+    "riesgo_preventivo": {
+      "precision": 0.8856304985337243,
+      "recall": 0.949685534591195,
+      "f1-score": 0.9165402124430956,
+      "support": 318.0
+    },
+    "accuracy": 0.9744186046511628,
+    "macro avg": {
+      "precision": 0.9550829908097689,
+      "recall": 0.9683299782774347,
+      "f1-score": 0.9613088196860485,
+      "support": 2150.0
+    },
+    "weighted avg": {
+      "precision": 0.9755477615296486,
+      "recall": 0.9744186046511628,
+      "f1-score": 0.9747843463413178,
+      "support": 2150.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      246,
+      0,
+      6
+    ],
+    [
+      0,
+      1547,
+      33
+    ],
+    [
+      3,
+      13,
+      302
+    ]
+  ],
+  "cross_validation": {
+    "folds": 5,
+    "scoring": "f1_weighted",
+    "grouped_by": "escenario_id",
+    "scores": [
+      0.9694306115927835,
+      0.9789839210171728,
+      0.9716291681723702,
+      0.9676401533236036,
+      0.9731125099648609
+    ],
+    "mean": 0.9721592728141581,
+    "std": 0.0038893065737372564
+  },
+  "feature_importances": {
+    "temperatura_ambiental": 0.10261618910749919,
+    "humedad_ambiental": 0.006133202061731145,
+    "temperatura_interna": 0.4056034889979731,
+    "diferencia_sensores": 0.016523500258297123,
+    "duracion_fuera_rango": 0.2026368935837311,
+    "frecuencia_desviaciones": 0.16986608786223611,
+    "tendencia_termica": 0.09418523487137018,
+    "apertura_refrigerador": 0.002035712609811214,
+    "hora_evento": 0.0,
+    "estado_conectividad_online": 0.00039969064735095183
+  },
+  "f1_weighted": 0.9747843463413178,
+  "rnf04": {
+    "umbral": 0.85,
+    "cumplido": true
+  }
+}

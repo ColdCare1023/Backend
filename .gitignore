@@ -3,4 +3,10 @@ __pycache__/
 .venv/
 *.sqlite
 .DS_Store
-
+.venv*/
+.pytest_cache/
+.env
+*.db
+# Cobertura de pruebas
+.coverage
+htmlcov/

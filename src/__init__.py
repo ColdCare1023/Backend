@@ -1,1 +1,0 @@
-"""ColdCare Backend package."""

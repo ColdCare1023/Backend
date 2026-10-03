@@ -1,0 +1,147 @@
+{
+  "model_name": "random_forest_thermal_risk",
+  "model_version": "3.0.0-reproducible",
+  "trained_at": "2026-07-23T01:21:23.224828+00:00",
+  "sklearn_version": "1.9.0",
+  "python_version": "3.12.13",
+  "random_state": 42,
+  "n_escenarios": 400,
+  "n_samples": 10076,
+  "n_samples_train": 8060,
+  "n_samples_test": 2016,
+  "feature_names": [
+    "temperatura_ambiental",
+    "humedad_ambiental",
+    "temperatura_interna",
+    "diferencia_sensores",
+    "duracion_fuera_rango",
+    "frecuencia_desviaciones",
+    "tendencia_termica",
+    "apertura_refrigerador",
+    "hora_evento",
+    "estado_conectividad_online"
+  ],
+  "classes": [
+    "excursion_critica",
+    "normal",
+    "riesgo_preventivo"
+  ],
+  "hyperparameters": {
+    "bootstrap": true,
+    "ccp_alpha": 0.0,
+    "class_weight": "balanced",
+    "criterion": "gini",
+    "max_depth": 12,
+    "max_features": "sqrt",
+    "max_leaf_nodes": null,
+    "max_samples": null,
+    "min_impurity_decrease": 0.0,
+    "min_samples_leaf": 3,
+    "min_samples_split": 2,
+    "min_weight_fraction_leaf": 0.0,
+    "monotonic_cst": null,
+    "n_estimators": 200,
+    "n_jobs": -1,
+    "oob_score": false,
+    "random_state": 42,
+    "verbose": 0,
+    "warm_start": false
+  },
+  "particion": "GroupShuffleSplit + StratifiedGroupKFold, agrupado por escenario_id determinista (AIV-01)",
+  "correccion_respecto_v2": "escenario_id ya no usa uuid4() (entropía del SO); se deriva de f'esc-{random_state:04d}-{indice:05d}', determinista y reproducible.",
+  "correccion_hash_respecto_v2": "model_hash se calcula UNA vez sobre el archivo .pkl ya guardado definitivamente (estimador puro, sin dict envolvente); el archivo no se vuelve a serializar tras calcular el hash (corrige AIV-06).",
+  "ruido_sensores": {
+    "temperatura_interna_std_c": 0.25,
+    "temperatura_ambiental_std_c": 0.15,
+    "humedad_std_pct": 1.0,
+    "prob_mensaje_perdido": 0.08
+  },
+  "dataset_hash": "6f2d2321dff07f9063f932029322ecf2269f9645ed76e61ba8d714db3c91526f:c94fc260bcad61781ed210164b585bdb6bf5ef779015810dafe401bc27cd356c",
+  "model_hash": "d8a3c12b1528ca6f7fc1135df7591486aa8e852d4c1c8c0d3ecde1bd5637745c",
+  "accuracy": 0.9677579365079365,
+  "f1_weighted": 0.968078859118034,
+  "classification_report": {
+    "excursion_critica": {
+      "precision": 0.9716088328075709,
+      "recall": 0.9777777777777777,
+      "f1-score": 0.9746835443037974,
+      "support": 315.0
+    },
+    "normal": {
+      "precision": 0.9898595943837754,
+      "recall": 0.9724137931034482,
+      "f1-score": 0.981059141863162,
+      "support": 1305.0
+    },
+    "riesgo_preventivo": {
+      "precision": 0.8968824940047961,
+      "recall": 0.9444444444444444,
+      "f1-score": 0.9200492004920049,
+      "support": 396.0
+    },
+    "accuracy": 0.9677579365079365,
+    "macro avg": {
+      "precision": 0.9527836403987141,
+      "recall": 0.9648786717752236,
+      "f1-score": 0.9585972955529881,
+      "support": 2016.0
+    },
+    "weighted avg": {
+      "precision": 0.9687445538844796,
+      "recall": 0.9677579365079365,
+      "f1-score": 0.968078859118034,
+      "support": 2016.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      308,
+      0,
+      7
+    ],
+    [
+      0,
+      1269,
+      36
+    ],
+    [
+      9,
+      13,
+      374
+    ]
+  ],
+  "cross_validation": {
+    "folds": 5,
+    "scoring": "f1_weighted",
+    "grouped_by": "escenario_id",
+    "scores": [
+      0.9767953521125593,
+      0.9731019790600363,
+      0.9724900961504845,
+      0.9715577498293906,
+      0.9719299533398091
+    ],
+    "mean": 0.973175026098456,
+    "std": 0.0018839858840580435
+  },
+  "feature_importances": {
+    "temperatura_ambiental": 0.10376392794357653,
+    "humedad_ambiental": 0.005721121521733679,
+    "temperatura_interna": 0.3895217913760585,
+    "diferencia_sensores": 0.016058693900301114,
+    "duracion_fuera_rango": 0.19342528706185952,
+    "frecuencia_desviaciones": 0.1688504492927018,
+    "tendencia_termica": 0.11584543010203362,
+    "apertura_refrigerador": 0.0017160666106012148,
+    "hora_evento": 0.004714730019515181,
+    "estado_conectividad_online": 0.0003825021716187902
+  },
+  "rnf04": {
+    "umbral": 0.85,
+    "cumplido": true
+  },
+  "baselines": {
+    "mayoritario_f1_weighted": 0.5087349980642663,
+    "arbol_simple_f1_weighted": 0.9637358838540304
+  }
+}

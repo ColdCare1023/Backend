@@ -1,0 +1,133 @@
+{
+  "model_name": "random_forest_thermal_risk",
+  "model_version": "4.0.0-binario",
+  "trained_at": "2026-09-19T00:59:44.878943+00:00",
+  "sklearn_version": "1.9.0",
+  "python_version": "3.14.5",
+  "random_state": 42,
+  "n_escenarios": 400,
+  "n_samples": 10076,
+  "n_samples_train": 8060,
+  "n_samples_test": 2016,
+  "feature_names": [
+    "temperatura_ambiental",
+    "humedad_ambiental",
+    "temperatura_interna",
+    "diferencia_sensores",
+    "duracion_fuera_rango",
+    "frecuencia_desviaciones",
+    "tendencia_termica",
+    "apertura_refrigerador",
+    "hora_evento",
+    "estado_conectividad_online"
+  ],
+  "classes": [
+    "normal",
+    "riesgo_preventivo"
+  ],
+  "hyperparameters": {
+    "bootstrap": true,
+    "ccp_alpha": 0.0,
+    "class_weight": "balanced",
+    "criterion": "gini",
+    "max_depth": 12,
+    "max_features": "sqrt",
+    "max_leaf_nodes": null,
+    "max_samples": null,
+    "min_impurity_decrease": 0.0,
+    "min_samples_leaf": 3,
+    "min_samples_split": 2,
+    "min_weight_fraction_leaf": 0.0,
+    "monotonic_cst": null,
+    "n_estimators": 200,
+    "n_jobs": -1,
+    "oob_score": false,
+    "random_state": 42,
+    "verbose": 0,
+    "warm_start": false
+  },
+  "particion": "GroupShuffleSplit + StratifiedGroupKFold, agrupado por escenario_id determinista (AIV-01)",
+  "correccion_respecto_v2": "escenario_id ya no usa uuid4() (entropía del SO); se deriva de f'esc-{random_state:04d}-{indice:05d}', determinista y reproducible.",
+  "correccion_hash_respecto_v2": "model_hash se calcula UNA vez sobre el archivo .pkl ya guardado definitivamente (estimador puro, sin dict envolvente); el archivo no se vuelve a serializar tras calcular el hash (corrige AIV-06).",
+  "ruido_sensores": {
+    "temperatura_interna_std_c": 0.25,
+    "temperatura_ambiental_std_c": 0.15,
+    "humedad_std_pct": 1.0,
+    "prob_mensaje_perdido": 0.08
+  },
+  "dataset_hash": "587064339df86ff4c01c64dfebb10ed71bd459020b8a21e59668cb669f732e0e:b6c7078d8357be1100938a83b7ecfeb6046ebc15e3d61afce152b3e047bfc682",
+  "model_hash": "0dfcc05d1337ed6c75e1f15d3136739e5932252afbb030bfc9999ce30479d5a9",
+  "accuracy": 0.9756944444444444,
+  "f1_weighted": 0.9757362962618883,
+  "classification_report": {
+    "normal": {
+      "precision": 0.9853168469860897,
+      "recall": 0.9770114942528736,
+      "f1-score": 0.9811465948441709,
+      "support": 1305.0
+    },
+    "riesgo_preventivo": {
+      "precision": 0.9584487534626038,
+      "recall": 0.9732770745428974,
+      "f1-score": 0.9658060013956734,
+      "support": 711.0
+    },
+    "accuracy": 0.9756944444444444,
+    "macro avg": {
+      "precision": 0.9718828002243467,
+      "recall": 0.9751442843978855,
+      "f1-score": 0.9734762981199221,
+      "support": 2016.0
+    },
+    "weighted avg": {
+      "precision": 0.9758410461452175,
+      "recall": 0.9756944444444444,
+      "f1-score": 0.9757362962618883,
+      "support": 2016.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      1275,
+      30
+    ],
+    [
+      19,
+      692
+    ]
+  ],
+  "cross_validation": {
+    "folds": 5,
+    "scoring": "f1_weighted",
+    "grouped_by": "escenario_id",
+    "scores": [
+      0.9839551411583172,
+      0.9733371342945696,
+      0.9784283523774896,
+      0.9840133196433237,
+      0.9806977108186369
+    ],
+    "mean": 0.9800863316584675,
+    "std": 0.003976512703609036
+  },
+  "feature_importances": {
+    "temperatura_ambiental": 0.09273501942787823,
+    "humedad_ambiental": 0.005644175586772874,
+    "temperatura_interna": 0.41004903388287095,
+    "diferencia_sensores": 0.016721720277107235,
+    "duracion_fuera_rango": 0.16175197980526798,
+    "frecuencia_desviaciones": 0.22613099390622557,
+    "tendencia_termica": 0.08524765698387823,
+    "apertura_refrigerador": 0.0014081049203631217,
+    "hora_evento": 0.0,
+    "estado_conectividad_online": 0.00031131520963582313
+  },
+  "rnf04": {
+    "umbral": 0.85,
+    "cumplido": true
+  },
+  "baselines": {
+    "mayoritario_f1_weighted": 0.5087349980642663,
+    "arbol_simple_f1_weighted": 0.9683134803681345
+  }
+}
