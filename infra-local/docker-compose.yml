@@ -33,6 +33,17 @@ services:
       EMQX_LISTENERS__SSL__DEFAULT__SSL_OPTIONS__KEYFILE: /opt/emqx/certs/servidor.key
       EMQX_LISTENERS__SSL__DEFAULT__SSL_OPTIONS__VERIFY: verify_none
       EMQX_LISTENERS__SSL__DEFAULT__SSL_OPTIONS__VERSIONS: '["tlsv1.3","tlsv1.2"]'
+      # HU-10: autenticación usuario/clave (usuario = device_id), sin anónimos.
+      EMQX_AUTHENTICATION__1__MECHANISM: password_based
+      EMQX_AUTHENTICATION__1__BACKEND: built_in_database
+      EMQX_AUTHENTICATION__1__USER_ID_TYPE: username
+      EMQX_AUTHENTICATION__1__PASSWORD_HASH_ALGORITHM__NAME: sha256
+      EMQX_AUTHENTICATION__1__PASSWORD_HASH_ALGORITHM__SALT_POSITION: suffix
+      EMQX_AUTHENTICATION__1__BOOTSTRAP_FILE: /opt/emqx/etc/bootstrap_users.csv
+      EMQX_AUTHENTICATION__1__BOOTSTRAP_TYPE: plain
+      # Autorización: lo que no esté permitido en acl.conf se deniega.
+      EMQX_AUTHORIZATION__NO_MATCH: deny
+      EMQX_AUTHORIZATION__DENY_ACTION: ignore
       EMQX_DASHBOARD__DEFAULT_USERNAME: ${EMQX_DASHBOARD_USER}
       EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD}
       EMQX_LOG__CONSOLE__LEVEL: info
@@ -43,6 +54,8 @@ services:
       - ./certs/ca.crt:/opt/emqx/certs/ca.crt:ro
       - ./certs/servidor.crt:/opt/emqx/certs/servidor.crt:ro
       - ./certs/servidor.key:/opt/emqx/certs/servidor.key:ro
+      - ./emqx/acl.conf:/opt/emqx/etc/acl.conf:ro
+      - ./emqx/bootstrap_users.csv:/opt/emqx/etc/bootstrap_users.csv:ro
       - emqxdata:/opt/emqx/data
     healthcheck:
       test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
