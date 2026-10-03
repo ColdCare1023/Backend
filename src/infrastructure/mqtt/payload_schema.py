@@ -60,7 +60,9 @@ class LecturaPayload(BaseModel):
     # instante de captura. "synced" cuando hay NTP/RTC válido; "unsynced"
     # cuando captured_at se estimó sin referencia externa confiable. Optativo
     # por compatibilidad con firmware que aún no lo declara.
-    time_quality: Literal["synced", "unsynced"] | None = None
+    # "backfilled": capturada sin hora y fechada por el propio nodo con el
+    # uptime del mismo arranque (contrato v1.0, `sntp_backfilled`).
+    time_quality: Literal["synced", "unsynced", "backfilled"] | None = None
     # Acepta contrato interno y nombres de firmware/simulador. Se serializa
     # siempre con los nombres internos, así no rompe backend existente.
     message_id: str | None = Field(default=None, max_length=100)

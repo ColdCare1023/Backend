@@ -264,7 +264,8 @@ async def test_reenvio_identico_no_es_conflicto(entorno):
     await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, cuerpo), _BroadcasterMudo(), cliente)
     await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, cuerpo), _BroadcasterMudo(), cliente)
 
-    assert cliente.publicados[1][1]["estado"] == "commit_confirmado"
+    assert cliente.publicados[1][1]["estado"] == "duplicado"
+    assert cliente.publicados[1][1]["status"] == "duplicate"
 
 
 # ── HU-15: rechazo por esquema ────────────────────────────────────────────

@@ -27,6 +27,7 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
 from src.infrastructure.database.session import _session_factory
+from src.infrastructure.mqtt import contrato_v1
 from src.infrastructure.mqtt.mqtt_client import mqtt_session
 from src.infrastructure.mqtt.payload_schema import (
     MAX_BYTES_PAYLOAD_MQTT,
@@ -79,6 +80,8 @@ async def _publicar_ack_lectura(
     reading_id: str | None,
     timestamp: datetime,
     estado: str = "commit_confirmado",
+    boot_id: int | None = None,
+    seq_no: int | None = None,
 ) -> None:
     """HU-07 Escenario 1: el acuse lógico se publica DESPUÉS de que la
     transacción de la lectura ya hizo COMMIT (se llama tras `session.commit()`
@@ -97,13 +100,18 @@ async def _publicar_ack_lectura(
     se detiene en el primer fallo de publicación)."""
     if client is None:
         return
+    acuse: dict = {
+        "device_id": device_id,
+        "reading_id": reading_id,
+        "timestamp": timestamp.isoformat(),
+        "estado": estado,
+    }
+    # Contrato v1.0 (firmware ColdCare): el nodo correlaciona por boot_id+seq_no
+    # y decide por `status` si libera el registro o lo pasa a cuarentena.
+    if boot_id is not None and seq_no is not None:
+        acuse.update(boot_id=boot_id, seq_no=seq_no, status=contrato_v1.STATUS_ACK.get(estado, "rejected"))
     cuerpo = json.dumps(
-        {
-            "device_id": device_id,
-            "reading_id": reading_id,
-            "timestamp": timestamp.isoformat(),
-            "estado": estado,
-        },
+        acuse,
         # Compacto a propósito: el firmware extrae `reading_id` con una búsqueda de
         # texto plano (`"reading_id":"..."`, core::extraerCampoString) y no tolera el
         # espacio tras los dos puntos que emite json.dumps por defecto.
@@ -143,7 +151,99 @@ async def _procesar_mensaje_mqtt(
     return await _procesar_lectura_mqtt(message, broadcaster, client)
 
 
+# Contrato v1.0: `event_type` → tipo interno. Los que no tienen equivalente se
+# auditan con su propio nombre (ver `_evento_desde_v1`).
+_EVENTOS_V1 = {
+    "online": TipoEventoDispositivo.LWT_ONLINE,
+    "lwt_offline": TipoEventoDispositivo.LWT_OFFLINE,
+    "buffer_80": TipoEventoDispositivo.BUFFER_CAPACIDAD_ALTA,
+    "buffer_saturado": TipoEventoDispositivo.BUFFER_SATURADO,
+    "wifi_reconexion_prolongada": TipoEventoDispositivo.WIFI_RECONEXION_PROLONGADA,
+    "conmutacion_respaldo": TipoEventoDispositivo.CONMUTACION_RESPALDO,
+    "suministro_restablecido": TipoEventoDispositivo.CONMUTACION_RESPALDO,
+    "respaldo_autonomia_critica": TipoEventoDispositivo.RESPALDO_BAJO,
+}
+
+
+async def _procesar_evento_v1(
+    message: aiomqtt.Message, crudo: dict, broadcaster: SSEBroadcaster
+) -> None:
+    """Eventos del firmware ColdCare (contrato v1.0)."""
+    try:
+        evento = contrato_v1.EventoV1.model_validate(crudo)
+    except ValidationError as exc:
+        logger.warning("Evento v1.0 inválido en tópico %s: %s", message.topic, exc.error_count())
+        return
+    device_topic = _device_id_del_topic(str(message.topic), sufijo="eventos")
+    if device_topic is None or device_topic != evento.device_id:
+        logger.warning("Descartado: evento v1.0 de %s en tópico de %s", evento.device_id, device_topic)
+        return
+
+    ocurrido = evento.occurred_at or datetime.now(timezone.utc)
+    sse = {
+        "device_id": evento.device_id,
+        "tipo_evento": evento.event_type,
+        "timestamp": ocurrido.isoformat(),
+        "detalle": evento.detail,
+        "boot_id": evento.boot_id,
+    }
+    # estado_nodo llega cada 5 min: es telemetría de salud, no un hecho auditable.
+    # Se emite por SSE para el dashboard pero no se escribe en la cadena de auditoría.
+    if evento.event_type == "estado_nodo":
+        await broadcaster.publicar(sse, "estado_nodo")
+        return
+
+    async with _session_factory() as session:
+        device_repository = SQLAlchemyDeviceRepository(session)
+        auditoria = AuditarAccionCriticaUseCase(
+            SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+        )
+        if not await device_repository.existe(evento.device_id):
+            await auditoria.execute(
+                usuario_id=None,
+                accion="EVENTO_DISPOSITIVO_DESCONOCIDO",
+                recurso="mqtt/eventos",
+                detalle={"device_id": evento.device_id, "tipo_evento": evento.event_type},
+                ip_origen=None,
+            )
+            await session.commit()
+            return
+
+        tipo = _EVENTOS_V1.get(evento.event_type)
+        if tipo is TipoEventoDispositivo.LWT_OFFLINE:
+            await device_repository.actualizar_estado_conectividad(evento.device_id, "offline")
+        elif tipo is TipoEventoDispositivo.LWT_ONLINE:
+            await device_repository.actualizar_estado_conectividad(evento.device_id, "online")
+        accion = {
+            TipoEventoDispositivo.LWT_OFFLINE: "DISPOSITIVO_OFFLINE",
+            TipoEventoDispositivo.LWT_ONLINE: "DISPOSITIVO_ONLINE",
+        }.get(tipo, (tipo.value if tipo else evento.event_type).upper())
+        detalle: dict = {"tipo_evento": evento.event_type, "boot_id": evento.boot_id}
+        if evento.detail:
+            detalle["detalle"] = evento.detail
+        if evento.occurred_at:
+            detalle["occurred_at"] = evento.occurred_at.isoformat()
+        await auditoria.execute(
+            usuario_id=None,
+            accion=accion,
+            recurso=f"dispositivos/{evento.device_id}",
+            detalle=detalle,
+            ip_origen=None,
+            device_id=evento.device_id,
+        )
+        await session.commit()
+
+    await broadcaster.publicar(sse, evento.event_type)
+
+
 async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadcaster) -> None:
+    try:
+        crudo = json.loads(message.payload)
+    except ValueError:
+        crudo = None
+    if contrato_v1.es_v1(crudo):
+        await _procesar_evento_v1(message, crudo, broadcaster)
+        return
     try:
         evento = EventoDispositivoPayload.model_validate_json(message.payload)
     except ValidationError as exc:
@@ -244,15 +344,19 @@ async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadc
 
 
 async def _rechazar_payload_invalido(
-    message: aiomqtt.Message, exc: ValidationError, client: aiomqtt.Client | None
+    message: aiomqtt.Message,
+    exc: ValidationError | None,
+    client: aiomqtt.Client | None,
+    errores: list[dict] | None = None,
 ) -> None:
     """HU-15: un payload que no cumple el contrato se rechaza sin detener la
     ingesta, queda auditado y —si trae `reading_id`— recibe acuse. Sin acuse el
     nodo reintentaría ese archivo para siempre y su cola FIFO no avanzaría."""
     device_id = _device_id_del_topic(str(message.topic))
-    errores = [
-        {"campo": ".".join(str(p) for p in e["loc"]), "tipo": e["type"]} for e in exc.errors()[:10]
-    ]
+    if exc is not None:
+        errores = [
+            {"campo": ".".join(str(p) for p in e["loc"]), "tipo": e["type"]} for e in exc.errors()[:10]
+        ]
     logger.warning("Payload MQTT rechazado en %s: %s", message.topic, errores)
     if device_id is None:
         return
@@ -261,6 +365,12 @@ async def _rechazar_payload_invalido(
     except ValueError:
         crudo = None
     reading_id = crudo.get("reading_id") if isinstance(crudo, dict) else None
+    boot_id = seq_no = None
+    if isinstance(crudo, dict):
+        try:
+            boot_id, seq_no = int(crudo["boot_id"]), int(crudo["seq_no"])
+        except (KeyError, TypeError, ValueError):
+            boot_id = seq_no = None
 
     async with _session_factory() as session:
         await AuditarAccionCriticaUseCase(
@@ -269,14 +379,18 @@ async def _rechazar_payload_invalido(
             usuario_id=None,
             accion="LECTURA_RECHAZADA_ESQUEMA",
             recurso="mqtt/lecturas",
-            detalle={"device_id": device_id, "reading_id": reading_id, "errores": errores},
+            detalle={
+                "device_id": device_id, "reading_id": reading_id,
+                "boot_id": boot_id, "seq_no": seq_no, "errores": errores,
+            },
             ip_origen=None,
         )
         await session.commit()
 
-    if isinstance(reading_id, str) and reading_id:
+    if (isinstance(reading_id, str) and reading_id) or (boot_id is not None and seq_no is not None):
         await _publicar_ack_lectura(
-            client, device_id, reading_id, datetime.now(timezone.utc), estado="payload_rechazado"
+            client, device_id, reading_id, datetime.now(timezone.utc), estado="payload_rechazado",
+            boot_id=boot_id, seq_no=seq_no,
         )
 
 
@@ -297,7 +411,26 @@ async def _procesar_lectura_mqtt(
         return
 
     try:
-        payload = LecturaPayload.model_validate_json(message.payload)
+        crudo = json.loads(message.payload)
+    except ValueError:
+        crudo = None
+    telemetria_v1: contrato_v1.TelemetriaV1 | None = None
+    try:
+        if contrato_v1.es_v1(crudo):
+            # Contrato v1.0 (firmware ColdCare1023/IoT): se valida con su propio
+            # esquema y se traduce al modelo interno; el resto del pipeline no cambia.
+            if len(message.payload) > contrato_v1.PAYLOAD_MAX_BYTES:
+                await _rechazar_payload_invalido(
+                    message, None, client,
+                    errores=[{"campo": "payload", "tipo": f"excede_{contrato_v1.PAYLOAD_MAX_BYTES}_bytes"}],
+                )
+                return
+            telemetria_v1 = contrato_v1.TelemetriaV1.model_validate(crudo)
+            payload = LecturaPayload.model_validate(
+                contrato_v1.a_lectura_interna(telemetria_v1, datetime.now(timezone.utc))
+            )
+        else:
+            payload = LecturaPayload.model_validate_json(message.payload)
     except ValidationError as exc:
         await _rechazar_payload_invalido(message, exc, client)
         return
@@ -350,6 +483,8 @@ async def _procesar_lectura_mqtt(
                 duracion_apertura_segundos=payload.duracion_apertura_segundos,
             ),
         )
+        if telemetria_v1 is not None:
+            lectura.payload = {**(lectura.payload or {}), **contrato_v1.evidencia_v1(telemetria_v1)}
         # Reenvío QoS1: no publicar un segundo SSE lógico. El caso de uso
         # conserva misma garantía en BD; este guard evita notificación doble.
         # HU-11: con boot_id+seq_no (firmware nuevo) esa es la identidad real
@@ -397,7 +532,7 @@ async def _procesar_lectura_mqtt(
                 )
                 await _publicar_ack_lectura(
                     client, payload.device_id, payload.reading_id, payload.timestamp,
-                    estado="conflicto_payload",
+                    estado="conflicto_payload", boot_id=payload.boot_id, seq_no=payload.seq_no,
                 )
                 return
             # HU-07 Escenario 2: el nodo puede reenviar un bloque cuyo COMMIT
@@ -405,7 +540,8 @@ async def _procesar_lectura_mqtt(
             # archivo previo al último confirmado). Confirmar de nuevo permite
             # que LittleFS lo borre en vez de reintentar indefinidamente.
             await _publicar_ack_lectura(
-                client, payload.device_id, payload.reading_id or existente.reading_id, payload.timestamp
+                client, payload.device_id, payload.reading_id or existente.reading_id, payload.timestamp,
+                estado="duplicado", boot_id=payload.boot_id, seq_no=payload.seq_no,
             )
             return
 
@@ -430,7 +566,7 @@ async def _procesar_lectura_mqtt(
             # FIFO detrás de él.
             await _publicar_ack_lectura(
                 client, payload.device_id, payload.reading_id, payload.timestamp,
-                estado="dispositivo_no_autorizado",
+                estado="dispositivo_no_autorizado", boot_id=payload.boot_id, seq_no=payload.seq_no,
             )
             return
         except LecturaInvalidaError as exc:
@@ -445,7 +581,7 @@ async def _procesar_lectura_mqtt(
             # transitorio, así que también necesita acuse para liberar LittleFS.
             await _publicar_ack_lectura(
                 client, payload.device_id, payload.reading_id, payload.timestamp,
-                estado="lectura_invalida",
+                estado="lectura_invalida", boot_id=payload.boot_id, seq_no=payload.seq_no,
             )
             return
         episodio_actual = await alerta_repository.obtener_episodio_abierto(payload.device_id)
@@ -461,7 +597,8 @@ async def _procesar_lectura_mqtt(
     # antes ni en su lugar. Es lo único que autoriza al firmware a borrar el
     # bloque correspondiente de LittleFS.
     await _publicar_ack_lectura(
-        client, lectura_guardada.device_id, lectura_guardada.reading_id, lectura_guardada.timestamp
+        client, lectura_guardada.device_id, lectura_guardada.reading_id, lectura_guardada.timestamp,
+        boot_id=lectura_guardada.boot_id, seq_no=lectura_guardada.seq_no,
     )
 
     evento_lectura = lectura_to_response(lectura_guardada).model_dump(mode="json")

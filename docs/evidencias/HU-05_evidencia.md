@@ -1,43 +1,32 @@
-# Evidencia de QA y Validación — HU-05: Estructuración Versionada de Telemetría
+# Evidencia — HU-05: Estructuración versionada de telemetría (contrato v1.0)
 
-## 1. Resumen de la Historia de Usuario
-- **ID**: HU-05
-- **Título**: Estructuración versionada de telemetría (contrato v1.0)
-- **Responsable**: Diego Soto / Brenda Gamio
-- **Objetivo**: Asegurar que cada lectura se estructure en un payload interoperable, identificable y versionado antes de su transmisión, representando fallas con `null` + `SENSOR_FAULT`, respetando el límite de 768 B y añadiendo `received_at` en el backend.
+Entorno: `infra-local/` (PostgreSQL 16, EMQX 5.8.6 con TLS 8883 y CA propia, backend FastAPI en Docker), nodo ESP32 DevKitC real con firmware ColdCare1023/IoT `develop` (v1.2.0) salvo donde se indique, frontend ColdCare1023/Frontend `main`. Fechas: 2–3 de octubre de 2026.
 
----
+> Reemplaza la evidencia anterior de esta HU, que se apoyaba en pruebas sobre módulos simulados (cliente MQTT sin conexión real, broker y navegador falsos en Python) y no ejercitaba el sistema real.
+## Defecto corregido
+El backend validaba el contrato anterior (`schema_version: 1`, `timestamp`, `temperatura_interna`, …) con
+`extra="forbid"`: **rechazaba el 100 % de los mensajes** del firmware ColdCare (contrato v1.0). Ahora
+`src/infrastructure/mqtt/contrato_v1.py` valida `TelemetriaV1`/`EventoV1` (copia de `contrato/telemetria_v1.py`)
+y los traduce al modelo interno; el acuse lleva `boot_id`, `seq_no` y `status`
+(`committed`/`duplicate`/`rejected`), que es lo que parsea `core/Ack.cpp`.
 
-## 2. Checklist de Verificación y Resultados
+## Tareas
+| Tarea | Resultado |
+|---|---|
+| [FW] Campos del payload real | ✅ Los 9 ejemplos generados por el firmware (`tests/fixtures/contrato_v1/`) se persisten y acusan |
+| [FW] Sensor caído como null + SENSOR_FAULT | ✅ DS18B20 desconectado en vivo: `temperatura_interna = NULL`, `ds18b20_fault = no_response`, IA omitida |
+| [FW] Rechazo por tamaño excedido | ✅ Payload v1 > 768 B → acuse `rejected` |
+| [BE] `received_at` en recepción | ✅ Columna `received_at` estampada por el backend en cada fila |
+| [QA] Evidencia | ✅ 22 pruebas `test_contrato_v1_coldcare.py` + nodo real |
 
-| Tarea | Rol | Criterio Verificado | Estado | Evidencia |
-|---|---|---|---|---|
-| **Verificar campos del payload real** | `[FW]` | El payload serializado contiene todos los campos mandatorios (`schema_version`, `device_id`, `boot_id`, `seq_no`, `captured_at`, `time_quality`, `uptime_s`, `temp_ds18b20`, `ds18b20_status`, `temp_sht31`, `humedad_sht31`, `door_open`, `mc38_status`, `sensor_fault`, `firmware_version`). | **PASS** | `test_payload_ejemplo_del_contrato` (77/77 Unity tests OK) |
-| **Probar sensor caído como null + SENSOR_FAULT** | `[FW]` | Si DS18B20 o SHT31 falla, se serializa como `null` explícito y `status = SENSOR_FAULT`, nunca un código numérico (-127, 85, etc.). | **PASS** | `test_payload_falla_ds18b20_es_null_con_sensor_fault` & `test_payload_falla_sht31_no_invalida_ds18b20` |
-| **Probar rechazo por tamaño excedido** | `[FW]` | Si el payload supera los 768 B configurados como límite físico, no se publica. | **PASS** | `test_payload_peor_caso_cabe_y_el_exceso_no_se_publica` |
-| **Verificar received_at en recepción** | `[BE]` | El timestamp `received_at` es generado en el backend en UTC (ISO8601) al ingerir la telemetría, y se rechaza si el nodo intenta enviarlo. | **PASS** | `backend/tests/test_hu05_payload_contrato.py::test_hu05_received_at_en_recepcion` |
-| **Registrar evidencia de escenarios** | `[QA]` | Ejecución completa de suites de pruebas nativas y Pydantic en backend y firmware sin fallos. | **PASS** | Documento generado y registrado. |
-
----
-
-## 3. Logs de Ejecución
-
-### Firmware C++ (Unity Native Test):
-```text
-iot/test/test_core/main.cpp:315:test_payload_ejemplo_del_contrato:PASS
-iot/test/test_core/main.cpp:316:test_payload_falla_ds18b20_es_null_con_sensor_fault:PASS
-iot/test/test_core/main.cpp:317:test_payload_falla_sht31_no_invalida_ds18b20:PASS
-iot/test/test_core/main.cpp:321:test_payload_peor_caso_cabe_y_el_exceso_no_se_publica:PASS
------------------------
-77 Tests 0 Failures 0 Ignored 
-OK
+## Nodo real (ESP32_FARMACIA_01, firmware v1.2.0)
 ```
-
-### Backend Python (Pytest):
-```text
-backend/tests/test_hu05_payload_contrato.py::test_hu05_campos_del_payload_real PASSED
-backend/tests/test_hu05_payload_contrato.py::test_hu05_sensor_caido_null_y_sensor_fault PASSED
-backend/tests/test_hu05_payload_contrato.py::test_hu05_rechazo_por_tamano_excedido PASSED
-backend/tests/test_hu05_payload_contrato.py::test_hu05_received_at_en_recepcion PASSED
-============================== 4 passed in 0.53s ===============================
+boot_id | seq_no | time_quality | t_int | t_amb |  hr   | puerta | contrato |   fw
+     23 |      2 | synced       | 24.56 | 25.35 | 69.91 | f      | 1.0      | v1.2.0
+     23 |      3 | synced       | 24.56 | 25.40 | 69.84 | f      | 1.0      | v1.2.0
 ```
+Monitor serie: `[MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.` y
+`[Red] 1 lectura(s) con acuse logico; quedan 0.` en cada ciclo de 30 s.
+
+Mutaciones rechazadas con `rejected` y sin persistir: null con status OK, −127 como valor, `sensor_fault`
+incoherente, `captured_at` null sin `unsynced`, campo extra, `firmware_version` sin `v`.
