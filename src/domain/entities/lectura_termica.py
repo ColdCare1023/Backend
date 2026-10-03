@@ -64,6 +64,11 @@ class LecturaTermica:
     # HU-05: instante en que el backend recibió el mensaje (distinto de
     # `timestamp`=captured_at, el instante de captura declarado por el nodo).
     received_at: datetime | None = None
+    # millis() del nodo al capturar, y la hora reconstruida a partir de él para
+    # lecturas capturadas sin NTP (ver migración 0016). `timestamp` nunca se
+    # sobrescribe: es lo que declaró el nodo.
+    uptime_ms: int | None = None
+    timestamp_estimado: datetime | None = None
     # HU-18/21/34: `nivel_riesgo` (arriba) sigue siendo la clase cruda que
     # produce el pipeline IA/salvaguarda (model_class). `excursion_confirmada`
     # y `riesgo_efectivo` son conceptos DISTINTOS y deliberadamente separados

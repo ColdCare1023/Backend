@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import select
@@ -37,6 +37,8 @@ def _to_entity(model: ThermalReadingModel) -> LecturaTermica:
         seq_no=model.seq_no,
         time_quality=model.time_quality,
         received_at=model.received_at,
+        uptime_ms=model.uptime_ms,
+        timestamp_estimado=model.timestamp_estimado,
     )
 
 
@@ -77,6 +79,7 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
             seq_no=lectura.seq_no,
             time_quality=lectura.time_quality,
             received_at=lectura.received_at,
+            uptime_ms=lectura.uptime_ms,
         )
         self._session.add(model)
         await self._session.flush()
@@ -132,6 +135,47 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
         result = await self._session.execute(stmt)
         model = result.scalar_one_or_none()
         return _to_entity(model) if model else None
+
+    async def reanclar_no_sincronizadas(self, device_id: str, boot_id: int) -> int:
+        """Reconstruye la hora de las lecturas `unsynced` de un arranque.
+
+        Dentro de un arranque, `uptime_ms` avanza con el mismo reloj que el
+        timestamp, así que una sola lectura `synced` del arranque fija la
+        hora real del instante 0: `timestamp - uptime_ms`. El resultado va a
+        `timestamp_estimado`; `timestamp` no se toca. Devuelve cuántas filas
+        reancló (0 si el arranque aún no tiene ninguna lectura sincronizada).
+        """
+        ancla = (
+            await self._session.execute(
+                select(ThermalReadingModel.timestamp, ThermalReadingModel.uptime_ms)
+                .where(
+                    ThermalReadingModel.device_id == device_id,
+                    ThermalReadingModel.boot_id == boot_id,
+                    ThermalReadingModel.time_quality == "synced",
+                    ThermalReadingModel.uptime_ms.is_not(None),
+                )
+                .order_by(ThermalReadingModel.seq_no)
+                .limit(1)
+            )
+        ).first()
+        if ancla is None:
+            return 0
+        inicio_del_arranque = ancla.timestamp - timedelta(milliseconds=ancla.uptime_ms)
+        pendientes = (
+            await self._session.execute(
+                select(ThermalReadingModel).where(
+                    ThermalReadingModel.device_id == device_id,
+                    ThermalReadingModel.boot_id == boot_id,
+                    ThermalReadingModel.time_quality == "unsynced",
+                    ThermalReadingModel.uptime_ms.is_not(None),
+                    ThermalReadingModel.timestamp_estimado.is_(None),
+                )
+            )
+        ).scalars().all()
+        for fila in pendientes:
+            fila.timestamp_estimado = inicio_del_arranque + timedelta(milliseconds=fila.uptime_ms)
+        await self._session.flush()
+        return len(pendientes)
 
     async def obtener_por_device_boot_seq(
         self, device_id: str, boot_id: int, seq_no: int

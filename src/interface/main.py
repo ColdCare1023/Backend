@@ -200,6 +200,8 @@ async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadc
                 # reinterpreta — es evidencia de auditoría, no un dato
                 # estructurado sobre el que este backend deba operar.
                 accion, tipo_sse = "BUFFER_SATURADO", "saturacion_buffer"
+            case TipoEventoDispositivo.BUFFER_CAPACIDAD_ALTA:
+                accion, tipo_sse = "BUFFER_CAPACIDAD_ALTA", "capacidad_buffer_alta"
             case TipoEventoDispositivo.WIFI_RECONEXION_PROLONGADA:
                 accion, tipo_sse = "WIFI_RECONEXION_PROLONGADA", "reconexion_prolongada"
             case TipoEventoDispositivo.CONMUTACION_RESPALDO:
@@ -342,6 +344,7 @@ async def _procesar_lectura_mqtt(
             boot_id=payload.boot_id,
             seq_no=payload.seq_no,
             time_quality=payload.time_quality,
+            uptime_ms=payload.uptime_ms,
             payload=evidencia_edge(
                 firmware_version=payload.firmware_version,
                 duracion_apertura_segundos=payload.duracion_apertura_segundos,
@@ -446,6 +449,12 @@ async def _procesar_lectura_mqtt(
             )
             return
         episodio_actual = await alerta_repository.obtener_episodio_abierto(payload.device_id)
+        # HU-06: si este arranque ya tiene una lectura sincronizada, reconstruye la
+        # hora de las capturadas sin NTP (incluida esta, si llegó sin sincronizar).
+        if lectura_guardada.boot_id is not None:
+            await lectura_repository.reanclar_no_sincronizadas(
+                lectura_guardada.device_id, lectura_guardada.boot_id
+            )
         await session.commit()
 
     # HU-07 Escenario 1: el acuse lógico se publica DESPUÉS del COMMIT, nunca

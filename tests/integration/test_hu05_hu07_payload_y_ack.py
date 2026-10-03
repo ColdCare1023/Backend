@@ -309,3 +309,30 @@ async def test_nodo_sin_mc38_persiste_puerta_como_null(entorno):
     async with entorno() as session:
         guardada = await SQLAlchemyLecturaRepository(session).obtener_por_device_y_timestamp(DEVICE_ID, ts)
     assert guardada.apertura_refrigerador is None
+
+
+# ── HU-06: reanclaje de lecturas capturadas sin NTP ───────────────────────
+
+
+@pytest.mark.asyncio
+async def test_lecturas_sin_ntp_se_reanclan_al_llegar_una_sincronizada(entorno):
+    from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
+
+    cliente = _ClienteEspia()
+    hora_compilacion = datetime(2026, 10, 2, 21, 1, 1, tzinfo=timezone.utc)
+    hora_real_sync = datetime(2026, 10, 3, 2, 30, 35, tzinfo=timezone.utc)
+    sin_ntp = _payload(reading_id="u", timestamp=hora_compilacion.isoformat(), boot_id=17, seq_no=0,
+                       time_quality="unsynced", uptime_ms=5_000)
+    con_ntp = _payload(reading_id="s", timestamp=hora_real_sync.isoformat(), boot_id=17, seq_no=9,
+                       time_quality="synced", uptime_ms=275_000)
+
+    await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, sin_ntp), _BroadcasterMudo(), cliente)
+    await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, con_ntp), _BroadcasterMudo(), cliente)
+
+    async with entorno() as session:
+        lectura = await SQLAlchemyLecturaRepository(session).obtener_por_device_boot_seq(DEVICE_ID, 17, 0)
+    # La hora declarada se conserva; la estimada sale de restar 270 s de uptime.
+    assert lectura.timestamp.replace(tzinfo=timezone.utc) == hora_compilacion
+    assert lectura.timestamp_estimado.replace(tzinfo=timezone.utc) == datetime(
+        2026, 10, 3, 2, 26, 5, tzinfo=timezone.utc
+    )

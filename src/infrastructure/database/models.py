@@ -2,6 +2,7 @@ import uuid
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -208,6 +209,9 @@ class ThermalReadingModel(Base):
     # `timestamp` (captured_at, el instante de captura declarado por el
     # dispositivo). NULL en filas anteriores a esta columna.
     received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Migración 0016: millis() del nodo y hora reanclada de lecturas `unsynced`.
+    uptime_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    timestamp_estimado: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # HU-18/21/34: conceptos distintos de `nivel_riesgo` (model_class, arriba)
     # — ver docstring de LecturaTermica.calcular_riesgo_efectivo().
     excursion_confirmada: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

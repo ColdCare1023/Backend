@@ -53,6 +53,9 @@ class LecturaPayload(BaseModel):
     # sobre reading_id/(device_id, timestamp).
     boot_id: int | None = Field(default=None, ge=0)
     seq_no: int | None = Field(default=None, ge=0)
+    # millis() del nodo al capturar (uint32). Permite reanclar la hora de las
+    # lecturas `unsynced` de un arranque cuando llega una `synced` del mismo.
+    uptime_ms: int | None = Field(default=None, ge=0, le=4_294_967_295)
     # HU-01: calidad de la sincronización temporal del dispositivo en el
     # instante de captura. "synced" cuando hay NTP/RTC válido; "unsynced"
     # cuando captured_at se estimó sin referencia externa confiable. Optativo
@@ -144,6 +147,9 @@ class TipoEventoDispositivo(StrEnum):
     # HU-06 criterio 3: el buffer offline (LittleFS) alcanzó su tope y aplicó
     # la política FIFO — ninguna pérdida de lecturas queda silenciosa.
     BUFFER_SATURADO = "buffer_saturado"
+    # HU-06: el buffer offline alcanzó el 80 % de su capacidad (aviso previo a
+    # la saturación). Se publica al recuperar la red, antes de drenar.
+    BUFFER_CAPACIDAD_ALTA = "buffer_capacidad_alta"
     # HU-08 criterio 3: el nodo se reconectó Wi-Fi/MQTT después de superar el
     # umbral operativo de reintentos fallidos. Solo puede reportarse AL
     # reconectar (sin red no hay forma de avisar antes); `detalle` trae

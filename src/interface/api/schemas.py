@@ -167,6 +167,11 @@ class LecturaResponse(BaseModel):
     # confirmada a partir de nivel_riesgo=excursion_critica por sí solo.
     excursion_confirmada: bool = False
     riesgo_efectivo: NivelRiesgo | None = None
+    # HU-01/HU-06: calidad del reloj del nodo al capturar y, para lecturas
+    # `unsynced`, la hora reconstruida (None hasta que el arranque sincroniza).
+    # Para graficar, usar `timestamp_estimado` cuando exista.
+    time_quality: str | None = None
+    timestamp_estimado: datetime | None = None
 
 
 class AlertaResponse(BaseModel):
