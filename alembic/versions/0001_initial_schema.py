@@ -27,6 +27,12 @@ ROLES_INICIALES = ("administrador", "farmaceutico", "tecnico")
 
 
 def upgrade() -> None:
+    # Varias revisiones posteriores tienen ids de más de 32 caracteres y Alembic crea
+    # alembic_version.version_num como VARCHAR(32): PostgreSQL falla con "value too
+    # long" al estampar 0006. SQLite no impone la longitud, por eso las pruebas no lo vieron.
+    if op.get_bind().dialect.name == "postgresql":
+        op.alter_column("alembic_version", "version_num", existing_type=sa.String(32), type_=sa.String(255))
+
     op.create_table(
         "devices",
         sa.Column("id", sa.String(50), primary_key=True),

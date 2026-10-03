@@ -33,7 +33,7 @@ def upgrade() -> None:
     # reconocida (no hay forma de saber retroactivamente si fue "atendida").
     op.execute(
         sa.text(
-            "UPDATE thermal_alerts SET estado = 'reconocida' WHERE revisada = true OR revisada = 1"
+            "UPDATE thermal_alerts SET estado = 'reconocida' WHERE revisada = true"
         )
     )
 

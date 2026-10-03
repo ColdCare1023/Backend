@@ -54,7 +54,10 @@ def base_temporal(monkeypatch):
     sobre la base en memoria del conftest y las tablas no se verían aquí."""
     from src.infrastructure.config import get_settings
 
-    with tempfile.TemporaryDirectory() as carpeta:
+    # ignore_cleanup_errors: en Windows SQLite puede retener el archivo unos
+    # instantes tras cerrar el engine y el borrado del directorio fallaba como
+    # ERROR de la prueba aunque las migraciones hubieran pasado.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as carpeta:
         ruta = pathlib.Path(carpeta) / "migraciones.db"
         # env.py construye un engine async, así que Alembic necesita aiosqlite;
         # el inspector de estas pruebas es síncrono y usa el driver por defecto.

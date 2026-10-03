@@ -1,30 +1,16 @@
-# Evidencia de QA y Validación — HU-22: Persistencia del Historial Térmico (PostgreSQL)
+# Evidencia — HU-22: Persistencia del histórico
 
-## 1. Resumen de la Historia de Usuario
-- **ID**: HU-22
-- **Título**: Persistencia del historial térmico en PostgreSQL
-- **Responsable**: Diego Soto
-- **Objetivo**: Asegurar que toda telemetría válida se conserve de forma íntegra en la base de datos relacional (PostgreSQL) junto con su clasificación de IA cuando esté disponible. Se aplica una restricción de unicidad estricta `UNIQUE(device_id, boot_id, seq_no)` para impedir duplicados ante reintentos de red, auditando cualquier colisión con contenido discordante y garantizando que fallas de validación no contaminen el histórico térmico.
+Entorno: `infra-local/` (PostgreSQL 16, EMQX 5.8.6 con TLS 8883 y CA propia, backend FastAPI en Docker), nodo ESP32 DevKitC real con firmware ColdCare1023/IoT `develop` (v1.2.0) salvo donde se indique, frontend ColdCare1023/Frontend `main`. Fechas: 2–3 de octubre de 2026.
 
----
+> Reemplaza la evidencia anterior de esta HU, que se apoyaba en pruebas sobre módulos simulados (cliente MQTT sin conexión real, broker y navegador falsos en Python) y no ejercitaba el sistema real.
+## Defectos corregidos (solo aparecían en PostgreSQL; las pruebas usaban SQLite)
+1. Varias revisiones de Alembic tienen ids de más de 32 caracteres y `alembic_version.version_num` es
+   `VARCHAR(32)`: `value too long` al migrar.
+2. La migración 0008 comparaba un booleano con un entero (`revisada = 1`): `operator does not exist`.
 
-## 2. Checklist de Verificación y Resultados
-
-| Tarea | Rol | Criterio Verificado | Estado | Evidencia |
-|---|---|---|---|---|
-| **Verificar persistencia en PostgreSQL real** | `[BE]` | Persistencia completa con tipos nativos de `device_id, boot_id, seq_no, captured_at, received_at, time_quality, uptime_s, temp_ds18b20, ds18b20_status, temp_sht31, humedad_sht31, sht31_status, door_open, door_open_s, mc38_status, sensor_fault, firmware_version`. Soporta almacenamiento complementario de predicciones IA sin alterar la telemetría original. | **PASS** | `test_hu22_be_persistencia_completa_en_bd`, `test_hu22_be_persistencia_con_clasificacion_ia` |
-| **Probar idempotencia en PostgreSQL** | `[BE]` | La recepción repetida de la misma clave de identidad no genera filas duplicadas. Si el payload difiere, se audita en la tabla `conflictos_lectura`. | **PASS** | `test_hu22_be_idempotencia_en_bd` |
-| **Confirmar que solo persiste lo validado** | `[QA]` | Mensajes con errores sintácticos de JSON o que incumplen las reglas de negocio del esquema Pydantic v1.0 son descartados en la capa de validación y nunca tocan la base de datos. | **PASS** | `test_hu22_qa_solo_persiste_lo_validado` |
-| **Registrar evidencia** | `[QA]` | Ejecución de suite de integración con SQLAlchemy y generación del informe de pruebas. | **PASS** | Reporte registrado. |
-
----
-
-## 3. Logs de Ejecución
-
-```text
-backend/tests/test_hu22_persistencia_postgresql.py::test_hu22_be_persistencia_completa_en_bd PASSED
-backend/tests/test_hu22_persistencia_postgresql.py::test_hu22_be_persistencia_con_clasificacion_ia PASSED
-backend/tests/test_hu22_persistencia_postgresql.py::test_hu22_be_idempotencia_en_bd PASSED
-backend/tests/test_hu22_persistencia_postgresql.py::test_hu22_qa_solo_persiste_lo_validado PASSED
-============================== 4 passed in 2.40s ===============================
-```
+## Resultados en vivo (PostgreSQL 16.14)
+| Tarea | Resultado |
+|---|---|
+| [BE] Persistencia en PostgreSQL real | ✅ Migraciones aplicadas desde cero; lecturas del ESP32 persistidas |
+| [BE] Idempotencia | ✅ Misma lectura 3 veces → 3 acuses, 1 fila |
+| [QA] Solo persiste lo validado | ✅ Humedad 150 % → `rejected`, 0 filas |
