@@ -1,31 +1,16 @@
-# Evidencia de QA y Validación — HU-40: Gestión de Sesión JWT en Memoria
+# Evidencia — HU-40: Sesión JWT en memoria
 
-## 1. Resumen de la Historia de Usuario
-- **ID**: HU-40
-- **Título**: Gestión de sesión JWT en memoria
-- **Responsable**: Diego Soto
-- **Objetivo**: Asegurar que la SPA conserve el token JWT estrictamente en memoria volátil de JavaScript, evitando su persistencia en `localStorage` o `sessionStorage`, reduciendo el riesgo de robo por scripts maliciosos. Al cerrar el contexto (pestaña/navegador) se requiere reautenticación, y al pulsar logout se destruye el token en memoria y se revoca en el servidor.
+Entorno: `infra-local/` (PostgreSQL 16, EMQX 5.8.6 con TLS 8883 y CA propia, backend FastAPI en Docker), nodo ESP32 DevKitC real con firmware ColdCare1023/IoT `develop` (v1.2.0) salvo donde se indique, frontend ColdCare1023/Frontend `main`. Fechas: 2–3 de octubre de 2026.
 
----
+> Reemplaza la evidencia anterior de esta HU, que se apoyaba en pruebas sobre módulos simulados (cliente MQTT sin conexión real, broker y navegador falsos en Python) y no ejercitaba el sistema real.
+## Resultados (navegador real)
+| Tarea | Resultado |
+|---|---|
+| [FE] JWT fuera de localStorage | ✅ Ningún valor `eyJ…` en `localStorage` |
+| [FE] JWT fuera de sessionStorage | ✅ Solo la marca `cf_sesion_previa = '1'` (no es un token) |
+| [FE] Reautenticación tras cerrar/recargar | ✅ Recargar `/dashboard` redirige a `/login` |
+| [FE] Logout elimina el token | ✅ `POST /api/auth/logout` 204; `/dashboard` → `/login` |
 
-## 2. Checklist de Verificación y Resultados
-
-| Tarea | Rol | Criterio Verificado | Estado | Evidencia |
-|---|---|---|---|---|
-| **Verificar JWT fuera de localStorage** | `[FE]` | El token no se escribe en `window.localStorage` tras iniciar sesión; el almacenamiento permanece limpio de credenciales. | **PASS** | `test_hu40_fe_jwt_fuera_de_local_storage` |
-| **Verificar JWT fuera de sessionStorage** | `[FE]` | En entorno de producción no demo, `sessionStorage` no almacena el JWT. | **PASS** | `test_hu40_fe_jwt_fuera_de_session_storage` |
-| **Probar reautenticación tras cerrar** | `[FE]` | Al recargar o reabrir la aplicación en una pestaña nueva, la ausencia de almacenamiento persistente obliga al usuario a identificarse nuevamente en rutas protegidas. | **PASS** | `test_hu40_fe_reautenticacion_tras_cerrar_contexto` |
-| **Probar que el logout elimina el token** | `[FE]` | El cierre de sesión limpia el token en memoria (`setAccessToken(null)`) y llama al backend para invalidar el `jti`, denegando llamadas posteriores con el mismo token. | **PASS** | `test_hu40_fe_logout_elimina_token_y_revoca` |
-| **Registrar evidencia** | `[QA]` | Ejecución de casos de prueba del plan de seguridad de sesión. | **PASS** | Reporte registrado. |
-
----
-
-## 3. Logs de Ejecución
-
-```text
-backend/tests/test_hu40_jwt_en_memoria.py::test_hu40_fe_jwt_fuera_de_local_storage PASSED
-backend/tests/test_hu40_jwt_en_memoria.py::test_hu40_fe_jwt_fuera_de_session_storage PASSED
-backend/tests/test_hu40_jwt_en_memoria.py::test_hu40_fe_reautenticacion_tras_cerrar_contexto PASSED
-backend/tests/test_hu40_jwt_en_memoria.py::test_hu40_fe_logout_elimina_token_y_revoca PASSED
-========================= 4 passed in 1.47s =========================
-```
+Revocación en el backend: el mismo token después del logout → **401** en `/api/lecturas` y en
+`/api/auth/sse-ticket`. Limitación conocida: la lista de revocación vive en memoria; si el backend se
+reinicia, un token revocado vuelve a valer hasta su expiración (60 min).
