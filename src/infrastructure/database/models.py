@@ -175,7 +175,9 @@ class ThermalReadingModel(Base):
     humedad_ambiental: Mapped[float | None] = mapped_column(Float, nullable=True)
     temperatura_interna: Mapped[float | None] = mapped_column(Float, nullable=True)
     # HU-04: nullable — None cuando el dispositivo no tiene MC-38 instalado.
-    apertura_refrigerador: Mapped[bool | None] = mapped_column(Boolean, default=False, nullable=True)
+    # HU-04: sin `default`. Con uno, el ORM trata None como "sin valor" y guarda
+    # False: un nodo sin MC-38 aparecía con la puerta cerrada en vez de "no aplica".
+    apertura_refrigerador: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     nivel_riesgo: Mapped[str | None] = mapped_column(String(30), nullable=True)
     estado_conectividad: Mapped[str | None] = mapped_column(String(20), nullable=True)
     payload: Mapped[dict | None] = mapped_column(JSONVariant, nullable=True)

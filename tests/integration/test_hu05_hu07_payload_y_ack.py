@@ -290,3 +290,22 @@ async def test_json_malformado_se_descarta_sin_excepcion(entorno):
     await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, '{"device_id": "x",'), _BroadcasterMudo(), cliente)
 
     assert cliente.publicados == []
+
+
+# ── HU-04: nodo sin MC-38 ─────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_nodo_sin_mc38_persiste_puerta_como_null(entorno):
+    from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
+
+    cliente = _ClienteEspia()
+    ts = datetime(2026, 10, 3, 1, 53, 6, tzinfo=timezone.utc)
+    cuerpo = _payload(reading_id="sin-mc38", timestamp=ts.isoformat(), apertura_refrigerador=None,
+                      mc38_status="not_installed")
+
+    await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, cuerpo), _BroadcasterMudo(), cliente)
+
+    async with entorno() as session:
+        guardada = await SQLAlchemyLecturaRepository(session).obtener_por_device_y_timestamp(DEVICE_ID, ts)
+    assert guardada.apertura_refrigerador is None
