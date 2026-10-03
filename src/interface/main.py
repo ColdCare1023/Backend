@@ -115,6 +115,21 @@ async def _publicar_ack_lectura(
         logger.exception("No se pudo publicar el acuse lógico MQTT para %s", device_id)
 
 
+def _payload_en_conflicto(existente, nueva) -> bool:
+    """True si dos lecturas con la misma identidad traen valores distintos."""
+    def distinto(a, b) -> bool:
+        if a is None or b is None:
+            return a is not b
+        return abs(float(a) - float(b)) > 0.005
+
+    return (
+        distinto(existente.temperatura_interna, nueva.temperatura_interna)
+        or distinto(existente.temperatura_ambiental, nueva.temperatura_ambiental)
+        or distinto(existente.humedad_ambiental, nueva.humedad_ambiental)
+        or existente.apertura_refrigerador != nueva.apertura_refrigerador
+    )
+
+
 async def _procesar_mensaje_mqtt(
     message: aiomqtt.Message, broadcaster: SSEBroadcaster, client: aiomqtt.Client | None = None
 ) -> None:
@@ -295,6 +310,8 @@ async def _procesar_lectura_mqtt(
         # conserva misma garantía en BD; este guard evita notificación doble.
         # HU-11: con boot_id+seq_no (firmware nuevo) esa es la identidad real
         # de la lectura; sin ellos se conserva device_id+timestamp.
+        # Con boot_id+seq_no, el timestamp NO identifica la lectura: sin NTP dos
+        # arranques repiten marcas (migración 0015).
         if payload.boot_id is not None and payload.seq_no is not None:
             existente = await lectura_repository.obtener_por_device_boot_seq(
                 payload.device_id, payload.boot_id, payload.seq_no
@@ -305,6 +322,40 @@ async def _procesar_lectura_mqtt(
             )
         if existente is not None:
             logger.info("Lectura MQTT duplicada omitida: %s/%s", payload.device_id, payload.timestamp)
+            # HU-11: un reenvío idéntico es un duplicado inocuo; el mismo identificador
+            # con valores distintos es un CONFLICTO y no se puede descartar sin dejar
+            # rastro: la lectura original se conserva y la recibida queda auditada.
+            if _payload_en_conflicto(existente, lectura):
+                auditoria = AuditarAccionCriticaUseCase(
+                    SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+                )
+                await auditoria.execute(
+                    usuario_id=None,
+                    accion="LECTURA_CONFLICTO",
+                    recurso="mqtt/lecturas",
+                    detalle={
+                        "device_id": payload.device_id,
+                        "timestamp": payload.timestamp.isoformat(),
+                        "reading_id_recibido": payload.reading_id,
+                        "boot_id_recibido": payload.boot_id,
+                        "seq_no_recibido": payload.seq_no,
+                        "reading_id_existente": existente.reading_id,
+                        "temperatura_interna_recibida": payload.temperatura_interna,
+                        "temperatura_ambiental_recibida": payload.temperatura_ambiental,
+                        "humedad_ambiental_recibida": payload.humedad_ambiental,
+                    },
+                    ip_origen=None,
+                )
+                await session.commit()
+                logger.warning(
+                    "Conflicto de lectura MQTT %s/%s: mismo identificador, contenido distinto.",
+                    payload.device_id, payload.timestamp,
+                )
+                await _publicar_ack_lectura(
+                    client, payload.device_id, payload.reading_id, payload.timestamp,
+                    estado="conflicto_payload",
+                )
+                return
             # HU-07 Escenario 2: el nodo puede reenviar un bloque cuyo COMMIT
             # ya ocurrió (el acuse anterior se perdió, o reanudó desde un
             # archivo previo al último confirmado). Confirmar de nuevo permite

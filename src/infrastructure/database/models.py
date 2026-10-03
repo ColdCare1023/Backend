@@ -146,7 +146,16 @@ class ThermalReadingModel(Base):
         # Se conserva por compatibilidad con firmware que aún no envía
         # boot_id/seq_no; el backlog nuevo (HU-11) exige la tripleta de abajo
         # como clave de idempotencia real.
-        UniqueConstraint("device_id", "timestamp", name="uq_thermal_readings_device_timestamp"),
+        # Solo para firmware anterior sin boot_id/seq_no (migración 0015): con
+        # el reloj sin NTP, dos arranques repiten timestamps y la identidad
+        # real pasa a ser la tripleta de abajo.
+        Index(
+            "uq_thermal_readings_device_timestamp_legado",
+            "device_id", "timestamp",
+            unique=True,
+            sqlite_where=sa_text("boot_id IS NULL OR seq_no IS NULL"),
+            postgresql_where=sa_text("boot_id IS NULL OR seq_no IS NULL"),
+        ),
         # HU-11/HU-05: idempotencia real por identidad lógica de la lectura.
         # Parcial (WHERE boot_id/seq_no no nulos) para no romper filas de
         # firmware anterior que aún no declara estos campos.

@@ -222,3 +222,46 @@ async def test_acuse_usa_json_compacto_para_el_parser_del_firmware():
     await main._publicar_ack_lectura(_Crudo(), DEVICE_ID, "esp32-0001", datetime.now(tz=timezone.utc))
 
     assert '"reading_id":"esp32-0001"' in crudos[0]
+
+
+# ── HU-11: conflicto de payload ───────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_mismo_timestamp_con_otra_identidad_se_guardan_ambas(entorno):
+    """Reloj sin NTP: tras reiniciar, el nodo repite timestamps con otro boot_id.
+    Son lecturas distintas (la identidad es boot_id+seq_no): se guardan las dos."""
+    cliente = _ClienteEspia()
+    ts = datetime(2026, 10, 2, 19, 30, 9, tzinfo=timezone.utc).isoformat()
+    primera = _payload(reading_id="a", timestamp=ts, boot_id=22, seq_no=0, temperatura_interna=5.0)
+    segunda = _payload(reading_id="b", timestamp=ts, boot_id=2, seq_no=0, temperatura_interna=6.5)
+
+    await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, primera), _BroadcasterMudo(), cliente)
+    await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, segunda), _BroadcasterMudo(), cliente)
+
+    assert cliente.publicados[0][1]["estado"] == "commit_confirmado"
+    assert cliente.publicados[1][1]["estado"] == "commit_confirmado"
+
+
+@pytest.mark.asyncio
+async def test_misma_identidad_con_valores_distintos_es_conflicto(entorno):
+    cliente = _ClienteEspia()
+    ts = datetime(2026, 10, 2, 19, 31, 9, tzinfo=timezone.utc).isoformat()
+    original = _payload(reading_id="c", timestamp=ts, boot_id=5, seq_no=1, temperatura_interna=5.0)
+    alterada = _payload(reading_id="c", timestamp=ts, boot_id=5, seq_no=1, temperatura_interna=9.0)
+
+    await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, original), _BroadcasterMudo(), cliente)
+    await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, alterada), _BroadcasterMudo(), cliente)
+
+    assert cliente.publicados[1][1]["estado"] == "conflicto_payload"
+
+
+@pytest.mark.asyncio
+async def test_reenvio_identico_no_es_conflicto(entorno):
+    cliente = _ClienteEspia()
+    cuerpo = _payload(reading_id="d", boot_id=7, seq_no=3)
+
+    await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, cuerpo), _BroadcasterMudo(), cliente)
+    await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, cuerpo), _BroadcasterMudo(), cliente)
+
+    assert cliente.publicados[1][1]["estado"] == "commit_confirmado"
