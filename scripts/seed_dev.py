@@ -15,6 +15,8 @@ USUARIOS_DEV = [
     ("Admin Demo", "admin@farmacia.demo.pe", "admin12345", Rol.ADMINISTRADOR),
     ("Farmaceutico Demo", "farmaceutico@farmacia.demo.pe", "farma12345", Rol.FARMACEUTICO),
     ("Tecnico Demo", "tecnico@farmacia.demo.pe", "tecni12345", Rol.TECNICO),
+    # HU-41: el cuarto rol, de solo lectura, para probar la matriz completa.
+    ("Auditor Demo", "auditor@farmacia.demo.pe", "audit12345", Rol.AUDITOR),
 ]
 
 
