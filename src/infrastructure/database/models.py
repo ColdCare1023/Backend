@@ -286,6 +286,8 @@ class CorrectiveActionModel(Base):
     corrige_accion_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("corrective_actions.id"), nullable=True
     )
+    # HU-28 (migración 0019): por qué se rectificó. Tabla append-only en PostgreSQL.
+    motivo_rectificacion: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = _created_at_column()
 
     alerta: Mapped[ThermalAlertModel] = relationship(back_populates="acciones_correctivas")

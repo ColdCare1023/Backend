@@ -116,6 +116,23 @@ class SQLAlchemyTrazabilidadRepository(ITrazabilidadRepository):
         result = await self._session.execute(stmt)
         return [_to_entity(m) for m in result.scalars().all()]
 
+    async def buscar_por_payload(
+        self, tipo_evento: str, clave: str, valor: str
+    ) -> RegistroTrazabilidad | None:
+        """HU-28: eslabón de un evento por un campo de su payload (p. ej. la
+        acción correctiva por `accion_id`). JSON en SQLite, JSONB en PostgreSQL."""
+        stmt = (
+            select(TraceabilityRecordModel)
+            .where(
+                TraceabilityRecordModel.tipo_evento == tipo_evento,
+                TraceabilityRecordModel.payload[clave].as_string() == valor,
+            )
+            .order_by(TraceabilityRecordModel.created_at.asc())
+            .limit(1)
+        )
+        modelo = (await self._session.execute(stmt)).scalar_one_or_none()
+        return _to_entity(modelo) if modelo else None
+
     async def marcar_corrupto(self, registro_id: UUID) -> None:
         await self._session.execute(
             update(TraceabilityRecordModel)

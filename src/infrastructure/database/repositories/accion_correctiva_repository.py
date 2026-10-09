@@ -16,6 +16,7 @@ def _to_entity(model: CorrectiveActionModel) -> AccionCorrectiva:
         descripcion=model.descripcion,
         created_at=model.created_at,
         corrige_accion_id=model.corrige_accion_id,
+        motivo_rectificacion=model.motivo_rectificacion,
     )
 
 
@@ -29,6 +30,7 @@ class SQLAlchemyAccionCorrectivaRepository(IAccionCorrectivaRepository):
             usuario_id=accion.usuario_id,
             descripcion=accion.descripcion,
             corrige_accion_id=accion.corrige_accion_id,
+            motivo_rectificacion=accion.motivo_rectificacion,
         )
         self._session.add(model)
         await self._session.flush()

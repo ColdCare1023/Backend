@@ -126,7 +126,10 @@ def test_rectificar_accion_correctiva_crea_evento_nuevo_sin_sobrescribir(client,
 
     rectificacion = client.post(
         f"/api/alertas/acciones-correctivas/{original['id']}/rectificar",
-        json={"descripcion": "Descripción corregida, sin el error."},
+        json={
+            "descripcion": "Descripción corregida, sin el error.",
+            "motivo_rectificacion": "Error de tipeo en la versión original.",
+        },
         headers=auth_header(token_tecnico),
     )
     assert rectificacion.status_code == 201
