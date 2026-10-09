@@ -1,33 +1,94 @@
-"""HU-23: aviso fuera de la aplicación ante una excursión crítica.
+"""HU-23/HU-53/HU-54: aviso fuera de la aplicación ante una excursión crítica.
 
 Una alerta que solo existe en el dashboard no sirve de noche ni con la farmacia
-cerrada, que es cuando una excursión térmica arruina un lote de vacunas. Este
-servicio empuja el aviso a un canal que el responsable técnico sí mira.
+cerrada, que es cuando una excursión térmica arruina un lote de vacunas.
 
-Dos garantías de diseño:
+Reparto de responsabilidades (HU-53):
 
-1. **Nunca bloquea ni rompe la ingesta.** Un SMTP caído o un token de Telegram
-   vencido no puede impedir que la lectura se persista y se encadene: cualquier
-   fallo se registra y se traga.
-2. **Antiflood por dispositivo.** Un episodio crítico produce una lectura cada
-   pocos segundos; sin cooldown, el responsable recibiría cientos de correos y
-   terminaría silenciando el canal — que es el peor resultado posible.
+- `componer_correo_excursion` arma el correo (asunto y cuerpo).
+- `transporte_email` lo envía (SMTP o API HTTP) y lanza si el proveedor no lo
+  confirma.
+- `despachador.DespachadorNotificaciones` decide CUÁNDO: después del COMMIT,
+  fuera del consumidor MQTT, una sola vez por episodio y con reintentos
+  auditados.
+- `NotificacionService` (este módulo) conserva los canales opcionales de
+  HU-54 —Telegram y SMS—, que nunca bloquean ni rompen la ingesta: cualquier
+  fallo se registra y se traga, con cooldown por dispositivo en memoria.
 """
 
-import asyncio
 import logging
-import smtplib
 from datetime import datetime, timedelta, timezone
-from email.message import EmailMessage
 
 import httpx
 
+from src.application.use_cases.generar_alerta import AvisoExcursion
 from src.infrastructure.config import Settings
+from src.infrastructure.notifications.transporte_email import MensajeCorreo
 
 logger = logging.getLogger("infrastructure.notificaciones")
 
+# Perú no aplica horario de verano: UTC-5 fijo. Se evita zoneinfo porque en
+# Windows (desarrollo) no trae base de datos de zonas sin el paquete tzdata.
+HORA_PERU = timezone(timedelta(hours=-5), "PET")
+
+
+def _formatear(instante: datetime) -> str:
+    utc = instante if instante.tzinfo is not None else instante.replace(tzinfo=timezone.utc)
+    local = utc.astimezone(HORA_PERU)
+    return f"{local:%d/%m/%Y %H:%M:%S} (hora de Perú) — {utc.astimezone(timezone.utc):%Y-%m-%d %H:%M:%S} UTC"
+
+
+def componer_correo_excursion(
+    aviso: AvisoExcursion,
+    remitente: str,
+    destinatario: str,
+    frontend_url: str = "",
+    dispositivo: dict | None = None,
+) -> MensajeCorreo:
+    """HU-53 criterio 6: el correo debe permitir actuar sin abrir el sistema
+    —qué refrigerador, dónde, a cuánto y cuándo— y llevar a la alerta."""
+    dispositivo = dispositivo or {}
+    temperatura = f"{aviso.temperatura:.1f} °C" if aviso.temperatura is not None else "sin dato de sensor"
+    etiqueta = " [DIFERIDA]" if aviso.diferida else ""
+    lineas = [
+        "ALERTA CRÍTICA — Cadena de frío",
+        "",
+        f"Dispositivo: {aviso.device_id}",
+    ]
+    if dispositivo.get("nombre"):
+        lineas.append(f"Equipo: {dispositivo['nombre']}")
+    if dispositivo.get("ubicacion"):
+        lineas.append(f"Ubicación: {dispositivo['ubicacion']}")
+    lineas += [
+        f"Temperatura registrada: {temperatura}",
+        f"Momento de la lectura: {_formatear(aviso.captured_at)}",
+    ]
+    if aviso.diferida:
+        recibida = _formatear(aviso.received_at) if aviso.received_at else "—"
+        lineas += [
+            f"Recibida por el sistema: {recibida}",
+            "",
+            "Esta lectura llegó DIFERIDA (el nodo estuvo sin conexión y la envió "
+            "desde su memoria). La excursión pudo haber ocurrido antes de este aviso.",
+        ]
+    lineas += [
+        "",
+        "La temperatura salió del rango 2–8 °C exigido para medicamentos termolábiles. "
+        "Verifique el refrigerador de inmediato y registre la acción correctiva en el sistema.",
+    ]
+    if frontend_url:
+        lineas += ["", f"Ver la alerta: {frontend_url.rstrip('/')}/alertas?id={aviso.alerta_id}"]
+    return MensajeCorreo(
+        remitente=remitente,
+        destinatario=destinatario,
+        asunto=f"[ColdCare] EXCURSIÓN CRÍTICA{etiqueta} — {aviso.device_id}",
+        cuerpo="\n".join(lineas),
+    )
+
 
 class NotificacionService:
+    """HU-54: canales opcionales (Telegram y SMS). El correo NO pasa por aquí."""
+
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._ultimo_aviso: dict[str, datetime] = {}
@@ -35,7 +96,7 @@ class NotificacionService:
 
     @property
     def habilitado(self) -> bool:
-        return self._settings.smtp_enabled or self._settings.telegram_enabled or self._settings.sms_enabled
+        return self._settings.telegram_enabled or self._settings.sms_enabled
 
     def _debe_notificar(self, device_id: str) -> bool:
         ahora = datetime.now(tz=timezone.utc)
@@ -51,58 +112,20 @@ class NotificacionService:
         device_id: str,
         temperatura: float | None,
         timestamp: str,
-        email_destino: str | None = None,
         telefono_destino: str | None = None,
     ) -> None:
-        """HU-53/HU-54: email_destino/telefono_destino son el responsable
-        REGISTRADO del dispositivo (devices.responsable_email/telefono). El
-        correo cae a SMTP_TO si el dispositivo no tiene uno propio (evita
-        dejar una excursión crítica sin avisar a nadie); el SMS, al ser un
-        canal explícitamente opcional (HU-54) y personal, NO tiene
-        equivalente global: sin número registrado, simplemente no se envía."""
+        """El SMS, al ser un canal explícitamente opcional (HU-54) y personal,
+        no tiene destinatario global: sin número registrado, no se envía."""
         if not self.habilitado or not self._debe_notificar(device_id):
             return
 
         temp_texto = f"{temperatura:.1f} °C" if temperatura is not None else "sin dato de sensor"
-        if self._settings.smtp_enabled:
-            await self._enviar_email(device_id, temp_texto, timestamp, email_destino)
         if self._settings.telegram_enabled:
             await self._enviar_telegram(device_id, temp_texto, timestamp)
         if self._settings.sms_enabled and telefono_destino:
             await self._enviar_sms(device_id, temp_texto, timestamp, telefono_destino)
 
     # ── Canales ───────────────────────────────────────────────────────────
-    async def _enviar_email(
-        self, device_id: str, temp_texto: str, timestamp: str, email_destino: str | None = None
-    ) -> None:
-        mensaje = EmailMessage()
-        mensaje["Subject"] = f"[ThermoTrace] EXCURSIÓN CRÍTICA — {device_id}"
-        mensaje["From"] = self._settings.smtp_from
-        mensaje["To"] = email_destino or self._settings.smtp_to
-        mensaje.set_content(
-            "ALERTA CRÍTICA — Cadena de frío\n\n"
-            f"Dispositivo: {device_id}\n"
-            f"Temperatura registrada: {temp_texto}\n"
-            f"Momento de la lectura: {timestamp}\n\n"
-            "La temperatura salió del rango 2–8 °C exigido para medicamentos "
-            "termolábiles. Verifique el refrigerador de inmediato y registre la "
-            "acción correctiva en el sistema."
-        )
-        try:
-            # smtplib es bloqueante: se aparta del event loop para no frenar la
-            # ingesta de lecturas mientras se negocia la conexión TLS.
-            await asyncio.to_thread(self._smtp_enviar, mensaje)
-            logger.info("Aviso por email enviado para %s", device_id)
-        except Exception:
-            logger.exception("No se pudo enviar el aviso por email para %s", device_id)
-
-    def _smtp_enviar(self, mensaje: EmailMessage) -> None:
-        with smtplib.SMTP_SSL(
-            self._settings.smtp_host, self._settings.smtp_port, timeout=10
-        ) as servidor:
-            servidor.login(self._settings.smtp_user, self._settings.smtp_password)
-            servidor.send_message(mensaje)
-
     async def _enviar_telegram(self, device_id: str, temp_texto: str, timestamp: str) -> None:
         texto = (
             "🚨 *EXCURSIÓN CRÍTICA — Cadena de frío*\n\n"
@@ -136,7 +159,7 @@ class NotificacionService:
         confirme con 2xx (HU-54 criterio 2: "sin declarar entrega exitosa si
         ningún proveedor la confirma")."""
         texto = (
-            f"[ThermoTrace] EXCURSION CRITICA {device_id}: {temp_texto} a las {timestamp}. "
+            f"[ColdCare] EXCURSION CRITICA {device_id}: {temp_texto} a las {timestamp}. "
             "Verifique el refrigerador de inmediato."
         )
         url = self._settings.sms_api_url.format(account_sid=self._settings.sms_account_sid)

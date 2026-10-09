@@ -41,3 +41,24 @@ def _produccion(**extra) -> dict:
 def test_produccion_minima_de_railway_es_valida():
     settings = Settings(**_produccion())
     assert settings.database_url.startswith("postgresql+asyncpg://")
+
+
+def test_correo_por_api_http_exige_clave_y_frontend_url():
+    with pytest.raises(ValueError, match="EMAIL_API_KEY"):
+        Settings(**_produccion(
+            email_enabled=True, email_transporte="http_api",
+            email_from="avisos@coldcare.pe", email_destino_respaldo="qf@coldcare.pe",
+            frontend_url="https://coldcare.vercel.app",
+        ))
+    with pytest.raises(ValueError, match="FRONTEND_URL"):
+        Settings(**_produccion(
+            email_enabled=True, email_transporte="http_api", email_api_key="re_x",
+            email_from="avisos@coldcare.pe", email_destino_respaldo="qf@coldcare.pe",
+        ))
+
+
+def test_smtp_enabled_sigue_siendo_sinonimo_del_correo():
+    settings = Settings(smtp_enabled=True)
+    assert settings.correo_habilitado
+    with pytest.raises(ValueError, match="remitente"):
+        Settings(**_produccion(smtp_enabled=True, frontend_url="https://coldcare.vercel.app"))

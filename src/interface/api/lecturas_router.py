@@ -17,7 +17,6 @@ from src.infrastructure.database.repositories.lectura_repository import SQLAlche
 from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
-from src.infrastructure.notifications.notificacion_service import NotificacionService
 from src.interface.api.api_protection import limitar_ingesta_lecturas
 from src.interface.api.deps import DbSessionDep, SettingsDep, require_roles
 from src.interface.api.mappers import evidencia_edge, lectura_to_response
@@ -55,7 +54,6 @@ async def ingestar_lectura(
         device_repository=SQLAlchemyDeviceRepository(session),
         registro_dispositivos_estricto=settings.device_registry_estricto,
         audit_log_repository=SQLAlchemyAuditLogRepository(session),
-        notificacion_service=NotificacionService(settings),
         ventana_normalizacion_alerta_minutos=settings.alerta_ventana_normalizacion_minutos,
     )
     lectura = LecturaTermica(
@@ -88,6 +86,11 @@ async def ingestar_lectura(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     episodio_actual = await alerta_repository.obtener_episodio_abierto(body.device_id)
     await session.commit()
+
+    # HU-53 (D2): mismo despachador único que la ingesta MQTT, tras el COMMIT.
+    despachador = getattr(request.app.state, "notificaciones", None)
+    if despachador is not None:
+        despachador.encolar_todos(use_case.avisos_pendientes)
 
     respuesta = lectura_to_response(lectura_guardada)
     # B-06: la ingesta por HTTP también notifica al dashboard. Antes solo el

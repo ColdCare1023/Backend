@@ -103,13 +103,34 @@ class Settings(BaseSettings):
     # llegan deshabilitados: sin credenciales configuradas el sistema funciona
     # igual, solo sin notificar. Las credenciales viven en el entorno (RNF-05),
     # nunca en el código.
+    #
+    # HU-53: el correo tiene dos transportes. `smtp` (SSL en 465 o STARTTLS en
+    # 587) y `http_api` (proveedor transaccional por HTTPS, compatible con la
+    # API de Resend), para plataformas que restringen el SMTP saliente.
+    # `SMTP_ENABLED` se conserva como sinónimo de `EMAIL_ENABLED` para no romper
+    # despliegues que ya lo usaban.
+    email_enabled: bool = False
+    email_transporte: Literal["smtp", "http_api"] = "smtp"
+    email_from: str = ""
+    # Destinatario cuando el dispositivo no tiene `responsable_email` propio.
+    email_destino_respaldo: str = ""
+    email_api_url: str = "https://api.resend.com/emails"
+    email_api_key: str = ""
+
     smtp_enabled: bool = False
     smtp_host: str = ""
     smtp_port: int = 465
+    smtp_seguridad: Literal["ssl", "starttls"] = "ssl"
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from: str = ""
     smtp_to: str = ""
+
+    # Base del enlace a la alerta que lleva el correo (FRONTEND_URL/alertas?id=…).
+    frontend_url: str = ""
+
+    # HU-53: reintentos del aviso ante fallo del proveedor (backoff 30 s, 2 min, 5 min).
+    notificacion_max_intentos: int = 3
 
     telegram_enabled: bool = False
     telegram_bot_token: str = ""
@@ -153,6 +174,18 @@ class Settings(BaseSettings):
     # Solo se aceptan entornos con semántica de seguridad conocida. Un valor
     # como "prod" no debe omitir silenciosamente los controles de production.
     environment: Literal["development", "test", "production"] = "development"
+
+    @property
+    def correo_habilitado(self) -> bool:
+        return self.email_enabled or self.smtp_enabled
+
+    @property
+    def correo_remitente(self) -> str:
+        return self.email_from or self.smtp_from
+
+    @property
+    def correo_destino_respaldo(self) -> str:
+        return self.email_destino_respaldo or self.smtp_to
 
     @model_validator(mode="after")
     def _validar_longitud_clave_jwt(self) -> "Settings":
@@ -219,12 +252,30 @@ class Settings(BaseSettings):
             # HU-23: habilitar un canal de aviso sin sus credenciales dejaría
             # al sistema creyendo que notifica cuando en realidad falla en cada
             # excursión crítica — el peor modo de fallo posible aquí.
-            if self.smtp_enabled and not all(
-                (self.smtp_host, self.smtp_user, self.smtp_password, self.smtp_from, self.smtp_to)
-            ):
-                raise ValueError(
-                    "SMTP_ENABLED requiere SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM y SMTP_TO."
-                )
+            if self.correo_habilitado:
+                if not (self.correo_remitente and self.correo_destino_respaldo):
+                    raise ValueError(
+                        "El correo (EMAIL_ENABLED/SMTP_ENABLED) requiere remitente "
+                        "(EMAIL_FROM o SMTP_FROM) y destinatario de respaldo "
+                        "(EMAIL_DESTINO_RESPALDO o SMTP_TO)."
+                    )
+                if self.email_transporte == "smtp" and not all(
+                    (self.smtp_host, self.smtp_user, self.smtp_password)
+                ):
+                    raise ValueError(
+                        "EMAIL_TRANSPORTE=smtp requiere SMTP_HOST, SMTP_USER y SMTP_PASSWORD."
+                    )
+                if self.email_transporte == "http_api" and not (
+                    self.email_api_url.startswith("https://") and self.email_api_key
+                ):
+                    raise ValueError(
+                        "EMAIL_TRANSPORTE=http_api requiere EMAIL_API_URL (https) y EMAIL_API_KEY."
+                    )
+                if not self.frontend_url.startswith("https://"):
+                    raise ValueError(
+                        "FRONTEND_URL (https) es obligatoria con el correo habilitado: "
+                        "el aviso enlaza a la alerta."
+                    )
             if self.telegram_enabled and not all(
                 (self.telegram_bot_token, self.telegram_chat_id)
             ):

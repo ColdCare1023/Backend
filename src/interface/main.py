@@ -41,7 +41,7 @@ from src.infrastructure.mqtt.payload_schema import (
     LecturaPayload,
     TipoEventoDispositivo,
 )
-from src.infrastructure.notifications.notificacion_service import NotificacionService
+from src.infrastructure.notifications.despachador import DespachadorNotificaciones
 from src.infrastructure.security.rate_limiter import SlidingWindowRateLimiter
 from src.infrastructure.security.revocation_store import JtiStore
 from src.interface.api.alertas_router import router as alertas_router
@@ -146,7 +146,10 @@ def _payload_en_conflicto(existente, nueva) -> bool:
 
 
 async def _procesar_mensaje_mqtt(
-    message: aiomqtt.Message, broadcaster: SSEBroadcaster, client: aiomqtt.Client | None = None
+    message: aiomqtt.Message,
+    broadcaster: SSEBroadcaster,
+    client: aiomqtt.Client | None = None,
+    notificaciones: DespachadorNotificaciones | None = None,
 ) -> None:
     """Despacha según el tópico. B-09: los mensajes de `/eventos` tienen su
     propio esquema; antes se validaban contra LecturaPayload, fallaban y se
@@ -155,7 +158,7 @@ async def _procesar_mensaje_mqtt(
     topico = str(message.topic)
     if topico.endswith("/eventos"):
         return await _procesar_evento_mqtt(message, broadcaster)
-    return await _procesar_lectura_mqtt(message, broadcaster, client)
+    return await _procesar_lectura_mqtt(message, broadcaster, client, notificaciones)
 
 
 # Contrato v1.0: `event_type` → tipo interno. Los que no tienen equivalente se
@@ -418,7 +421,10 @@ async def _rechazar_payload_invalido(
 
 
 async def _procesar_lectura_mqtt(
-    message: aiomqtt.Message, broadcaster: SSEBroadcaster, client: aiomqtt.Client | None = None
+    message: aiomqtt.Message,
+    broadcaster: SSEBroadcaster,
+    client: aiomqtt.Client | None = None,
+    notificaciones: DespachadorNotificaciones | None = None,
 ) -> None:
     # El tamaño se comprueba ANTES de deserializar: la ingesta MQTT no pasa por
     # el middleware que acota el cuerpo de las peticiones REST, así que este es
@@ -483,7 +489,6 @@ async def _procesar_lectura_mqtt(
             device_repository=SQLAlchemyDeviceRepository(session),
             registro_dispositivos_estricto=settings.device_registry_estricto,
             audit_log_repository=SQLAlchemyAuditLogRepository(session),
-            notificacion_service=NotificacionService(settings),
             ventana_normalizacion_alerta_minutos=settings.alerta_ventana_normalizacion_minutos,
         )
 
@@ -629,6 +634,12 @@ async def _procesar_lectura_mqtt(
         )
         await session.commit()
 
+    # HU-53 (D2): el aviso por correo se ENCOLA después del COMMIT; el envío lo
+    # hace el despachador fuera de este manejador, así que un proveedor lento o
+    # caído no retrasa el acuse ni la lectura siguiente.
+    if notificaciones is not None:
+        notificaciones.encolar_todos(use_case.avisos_pendientes)
+
     # HU-07 Escenario 1: el acuse lógico se publica DESPUÉS del COMMIT, nunca
     # antes ni en su lugar. Es lo único que autoriza al firmware a borrar el
     # bloque correspondiente de LittleFS.
@@ -670,11 +681,26 @@ async def _procesar_lectura_mqtt(
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     app.state.sse_broadcaster = SSEBroadcaster()
+    # HU-53: UNA instancia por proceso (D1) — la cola, el worker y los
+    # reintentos de los avisos por correo viven aquí, no en cada lectura.
+    app.state.notificaciones = DespachadorNotificaciones(settings, _session_factory)
+    if settings.environment != "test":
+        await app.state.notificaciones.iniciar()
+    try:
+        async with _ingesta_mqtt(app, settings):
+            yield
+    finally:
+        await app.state.notificaciones.detener()
 
+
+@contextlib.asynccontextmanager
+async def _ingesta_mqtt(app: FastAPI, settings) -> AsyncIterator[None]:
     if settings.mqtt_enabled and settings.environment != "test":
 
         async def manejador(client: aiomqtt.Client, message: aiomqtt.Message) -> None:
-            await _procesar_mensaje_mqtt(message, app.state.sse_broadcaster, client)
+            await _procesar_mensaje_mqtt(
+                message, app.state.sse_broadcaster, client, app.state.notificaciones
+            )
 
         # La conexión y sus reintentos viven dentro de la tarea consumidora, así
         # que el arranque nunca se bloquea ni se cae por un broker inaccesible.

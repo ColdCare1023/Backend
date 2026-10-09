@@ -61,20 +61,14 @@ class _RepoEnMemoria(IAlertaRepository):
         return True
 
 
-class _NotificadorEspia:
-    def __init__(self) -> None:
-        self.avisos: list[tuple[str, float | None]] = []
-
-    async def notificar_excursion_critica(
-        self, device_id, temperatura, timestamp, email_destino=None, telefono_destino=None
-    ):
-        self.avisos.append((device_id, temperatura))
+def _avisos(use_case: GenerarAlertaUseCase) -> list[tuple[str, float | None]]:
+    """HU-53: el caso de uso ya no envía; deja avisos para después del COMMIT."""
+    return [(a.device_id, a.temperatura) for a in use_case.avisos_pendientes]
 
 
 @pytest.mark.asyncio
 async def test_apertura_de_episodio_critico_dispara_un_aviso():
-    notificador = _NotificadorEspia()
-    use_case = GenerarAlertaUseCase(_RepoEnMemoria(), notificador)
+    use_case = GenerarAlertaUseCase(_RepoEnMemoria())
 
     await use_case.execute(
         reading_id=uuid4(),
@@ -84,14 +78,13 @@ async def test_apertura_de_episodio_critico_dispara_un_aviso():
         temperatura_interna=14.5,
     )
 
-    assert notificador.avisos == [(DEVICE_ID, 14.5)]
+    assert _avisos(use_case) == [(DEVICE_ID, 14.5)]
 
 
 @pytest.mark.asyncio
 async def test_lecturas_sucesivas_del_mismo_episodio_no_reavisan():
-    notificador = _NotificadorEspia()
     repo = _RepoEnMemoria()
-    use_case = GenerarAlertaUseCase(repo, notificador)
+    use_case = GenerarAlertaUseCase(repo)
 
     for minuto in range(6):
         await use_case.execute(
@@ -102,7 +95,7 @@ async def test_lecturas_sucesivas_del_mismo_episodio_no_reavisan():
             temperatura_interna=14.5,
         )
 
-    assert len(notificador.avisos) == 1
+    assert len(_avisos(use_case)) == 1
     assert len(repo.filas) == 1
 
 
@@ -110,8 +103,7 @@ async def test_lecturas_sucesivas_del_mismo_episodio_no_reavisan():
 async def test_riesgo_preventivo_no_dispara_aviso_externo():
     """Solo la excursión crítica justifica interrumpir al responsable fuera de
     la aplicación; el riesgo preventivo se ve en el dashboard."""
-    notificador = _NotificadorEspia()
-    use_case = GenerarAlertaUseCase(_RepoEnMemoria(), notificador)
+    use_case = GenerarAlertaUseCase(_RepoEnMemoria())
 
     await use_case.execute(
         reading_id=uuid4(),
@@ -121,13 +113,12 @@ async def test_riesgo_preventivo_no_dispara_aviso_externo():
         temperatura_interna=8.4,
     )
 
-    assert notificador.avisos == []
+    assert _avisos(use_case) == []
 
 
 @pytest.mark.asyncio
 async def test_escalar_de_preventivo_a_critico_si_avisa():
-    notificador = _NotificadorEspia()
-    use_case = GenerarAlertaUseCase(_RepoEnMemoria(), notificador)
+    use_case = GenerarAlertaUseCase(_RepoEnMemoria())
 
     await use_case.execute(
         reading_id=uuid4(), device_id=DEVICE_ID, nivel_riesgo=NivelRiesgo.RIESGO_PREVENTIVO,
@@ -138,12 +129,12 @@ async def test_escalar_de_preventivo_a_critico_si_avisa():
         timestamp=BASE + timedelta(minutes=1), temperatura_interna=14.9,
     )
 
-    assert notificador.avisos == [(DEVICE_ID, 14.9)]
+    assert _avisos(use_case) == [(DEVICE_ID, 14.9)]
 
 
 @pytest.mark.asyncio
-async def test_sin_notificador_el_pipeline_funciona_igual():
-    """El servicio es opcional: sin él, la alerta se genera exactamente igual."""
+async def test_la_alerta_se_genera_aunque_nadie_despache_el_aviso():
+    """Sin despachador (pruebas, REST sin lifespan) la alerta se genera igual."""
     repo = _RepoEnMemoria()
     use_case = GenerarAlertaUseCase(repo)
 
@@ -157,3 +148,37 @@ async def test_sin_notificador_el_pipeline_funciona_igual():
 
     assert alerta is not None
     assert len(repo.filas) == 1
+
+
+@pytest.mark.asyncio
+async def test_reapertura_dentro_de_la_ventana_conserva_el_id_de_la_alerta():
+    """HU-53/P3: la reapertura deja un aviso con el MISMO id de alerta; el
+    despachador lo descarta porque ese episodio ya fue notificado."""
+    repo = _RepoEnMemoria()
+    use_case = GenerarAlertaUseCase(repo)
+    await use_case.execute(
+        reading_id=uuid4(), device_id=DEVICE_ID, nivel_riesgo=NivelRiesgo.EXCURSION_CRITICA,
+        timestamp=BASE, temperatura_interna=12.0,
+    )
+    await use_case.execute(
+        reading_id=uuid4(), device_id=DEVICE_ID, nivel_riesgo=NivelRiesgo.NORMAL,
+        timestamp=BASE + timedelta(minutes=2), temperatura_interna=5.0,
+    )
+    await use_case.execute(
+        reading_id=uuid4(), device_id=DEVICE_ID, nivel_riesgo=NivelRiesgo.EXCURSION_CRITICA,
+        timestamp=BASE + timedelta(minutes=5), temperatura_interna=12.5,
+    )
+    ids = {a.alerta_id for a in use_case.avisos_pendientes}
+    assert len(repo.filas) == 1
+    assert ids == {repo.filas[0].id}
+
+
+@pytest.mark.asyncio
+async def test_lectura_recibida_tarde_marca_el_aviso_como_diferido():
+    use_case = GenerarAlertaUseCase(_RepoEnMemoria())
+    await use_case.execute(
+        reading_id=uuid4(), device_id=DEVICE_ID, nivel_riesgo=NivelRiesgo.EXCURSION_CRITICA,
+        timestamp=BASE, temperatura_interna=12.0,
+        received_at=BASE + timedelta(minutes=20), time_quality="synced",
+    )
+    assert use_case.avisos_pendientes[0].diferida
