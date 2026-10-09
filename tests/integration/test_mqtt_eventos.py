@@ -81,7 +81,8 @@ async def test_lwt_offline_marca_dispositivo_y_notifica(sesion_con_device):
     await _procesar_mensaje_mqtt(mensaje, broadcaster)
 
     assert (await _estado_device(sesion_con_device))["estado_conectividad"] == "offline"
-    assert [tipo for _, tipo in broadcaster.publicados] == ["desconexion"]
+    # HU-13: tras el evento crudo, el cambio normalizado `conectividad` (D3).
+    assert [tipo for _, tipo in broadcaster.publicados] == ["desconexion", "conectividad"]
     acciones = [e["accion"] for e in await _auditoria(sesion_con_device)]
     assert "DISPOSITIVO_OFFLINE" in acciones
 
@@ -97,7 +98,9 @@ async def test_lwt_online_restaura_estado(sesion_con_device):
     )
 
     assert (await _estado_device(sesion_con_device))["estado_conectividad"] == "online"
-    assert [tipo for _, tipo in broadcaster.publicados] == ["desconexion", "reconexion"]
+    assert [tipo for _, tipo in broadcaster.publicados] == [
+        "desconexion", "conectividad", "reconexion", "conectividad",
+    ]
 
 
 @pytest.mark.asyncio
@@ -288,4 +291,5 @@ async def test_las_lecturas_siguen_llegando_a_su_manejador(sesion_con_device):
     # el tipo de evento SSE es "inferencia_omitida", no "lectura". El punto
     # de esta prueba (que el despacho por tópico siga entregando lecturas al
     # manejador) sigue cumplido: el evento llegó.
-    assert [tipo for _, tipo in broadcaster.publicados] == ["inferencia_omitida"]
+    # HU-13: el dispositivo figuraba offline; su primera lectura lo pasa a online.
+    assert [tipo for _, tipo in broadcaster.publicados] == ["inferencia_omitida", "conectividad"]

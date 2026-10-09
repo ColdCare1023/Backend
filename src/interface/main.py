@@ -11,6 +11,10 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import ValidationError
 from sqlalchemy import text
 
+from src.application.use_cases.actualizar_conectividad import (
+    ActualizarConectividadUseCase,
+    CambioConectividad,
+)
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.clasificar_riesgo_termico import ClasificarRiesgoTermicoUseCase
 from src.application.use_cases.registrar_lectura_termica import RegistrarLecturaTermicaUseCase
@@ -213,30 +217,40 @@ async def _procesar_evento_v1(
             return
 
         tipo = _EVENTOS_V1.get(evento.event_type)
-        if tipo is TipoEventoDispositivo.LWT_OFFLINE:
-            await device_repository.actualizar_estado_conectividad(evento.device_id, "offline")
-        elif tipo is TipoEventoDispositivo.LWT_ONLINE:
-            await device_repository.actualizar_estado_conectividad(evento.device_id, "online")
-        accion = {
-            TipoEventoDispositivo.LWT_OFFLINE: "DISPOSITIVO_OFFLINE",
-            TipoEventoDispositivo.LWT_ONLINE: "DISPOSITIVO_ONLINE",
-        }.get(tipo, (tipo.value if tipo else evento.event_type).upper())
         detalle: dict = {"tipo_evento": evento.event_type, "boot_id": evento.boot_id}
         if evento.detail:
             detalle["detalle"] = evento.detail
         if evento.occurred_at:
             detalle["occurred_at"] = evento.occurred_at.isoformat()
-        await auditoria.execute(
-            usuario_id=None,
-            accion=accion,
-            recurso=f"dispositivos/{evento.device_id}",
-            detalle=detalle,
-            ip_origen=None,
-            device_id=evento.device_id,
-        )
+        cambio = None
+        if tipo in (TipoEventoDispositivo.LWT_OFFLINE, TipoEventoDispositivo.LWT_ONLINE):
+            # HU-13: reglas de transición (incluido el LWT obsoleto) y su
+            # auditoría viven en el caso de uso. `desde` es el instante en que
+            # el backend observa el cambio: la hora del nodo puede no estar
+            # sincronizada y el LWT no trae hora.
+            cambio = await ActualizarConectividadUseCase(device_repository, auditoria).execute(
+                evento.device_id,
+                "lwt" if tipo is TipoEventoDispositivo.LWT_OFFLINE else "online",
+                boot_id=evento.boot_id,
+                detalle=detalle,
+            )
+            if cambio is None:
+                await session.commit()
+                return
+        else:
+            await auditoria.execute(
+                usuario_id=None,
+                accion=(tipo.value if tipo else evento.event_type).upper(),
+                recurso=f"dispositivos/{evento.device_id}",
+                detalle=detalle,
+                ip_origen=None,
+                device_id=evento.device_id,
+            )
         await session.commit()
 
     await broadcaster.publicar(sse, evento.event_type)
+    if cambio is not None:
+        await broadcaster.publicar(cambio.como_evento_sse(), "conectividad")
 
 
 async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadcaster) -> None:
@@ -288,13 +302,16 @@ async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadc
         if evento.detalle:
             detalle_auditoria["detalle"] = evento.detalle
 
+        cambio = None
         match evento.tipo_evento:
-            case TipoEventoDispositivo.LWT_OFFLINE:
-                await device_repository.actualizar_estado_conectividad(evento.device_id, "offline")
-                accion, tipo_sse = "DISPOSITIVO_OFFLINE", "desconexion"
-            case TipoEventoDispositivo.LWT_ONLINE:
-                await device_repository.actualizar_estado_conectividad(evento.device_id, "online")
-                accion, tipo_sse = "DISPOSITIVO_ONLINE", "reconexion"
+            case TipoEventoDispositivo.LWT_OFFLINE | TipoEventoDispositivo.LWT_ONLINE:
+                # HU-13: firmware anterior al contrato v1.0 — sin boot_id, así
+                # que el LWT se aplica sin la comparación de arranques.
+                es_offline = evento.tipo_evento is TipoEventoDispositivo.LWT_OFFLINE
+                cambio = await ActualizarConectividadUseCase(device_repository, auditoria).execute(
+                    evento.device_id, "lwt" if es_offline else "online", detalle=detalle_auditoria
+                )
+                accion, tipo_sse = None, "desconexion" if es_offline else "reconexion"
             case TipoEventoDispositivo.ERROR_SENSOR:
                 accion, tipo_sse = "ERROR_SENSOR", "fallo_sensor"
             case TipoEventoDispositivo.BUFFER_SATURADO:
@@ -324,14 +341,15 @@ async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadc
                     detalle_auditoria["firmware_version"] = evento.firmware_version
                 accion, tipo_sse = "FIRMWARE_ACTUALIZADO", "firmware_actualizado"
 
-        await auditoria.execute(
-            usuario_id=None,
-            accion=accion,
-            recurso=f"dispositivos/{evento.device_id}",
-            detalle=detalle_auditoria,
-            ip_origen=None,
-            device_id=evento.device_id,
-        )
+        if accion is not None:
+            await auditoria.execute(
+                usuario_id=None,
+                accion=accion,
+                recurso=f"dispositivos/{evento.device_id}",
+                detalle=detalle_auditoria,
+                ip_origen=None,
+                device_id=evento.device_id,
+            )
         await session.commit()
 
     await broadcaster.publicar(
@@ -344,6 +362,8 @@ async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadc
         },
         tipo_sse,
     )
+    if cambio is not None:
+        await broadcaster.publicar(cambio.como_evento_sse(), "conectividad")
 
 
 async def _rechazar_payload_invalido(
@@ -594,6 +614,19 @@ async def _procesar_lectura_mqtt(
             await lectura_repository.reanclar_no_sincronizadas(
                 lectura_guardada.device_id, lectura_guardada.boot_id
             )
+        # HU-13 criterio 4: un nodo que envía telemetría está conectado. Corrige
+        # un LWT tardío del mismo arranque (reconexión antes del keepalive).
+        cambio_conectividad: CambioConectividad | None = await ActualizarConectividadUseCase(
+            SQLAlchemyDeviceRepository(session),
+            AuditarAccionCriticaUseCase(
+                SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+            ),
+        ).execute(
+            lectura_guardada.device_id,
+            "telemetria",
+            boot_id=lectura_guardada.boot_id,
+            detalle={"seq_no": lectura_guardada.seq_no},
+        )
         await session.commit()
 
     # HU-07 Escenario 1: el acuse lógico se publica DESPUÉS del COMMIT, nunca
@@ -628,6 +661,9 @@ async def _procesar_lectura_mqtt(
             },
             tipo_episodio,
         )
+
+    if cambio_conectividad is not None:
+        await broadcaster.publicar(cambio_conectividad.como_evento_sse(), "conectividad")
 
 
 @contextlib.asynccontextmanager

@@ -123,7 +123,8 @@ class EventoV1(BaseModel):
         "conmutacion_respaldo", "suministro_restablecido", "respaldo_autonomia_critica",
         "estado_nodo",
     ]
-    # El LWT lo publica el broker: no lleva boot_id, hora ni detalle.
+    # El LWT lo publica el broker: no lleva hora ni detalle. Desde HU-13 el
+    # firmware incluye el boot_id de la sesión; uno anterior se acepta sin él.
     boot_id: int | None = Field(default=None, ge=0, le=UINT32)
     occurred_at: datetime | None = None
     time_quality: Literal["sntp_synced", "sntp_backfilled", "unsynced"] | None = None

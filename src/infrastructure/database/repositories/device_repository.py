@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import select
@@ -14,6 +14,8 @@ def _to_dict(model: DeviceModel) -> dict:
         "nombre": model.nombre,
         "ubicacion": model.ubicacion,
         "estado_conectividad": model.estado_conectividad,
+        "conectividad_cambiada_en": model.conectividad_cambiada_en,
+        "conectividad_boot_id": model.conectividad_boot_id,
         "created_at": model.created_at,
         "activo": model.activo,
         "firmware_version": model.firmware_version,
@@ -76,13 +78,24 @@ class SQLAlchemyDeviceRepository(IDeviceRepository):
             await self._session.refresh(model)
         return _to_dict(model)
 
-    async def actualizar_estado_conectividad(self, device_id: str, estado: str) -> None:
+    async def actualizar_estado_conectividad(
+        self,
+        device_id: str,
+        estado: str,
+        boot_id: int | None = None,
+        momento: datetime | None = None,
+    ) -> None:
+        """HU-13: `boot_id` solo se actualiza si viene (lo aporta un `online` o
+        la telemetría); un LWT conserva el arranque de la sesión que se cayó."""
         model = await self._session.get(DeviceModel, device_id)
         if model is None:
             model = DeviceModel(id=device_id, estado_conectividad=estado)
             self._session.add(model)
         else:
             model.estado_conectividad = estado
+        model.conectividad_cambiada_en = momento or datetime.now(tz=timezone.utc)
+        if boot_id is not None:
+            model.conectividad_boot_id = boot_id
         await self._session.flush()
 
     async def listar(self) -> list[dict]:

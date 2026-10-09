@@ -27,7 +27,13 @@ class IDeviceRepository(ABC):
     async def obtener_o_crear(self, device_id: str) -> dict: ...
 
     @abstractmethod
-    async def actualizar_estado_conectividad(self, device_id: str, estado: str) -> None: ...
+    async def actualizar_estado_conectividad(
+        self,
+        device_id: str,
+        estado: str,
+        boot_id: int | None = None,
+        momento: datetime | None = None,
+    ) -> None: ...
 
     @abstractmethod
     async def listar(self) -> list[dict]: ...

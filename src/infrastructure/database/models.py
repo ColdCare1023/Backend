@@ -50,6 +50,10 @@ class DeviceModel(Base):
     nombre: Mapped[str | None] = mapped_column(String(120), nullable=True)
     ubicacion: Mapped[str | None] = mapped_column(String(200), nullable=True)
     estado_conectividad: Mapped[str] = mapped_column(String(20), default="offline")
+    # HU-13 (migración 0017): desde cuándo rige el estado actual y con qué
+    # arranque del nodo se aplicó el último `online` (descarta LWT obsoletos).
+    conectividad_cambiada_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    conectividad_boot_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = _created_at_column()
 
     # HU-43: ciclo de vida (baja/reemplazo) sin borrar el histórico.

@@ -292,6 +292,8 @@ class DispositivoResponse(BaseModel):
     nombre: str | None
     ubicacion: str | None
     estado_conectividad: str
+    # HU-13: desde cuándo rige `estado_conectividad` («Desconectado desde…»).
+    conectividad_cambiada_en: datetime | None = None
     activo: bool
     firmware_version: str
     motivo_baja: str | None = None

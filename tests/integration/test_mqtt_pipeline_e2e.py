@@ -208,7 +208,8 @@ async def test_duracion_apertura_llega_al_evento_sse(entorno):
         broadcaster,
     )
 
-    assert len(broadcaster.publicados) == 1
+    # HU-13: el segundo evento es el cambio de conectividad por telemetría.
+    assert [tipo for _, tipo in broadcaster.publicados][1:] == ["conectividad"]
     evento, _tipo = broadcaster.publicados[0]
     assert evento["apertura_refrigerador"] is True
     assert evento["duracion_apertura_segundos"] == 185
