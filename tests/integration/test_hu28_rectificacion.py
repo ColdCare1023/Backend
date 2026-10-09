@@ -78,6 +78,23 @@ async def test_la_original_queda_intacta_y_la_rectificacion_la_referencia(
     assert fila.motivo_rectificacion is None
 
 
+@pytest.mark.asyncio
+async def test_los_recursos_auditados_caben_en_la_columna(client, token_tecnico, db_session_factory):
+    """audit_logs.recurso es VARCHAR(100). SQLite no lo valida, PostgreSQL sí:
+    un recurso más largo convertía cada acción correctiva en un 500."""
+    from sqlalchemy import select
+
+    from src.infrastructure.database.models import AuditLogModel
+
+    alerta_id = _crear_alerta(client, token_tecnico)
+    accion = _accion(client, token_tecnico, alerta_id)
+    _rectificar(client, token_tecnico, accion["id"])
+    async with db_session_factory() as session:
+        recursos = (await session.execute(select(AuditLogModel.recurso))).scalars().all()
+    assert recursos
+    assert max(len(r) for r in recursos) <= AuditLogModel.__table__.c.recurso.type.length
+
+
 def test_solo_se_rectifica_la_version_vigente(client, token_tecnico):
     alerta_id = _crear_alerta(client, token_tecnico)
     original = _accion(client, token_tecnico, alerta_id)

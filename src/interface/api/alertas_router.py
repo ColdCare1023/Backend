@@ -175,7 +175,10 @@ async def registrar_accion_correctiva(
     ).execute(
         usuario_id=usuario.id,
         accion="REGISTRAR_ACCION_CORRECTIVA",
-        recurso=f"alertas/{alerta_id}/acciones-correctivas/{accion.id}",
+        # audit_logs.recurso es VARCHAR(100): ".../acciones-correctivas/<uuid>"
+        # medía 102 y en PostgreSQL toda acción correctiva fallaba con 500
+        # (SQLite, el de las pruebas, no valida longitudes).
+        recurso=f"alertas/{alerta_id}/acciones/{accion.id}",
         detalle={"descripcion": body.descripcion},
         ip_origen=request.client.host if request.client else None,
         device_id=alerta_para_auditoria.device_id if alerta_para_auditoria else None,
