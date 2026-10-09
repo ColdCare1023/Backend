@@ -79,6 +79,13 @@ def build_client(settings: Settings) -> aiomqtt.Client:
         identifier=settings.mqtt_client_id,
         tls_context=build_ssl_context(settings.mqtt_tls_enabled, settings.mqtt_ca_file),
         keepalive=60,
+        # HU-13 criterio 5 / HU-12: sesión PERSISTENTE. Con sesión limpia (el
+        # valor por defecto) el broker descarta la suscripción al caer el
+        # backend, y un LWT —o lecturas QoS 1— publicados mientras tanto se
+        # pierden: el nodo apagado seguía figurando «online» (probado con el
+        # nodo real el 8-oct-2026). Exige `client_id` fijo y una sola instancia
+        # (README, «Topología»).
+        clean_session=False,
     )
 
 

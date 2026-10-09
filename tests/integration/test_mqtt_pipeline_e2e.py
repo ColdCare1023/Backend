@@ -446,10 +446,23 @@ def test_los_parametros_de_build_client_existen_en_la_version_instalada():
         "identifier",
         "tls_context",
         "keepalive",
+        "clean_session",
     }
 
     faltantes = usados - set(firma.parameters)
     assert not faltantes, f"aiomqtt ya no acepta: {sorted(faltantes)}"
+
+
+def test_el_backend_usa_sesion_mqtt_persistente(monkeypatch):
+    """HU-13 criterio 5: con sesión limpia, un LWT publicado con el backend
+    caído se perdía y el nodo apagado seguía «online»."""
+    from src.infrastructure.config import get_settings
+
+    capturados = {}
+    monkeypatch.setattr(mqtt_client.aiomqtt, "Client", lambda **kw: capturados.update(kw))
+    mqtt_client.build_client(get_settings())
+    assert capturados["clean_session"] is False
+    assert capturados["identifier"]  # la sesión persistente exige client_id fijo
 
 
 # ── Rechazos que deben quedar auditados ───────────────────────────────────
