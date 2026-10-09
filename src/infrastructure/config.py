@@ -2,10 +2,22 @@ import warnings
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _SECRETO_POR_DEFECTO = "clave_secreta_larga_y_aleatoria_cambiar_en_produccion"
+
+_PREFIJOS_POSTGRES_SIN_DRIVER = ("postgres://", "postgresql://")
+
+
+def normalizar_database_url(url: str) -> str:
+    for prefijo in _PREFIJOS_POSTGRES_SIN_DRIVER:
+        if url.startswith(prefijo):
+            url = "postgresql+asyncpg://" + url[len(prefijo):]
+            break
+    if url.startswith("postgresql+asyncpg://"):
+        url = url.replace("sslmode=", "ssl=")
+    return url
 
 # RFC 7518 §3.2: la clave HMAC de HS256 debe tener al menos el tamaño de la
 # salida de la función hash (32 bytes). Con una clave más corta la firma es
@@ -25,6 +37,15 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     database_url: str = "postgresql+asyncpg://user:pass@localhost:5432/farmacia_db"
+
+    @field_validator("database_url")
+    @classmethod
+    def _normalizar_database_url(cls, valor: str) -> str:
+        """HU-56: Railway (y Heroku, Render…) entregan `postgres://` o
+        `postgresql://`, que SQLAlchemy resolvería con psycopg2 —no instalado—
+        en vez de asyncpg. asyncpg tampoco entiende `sslmode`, sino `ssl`.
+        Normalizar aquí cubre a la vez la app y Alembic (env.py lee Settings)."""
+        return normalizar_database_url(valor)
 
     jwt_secret_key: str = _SECRETO_POR_DEFECTO
     jwt_algorithm: str = "HS256"

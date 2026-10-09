@@ -2,6 +2,8 @@
 #   ./scripts/init.sh <IP_LAN_de_la_PC>     (una vez: certificados + secretos)
 #   docker compose up -d                    (postgres + emqx)
 #   docker compose --profile backend up -d --build   (además, el backend)
+#   docker compose --profile cloud-like up -d --build  (backend con los validadores
+#                                                       de producción, como en Railway)
 name: thermotrace
 
 services:
@@ -71,7 +73,7 @@ services:
     profiles: ["backend"]
     build:
       context: ..
-      dockerfile: infra-local/backend/Dockerfile
+      dockerfile: Dockerfile
     depends_on:
       postgres: { condition: service_healthy }
       emqx: { condition: service_healthy }
@@ -95,6 +97,29 @@ services:
       - "127.0.0.1:8000:8000"
     volumes:
       - ./certs/ca.crt:/certs/ca.crt:ro
+
+  # HU-56: mismo Dockerfile y mismos validadores que Railway (ENVIRONMENT=production),
+  # contra el PostgreSQL local. DATABASE_URL va con el esquema `postgresql://` que
+  # entrega Railway para ejercitar la normalización a asyncpg. Sin MQTT: aquí solo
+  # se comprueba que la configuración de producción arranca y responde.
+  backend-cloud:
+    profiles: ["cloud-like"]
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      ENVIRONMENT: production
+      PORT: "8001"
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      MQTT_ENABLED: "false"
+      DEVICE_REGISTRY_ESTRICTO: "true"
+      ALLOWED_HOSTS: '["localhost","127.0.0.1","healthcheck.railway.app"]'
+      CORS_ORIGINS: '["https://coldcare.example"]'
+    ports:
+      - "127.0.0.1:8001:8001"
 
 volumes:
   pgdata:

@@ -5,16 +5,18 @@ from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
 import aiomqtt
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import ValidationError
+from sqlalchemy import text
 
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.clasificar_riesgo_termico import ClasificarRiesgoTermicoUseCase
 from src.application.use_cases.registrar_lectura_termica import RegistrarLecturaTermicaUseCase
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.exceptions import DispositivoNoAutorizadoError, LecturaInvalidaError
+from src.domain.value_objects.rol import Rol
 from src.infrastructure.ai.random_forest_service import get_random_forest_service
 from src.infrastructure.config import get_settings
 from src.infrastructure.database.repositories.alerta_repository import SQLAlchemyAlertaRepository
@@ -28,7 +30,7 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
 )
 from src.infrastructure.database.session import _session_factory
 from src.infrastructure.mqtt import contrato_v1
-from src.infrastructure.mqtt.mqtt_client import mqtt_session
+from src.infrastructure.mqtt.mqtt_client import ESTADO_CONEXION, mqtt_session
 from src.infrastructure.mqtt.payload_schema import (
     MAX_BYTES_PAYLOAD_MQTT,
     EventoDispositivoPayload,
@@ -43,6 +45,7 @@ from src.interface.api.api_protection import instalar_proteccion_api
 from src.interface.api.auditoria_router import router as auditoria_router
 from src.interface.api.auth_router import router as auth_router
 from src.interface.api.checklist_router import router as checklist_router
+from src.interface.api.deps import DbSessionDep, require_roles
 from src.interface.api.dispositivos_router import router as dispositivos_router
 from src.interface.api.firmware_router import router as firmware_router
 from src.interface.api.ia_router import router as ia_router
@@ -713,7 +716,47 @@ def create_app() -> FastAPI:
 
     @app.get("/health", tags=["health"])
     async def health() -> dict:
+        # Liveness: NO consulta la base de datos a propósito. Si PostgreSQL cae,
+        # Railway reiniciaría el backend en bucle sin arreglar nada; el estado de
+        # las dependencias está en /health/detalle.
         return {"status": "ok", "timestamp": datetime.now(tz=timezone.utc).isoformat()}
+
+    @app.get("/health/detalle", tags=["health"])
+    async def health_detalle(
+        request: Request,
+        session: DbSessionDep,
+        _admin=Depends(require_roles(Rol.ADMINISTRADOR)),
+    ) -> dict:
+        """HU-56: estado de las dependencias para el operador (solo administrador)."""
+        try:
+            await session.execute(text("SELECT 1"))
+            db = "ok"
+        except Exception as exc:  # pragma: no cover - depende de una BD caída
+            db = f"error: {type(exc).__name__}"
+        try:
+            revision = (await session.execute(text("SELECT version_num FROM alembic_version"))).scalar()
+        except Exception:
+            # Sin tabla alembic_version (BD creada con create_all en pruebas).
+            await session.rollback()
+            revision = None
+        tarea_mqtt = getattr(request.app.state, "mqtt", None)
+        despachador = getattr(request.app.state, "notificaciones", None)
+        return {
+            "status": "ok" if db == "ok" else "degradado",
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            "db": db,
+            "alembic_revision": revision,
+            "mqtt": {
+                "habilitado": tarea_mqtt is not None,
+                "tarea_activa": tarea_mqtt is not None and not tarea_mqtt.done(),
+                "conectado": ESTADO_CONEXION.conectado,
+                "desde": ESTADO_CONEXION.desde.isoformat() if ESTADO_CONEXION.desde else None,
+            },
+            "notificaciones": {
+                "worker_activo": despachador is not None and despachador.activo,
+                "cola_pendiente": despachador.pendientes if despachador is not None else 0,
+            },
+        }
 
     return app
 

@@ -1,0 +1,24 @@
+.venv
+.venv*/
+.git
+.github
+.idea
+.ruff_cache
+.pytest_cache
+__pycache__
+*.pyc
+*.sqlite
+*.sqlite3
+*.db
+.coverage
+htmlcov
+.env
+tests
+docs
+contrato
+infra-local
+banco_mqtt_local
+simulacion_excursiones
+# Solo random_forest_termico.pkl se carga en ejecución; las demás versiones del
+# modelo son artefactos de entrenamiento (≈17 MB que no necesita la imagen).
+src/infrastructure/ai/models/*.joblib
