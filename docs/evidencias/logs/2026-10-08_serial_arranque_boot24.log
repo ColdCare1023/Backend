@@ -1,0 +1,4 @@
+20:42:02 [Red] 1 lectura(s) con acuse logico; quedan 0.
+20:42:02 [Reloj] SNTP sincronizado: 2026-10-09T01:42:00Z
+20:42:25 [CAP] boot=24 seq=2 up=30 t=2026-10-09T01:42:26Z tq=sntp ds=25.88 ds_f=- sht=26.00 hr=72.52 sht_f=- door=1 door_s=30 pwr=NA sim=0 g=OK q=1 ocup=0 heap=173832
+20:42:25 [Red] 1 lectura(s) con acuse logico; quedan 0.
