@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from src.domain.entities.usuario import Usuario
-from src.domain.exceptions import DomainError, RecursoNoEncontradoError
+from src.domain.exceptions import DomainError, OperacionRbacRechazadaError, RecursoNoEncontradoError
 from src.domain.repositories.i_usuario_repository import IUsuarioRepository
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.security.password_hasher import hash_password
@@ -31,6 +31,15 @@ class ListarUsuariosUseCase:
         return await self._usuario_repository.listar()
 
 
+async def _exigir_otro_administrador(repositorio: IUsuarioRepository) -> None:
+    """HU-41: quitar o desactivar a un administrador exige que quede otro activo."""
+    if await repositorio.contar_administradores_activos() <= 1:
+        raise OperacionRbacRechazadaError(
+            "Es el último administrador activo: el sistema quedaría sin administración.",
+            "ultimo_admin",
+        )
+
+
 class CambiarRolUsuarioUseCase:
     """HU-41: asignar/modificar el rol de un usuario existente.
 
@@ -42,12 +51,18 @@ class CambiarRolUsuarioUseCase:
     def __init__(self, usuario_repository: IUsuarioRepository) -> None:
         self._usuario_repository = usuario_repository
 
-    async def execute(self, usuario_id: UUID, nuevo_rol: Rol) -> Usuario:
+    async def execute(self, usuario_id: UUID, nuevo_rol: Rol, admin_id: UUID | None = None) -> Usuario:
         usuario = await self._usuario_repository.obtener_por_id(usuario_id)
         if usuario is None:
             raise RecursoNoEncontradoError(f"Usuario {usuario_id} no encontrado")
         if not usuario.is_active:
             raise DomainError("No se puede cambiar el rol de un usuario desactivado")
+        if admin_id is not None and usuario_id == admin_id:
+            raise OperacionRbacRechazadaError(
+                "Un administrador no puede cambiar su propio rol.", "auto_modificacion"
+            )
+        if usuario.rol == Rol.ADMINISTRADOR and nuevo_rol != Rol.ADMINISTRADOR:
+            await _exigir_otro_administrador(self._usuario_repository)
         usuario.rol = nuevo_rol
         return await self._usuario_repository.actualizar(usuario)
 
@@ -72,6 +87,12 @@ class DesactivarUsuarioUseCase:
             raise RecursoNoEncontradoError(f"Usuario {usuario_id} no encontrado")
         if not usuario.is_active:
             raise DomainError("El usuario ya está desactivado")
+        if usuario_id == admin_id:
+            raise OperacionRbacRechazadaError(
+                "Un administrador no puede desactivarse a sí mismo.", "auto_modificacion"
+            )
+        if usuario.rol == Rol.ADMINISTRADOR:
+            await _exigir_otro_administrador(self._usuario_repository)
 
         usuario.is_active = False
         usuario.motivo_desactivacion = motivo

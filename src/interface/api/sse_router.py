@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import AsyncGenerator
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -10,9 +11,12 @@ from src.interface.api.deps import JWTHandlerDep
 router = APIRouter(prefix="/api/sse", tags=["sse"])
 
 
-async def _event_stream(request: Request, token_padre_jti: str | None = None) -> AsyncGenerator[str, None]:
+async def _event_stream(
+    request: Request, token_padre_jti: str | None = None, usuario_id: UUID | None = None
+) -> AsyncGenerator[str, None]:
     broadcaster = request.app.state.sse_broadcaster
     revocacion = request.app.state.token_revocation
+    desactivados = getattr(request.app.state, "usuarios_desactivados", set())
     queue = broadcaster.subscribe()
     try:
         # Chunk inicial: fuerza el envío de headers a través de proxies y
@@ -27,6 +31,9 @@ async def _event_stream(request: Request, token_padre_jti: str | None = None) ->
             # navegador se cerrase, contradiciendo la revocación de JWT que el
             # sistema declara como control de seguridad (RF-17).
             if token_padre_jti is not None and revocacion.contiene(token_padre_jti):
+                break
+            # HU-41: desactivar a un usuario corta también su stream abierto.
+            if usuario_id is not None and usuario_id in desactivados:
                 break
             try:
                 mensaje = await asyncio.wait_for(queue.get(), timeout=15.0)
@@ -71,6 +78,6 @@ async def stream_lecturas(
         )
 
     return StreamingResponse(
-        _event_stream(request, datos_ticket.token_padre_jti),
+        _event_stream(request, datos_ticket.token_padre_jti, datos_ticket.usuario_id),
         media_type="text/event-stream",
     )

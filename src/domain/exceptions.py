@@ -25,3 +25,13 @@ class PermisoDenegadoError(DomainError):
 
 class RecursoNoEncontradoError(DomainError):
     """Se lanza cuando un recurso solicitado no existe."""
+
+
+class OperacionRbacRechazadaError(DomainError):
+    """HU-41: operación de administración de usuarios que dejaría el sistema sin
+    administración (último administrador) o en la que el administrador se
+    modifica a sí mismo. `motivo`: "ultimo_admin" | "auto_modificacion"."""
+
+    def __init__(self, mensaje: str, motivo: str) -> None:
+        super().__init__(mensaje)
+        self.motivo = motivo

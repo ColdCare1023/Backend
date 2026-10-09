@@ -749,6 +749,9 @@ def create_app() -> FastAPI:
     # Revocación de access tokens (logout) y consumo único de tickets SSE.
     app.state.token_revocation = JtiStore(settings.security_state_max_entries)
     app.state.sse_ticket_store = JtiStore(settings.security_state_max_entries)
+    # HU-41 (P9): usuarios desactivados durante la vida de este proceso; cierra
+    # sus streams SSE ya abiertos (un solo proceso por diseño, D1).
+    app.state.usuarios_desactivados = set()
 
     if es_produccion:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)

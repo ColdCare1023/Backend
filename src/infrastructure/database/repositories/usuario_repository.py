@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -106,3 +106,12 @@ class SQLAlchemyUsuarioRepository(IUsuarioRepository):
         await self._session.flush()
         await self._session.refresh(model, attribute_names=["rol"])
         return _to_entity(model)
+
+    async def contar_administradores_activos(self) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(UserModel)
+            .join(RoleModel, UserModel.rol_id == RoleModel.id)
+            .where(RoleModel.nombre == Rol.ADMINISTRADOR.value, UserModel.is_active.is_(True))
+        )
+        return int((await self._session.execute(stmt)).scalar_one())
