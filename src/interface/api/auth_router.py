@@ -1,41 +1,56 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.autenticar_con_google import AutenticarConGoogleUseCase
 from src.application.use_cases.autenticar_usuario import AutenticarUsuarioUseCase
+from src.application.use_cases.gestionar_credenciales import (
+    CambiarPasswordUseCase,
+    RestablecerPasswordConEnlaceUseCase,
+    SolicitarRecuperacionPasswordUseCase,
+)
 from src.application.use_cases.gestionar_privacidad import (
     AceptarPrivacidadUseCase,
     RechazarPrivacidadUseCase,
 )
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
-from src.domain.exceptions import CredencialesInvalidasError
+from src.domain.exceptions import CredencialesInvalidasError, DomainError
 from src.infrastructure.database.repositories.audit_log_repository import (
     SQLAlchemyAuditLogRepository,
 )
 from src.infrastructure.database.repositories.jti_repository import (
     MOTIVO_LOGOUT,
+    MOTIVO_PASSWORD_CAMBIADA,
     MOTIVO_PRIVACIDAD_RECHAZADA,
     SQLAlchemyJtiRepository,
+)
+from src.infrastructure.database.repositories.password_reset_repository import (
+    SQLAlchemyPasswordResetRepository,
 )
 from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
 from src.infrastructure.database.repositories.usuario_repository import SQLAlchemyUsuarioRepository
 from src.infrastructure.security.google_verifier_provider import obtener_verificador_google
+from src.interface.api.api_protection import limitar_por_ip
 from src.interface.api.deps import (
     CurrentUserDep,
     CurrentUserSinPrivacidadDep,
     DbSessionDep,
+    EnviadorCorreoDep,
     JWTHandlerDep,
     SettingsDep,
     oauth2_scheme,
 )
 from src.interface.api.schemas import (
+    CambiarPasswordRequest,
     LoginGoogleRequest,
     PrivacidadResponse,
+    RecuperarPasswordRequest,
+    RestablecerPasswordRequest,
+    SolicitudRecuperacionResponse,
     SSETicketResponse,
     TokenResponse,
 )
@@ -146,6 +161,7 @@ async def login(
     return TokenResponse(
         access_token=resultado.access_token,
         require_privacy_consent=resultado.require_privacy_consent,
+        require_password_change=resultado.require_password_change,
     )
 
 
@@ -221,6 +237,7 @@ async def login_google(
     return TokenResponse(
         access_token=resultado.access_token,
         require_privacy_consent=resultado.require_privacy_consent,
+        require_password_change=resultado.require_password_change,
     )
 
 
@@ -287,7 +304,9 @@ async def rechazar_privacidad(
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
-    usuario: CurrentUserDep,
+    # BE-025: cerrar sesión siempre es posible, aunque falte el consentimiento
+    # o haya una contraseña temporal pendiente de cambio.
+    usuario: CurrentUserSinPrivacidadDep,
     token: Annotated[str, Depends(oauth2_scheme)],
     session: DbSessionDep,
     jwt_handler: JWTHandlerDep,
@@ -309,6 +328,131 @@ async def logout(
         usuario_id=usuario.id,
         accion="LOGOUT",
         recurso="auth/logout",
+        detalle=None,
+        ip_origen=_ip_cliente(request),
+    )
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── BE-025: ciclo de vida de la contraseña ────────────────────────────────
+
+
+@router.post(
+    "/cambiar-password",
+    response_model=TokenResponse,
+    dependencies=[limitar_por_ip("auth_cambiar_password", 10, 300)],
+)
+async def cambiar_password(
+    body: CambiarPasswordRequest,
+    usuario: CurrentUserSinPrivacidadDep,
+    token: Annotated[str, Depends(oauth2_scheme)],
+    session: DbSessionDep,
+    jwt_handler: JWTHandlerDep,
+    request: Request,
+) -> TokenResponse:
+    """Cambia la contraseña del usuario autenticado (también la temporal).
+
+    Invalida todas las sesiones anteriores y devuelve un token nuevo para que
+    quien la cambia no tenga que volver a iniciar sesión."""
+    try:
+        await CambiarPasswordUseCase(
+            SQLAlchemyUsuarioRepository(session), SQLAlchemyPasswordResetRepository(session)
+        ).execute(usuario, body.password_actual, body.password_nueva)
+    except (CredencialesInvalidasError, DomainError) as exc:
+        # 400 y no 401: la sesión es válida; lo incorrecto es el dato enviado.
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    actual = jwt_handler.decodificar_token(token)
+    await SQLAlchemyJtiRepository(session).invalidar(actual.jti, actual.exp, MOTIVO_PASSWORD_CAMBIADA)
+    await AuditarAccionCriticaUseCase(
+        SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+    ).execute(
+        usuario_id=usuario.id,
+        accion="PASSWORD_CAMBIADA",
+        recurso="auth/cambiar-password",
+        detalle=None,
+        ip_origen=_ip_cliente(request),
+    )
+    await session.commit()
+    return TokenResponse(
+        access_token=jwt_handler.crear_token(usuario.id, usuario.email, usuario.rol),
+        require_privacy_consent=usuario.requiere_aceptar_privacidad,
+        require_password_change=False,
+    )
+
+
+_RESPUESTA_RECUPERACION = (
+    "Si el correo corresponde a una cuenta activa, recibirás un enlace para restablecer la contraseña."
+)
+
+
+@router.post(
+    "/recuperar-password",
+    response_model=SolicitudRecuperacionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[limitar_por_ip("auth_recuperar_password", 5, 900)],
+)
+async def recuperar_password(
+    body: RecuperarPasswordRequest,
+    session: DbSessionDep,
+    settings: SettingsDep,
+    enviador: EnviadorCorreoDep,
+    tareas: BackgroundTasks,
+    request: Request,
+) -> SolicitudRecuperacionResponse:
+    """"Olvidé mi contraseña". La respuesta es idéntica exista o no la cuenta
+    (no permite averiguar qué correos están registrados) y el correo se envía
+    después de responder, para que el tiempo tampoco lo delate."""
+    if not enviador.configurado:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="La recuperación por correo no está disponible. Contacte al administrador.",
+        )
+    correo = await SolicitarRecuperacionPasswordUseCase(
+        SQLAlchemyUsuarioRepository(session), SQLAlchemyPasswordResetRepository(session), settings.password_reset_url
+    ).execute(body.email)
+    await AuditarAccionCriticaUseCase(
+        SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+    ).execute(
+        usuario_id=None,
+        accion="RECUPERACION_PASSWORD_SOLICITADA",
+        recurso="auth/recuperar-password",
+        detalle={"email": enmascarar_email(body.email)},
+        ip_origen=_ip_cliente(request),
+    )
+    await session.commit()
+    if correo is not None:
+        tareas.add_task(enviador.enviar, correo.destino, correo.asunto, correo.cuerpo)
+    return SolicitudRecuperacionResponse(detail=_RESPUESTA_RECUPERACION)
+
+
+@router.post(
+    "/restablecer-password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[limitar_por_ip("auth_restablecer_password", 10, 900)],
+)
+async def restablecer_password(
+    body: RestablecerPasswordRequest,
+    session: DbSessionDep,
+    request: Request,
+) -> Response:
+    """Fija una contraseña nueva con el enlace de recuperación (un solo uso,
+    30 minutos). Cierra todas las sesiones abiertas de la cuenta."""
+    try:
+        usuario = await RestablecerPasswordConEnlaceUseCase(
+            SQLAlchemyUsuarioRepository(session), SQLAlchemyPasswordResetRepository(session)
+        ).execute(body.token, body.password_nueva)
+    except CredencialesInvalidasError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    await AuditarAccionCriticaUseCase(
+        SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+    ).execute(
+        usuario_id=usuario.id,
+        accion="PASSWORD_RESTABLECIDA_CON_ENLACE",
+        recurso="auth/restablecer-password",
         detalle=None,
         ip_origen=_ip_cliente(request),
     )

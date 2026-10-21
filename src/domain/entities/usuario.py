@@ -32,6 +32,9 @@ class Usuario:
     anonymized_for_gdpr: bool = False
     # BE-009: los access tokens emitidos antes de este instante no valen.
     tokens_invalidos_antes_de: datetime | None = None
+    # BE-025: contraseña asignada por un administrador (alta, restablecimiento
+    # o reactivación): debe cambiarse antes de usar el sistema.
+    debe_cambiar_password: bool = False
 
     def tiene_permiso(self, roles_permitidos: tuple[Rol, ...]) -> bool:
         return self.rol in roles_permitidos
@@ -57,3 +60,15 @@ class Usuario:
         if emitido_en is None:
             return False
         return _a_utc(emitido_en) >= _a_utc(self.tokens_invalidos_antes_de)
+
+    def establecer_password(
+        self, password_hash: str, cuando: datetime, *, temporal: bool, conservar_token_nuevo: bool = False
+    ) -> None:
+        """BE-025: cambia la contraseña e invalida las sesiones existentes.
+
+        `temporal`: la asignó un administrador y debe cambiarse en el próximo
+        acceso. `conservar_token_nuevo`: el token que se emite en esta misma
+        operación (cambio de contraseña autenticado) sigue valiendo."""
+        self.password_hash = password_hash
+        self.debe_cambiar_password = temporal
+        self.invalidar_sesiones(cuando, conservar_mismo_segundo=conservar_token_nuevo)

@@ -12,6 +12,7 @@ from src.infrastructure.config import Settings, get_settings
 from src.infrastructure.database.repositories.jti_repository import SQLAlchemyJtiRepository
 from src.infrastructure.database.repositories.usuario_repository import SQLAlchemyUsuarioRepository
 from src.infrastructure.database.session import get_session
+from src.infrastructure.notifications.correo_transaccional import EnviadorCorreo
 from src.infrastructure.security.jwt_handler import JWTHandler
 from src.infrastructure.security.rbac import verificar_permiso
 
@@ -87,6 +88,13 @@ async def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Debe aceptar la política de privacidad y consentimiento para acceder a este recurso",
         )
+    # BE-025: una contraseña temporal (asignada por un administrador) solo
+    # sirve para elegir una propia en POST /api/auth/cambiar-password.
+    if usuario.debe_cambiar_password:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Debe cambiar la contraseña temporal antes de continuar",
+        )
     return usuario
 
 
@@ -102,6 +110,14 @@ async def get_current_user_sin_privacidad(
 
 
 CurrentUserSinPrivacidadDep = Annotated[Usuario, Depends(get_current_user_sin_privacidad)]
+
+
+def get_enviador_correo(settings: SettingsDep) -> EnviadorCorreo:
+    """BE-025: sustituible en pruebas (no se sale a la red)."""
+    return EnviadorCorreo(settings)
+
+
+EnviadorCorreoDep = Annotated[EnviadorCorreo, Depends(get_enviador_correo)]
 
 
 def require_roles(*roles_permitidos: Rol) -> Callable[[Usuario], Usuario]:

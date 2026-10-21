@@ -32,6 +32,11 @@ PUBLICOS = {
     # usuario con sesión. BE-011: se autentica con el secreto compartido del
     # broker (cabecera X-Broker-Auth), no vía JWT; sin secreto responde 503.
     ("POST", "/api/dispositivos/autenticar"): "autenticado por secreto del broker, no por JWT",
+    # BE-025: recuperación de contraseña. Quien la usa no tiene sesión; la
+    # solicitud responde igual exista o no la cuenta y el restablecimiento se
+    # autoriza con el token de un solo uso enviado al correo del usuario.
+    ("POST", "/api/auth/recuperar-password"): "punto de entrada de la recuperación de contraseña",
+    ("POST", "/api/auth/restablecer-password"): "autorizado por el token de un solo uso del correo",
 }
 
 # Valores de ejemplo para los parámetros de ruta. El contenido es irrelevante:

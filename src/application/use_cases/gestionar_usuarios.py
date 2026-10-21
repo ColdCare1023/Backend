@@ -27,9 +27,17 @@ class CrearUsuarioUseCase:
     async def execute(self, nombre: str, email: str, password: str, rol: Rol) -> Usuario:
         existente = await self._usuario_repository.obtener_por_email(email)
         if existente is not None:
+            if not existente.is_active:
+                raise DomainError(
+                    f"Ya existe un usuario desactivado con el email {email}: reactívelo en lugar de crear otro"
+                )
             raise DomainError(f"Ya existe un usuario con el email {email}")
 
-        usuario = Usuario(nombre=nombre, email=email, password_hash=hash_password(password), rol=rol)
+        # BE-025: la contraseña inicial la conoce el administrador; el usuario
+        # debe reemplazarla por una propia en su primer acceso.
+        usuario = Usuario(
+            nombre=nombre, email=email, password_hash=hash_password(password), rol=rol, debe_cambiar_password=True
+        )
         return await self._usuario_repository.agregar(usuario)
 
 

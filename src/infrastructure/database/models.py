@@ -139,9 +139,30 @@ class UserModel(Base):
     # BE-009: todo access token emitido antes de este instante deja de valer
     # (desactivación, cambio de rol o de contraseña).
     tokens_invalidos_antes_de: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # BE-025: contraseña temporal pendiente de cambio.
+    debe_cambiar_password: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=sa_text("false"), nullable=False
+    )
     created_at: Mapped[datetime] = _created_at_column()
 
     rol: Mapped[RoleModel] = relationship(back_populates="usuarios")
+
+
+class PasswordResetTokenModel(Base):
+    """BE-025: enlaces de recuperación de contraseña. Solo se guarda el
+    SHA-256 del token (el valor viaja únicamente en el correo); caducan
+    pronto y se consumen una sola vez."""
+
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    usuario_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    expira_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    usado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = _created_at_column()
 
 
 class InvalidatedJtiModel(Base):

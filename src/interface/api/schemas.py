@@ -2,7 +2,15 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    StringConstraints,
+    field_validator,
+)
 
 from src.domain.entities.checklist_bpa import DIAS_RETROACTIVOS_MAXIMOS
 from src.domain.value_objects.device_id import PATRON_DEVICE_ID
@@ -57,6 +65,8 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     require_privacy_consent: bool = False
+    # BE-025: contraseña temporal; el frontend debe llevar al cambio.
+    require_password_change: bool = False
 
 
 class SSETicketResponse(BaseModel):
@@ -68,25 +78,46 @@ class PrivacidadResponse(BaseModel):
     privacy_version_accepted: str | None
 
 
+def _politica_password(valor: str) -> str:
+    if not any(c.isdigit() for c in valor) or not any(c.isalpha() for c in valor):
+        raise ValueError("La contraseña debe combinar letras y números")
+    # Se mide en bytes porque es lo que consume bcrypt: una contraseña con
+    # acentos o emoji ocupa más bytes que caracteres tiene.
+    if len(valor.encode("utf-8")) > PASSWORD_MAX_BYTES:
+        raise ValueError(
+            f"La contraseña no puede superar {PASSWORD_MAX_BYTES} bytes "
+            "(bcrypt ignora en silencio lo que exceda ese límite)"
+        )
+    return valor
+
+
+# BE-025: la misma política en el alta, el cambio y el restablecimiento.
+PasswordNueva = Annotated[str, Field(min_length=PASSWORD_MIN_LENGTH), AfterValidator(_politica_password)]
+
+
 class UsuarioCreateRequest(_PeticionEstricta):
     nombre: str = Field(min_length=1, max_length=120)
     email: EmailStr
-    password: str = Field(min_length=PASSWORD_MIN_LENGTH)
+    password: PasswordNueva
     rol: Rol
 
-    @field_validator("password")
-    @classmethod
-    def _politica_password(cls, valor: str) -> str:
-        if not any(c.isdigit() for c in valor) or not any(c.isalpha() for c in valor):
-            raise ValueError("La contraseña debe combinar letras y números")
-        # Se mide en bytes porque es lo que consume bcrypt: una contraseña con
-        # acentos o emoji ocupa más bytes que caracteres tiene.
-        if len(valor.encode("utf-8")) > PASSWORD_MAX_BYTES:
-            raise ValueError(
-                f"La contraseña no puede superar {PASSWORD_MAX_BYTES} bytes "
-                "(bcrypt ignora en silencio lo que exceda ese límite)"
-            )
-        return valor
+
+class CambiarPasswordRequest(_PeticionEstricta):
+    password_actual: str = Field(min_length=1, max_length=256)
+    password_nueva: PasswordNueva
+
+
+class RecuperarPasswordRequest(_PeticionEstricta):
+    email: EmailStr
+
+
+class RestablecerPasswordRequest(_PeticionEstricta):
+    token: str = Field(min_length=20, max_length=256)
+    password_nueva: PasswordNueva
+
+
+class SolicitudRecuperacionResponse(BaseModel):
+    detail: str
 
 
 class UsuarioResponse(BaseModel):
@@ -99,6 +130,15 @@ class UsuarioResponse(BaseModel):
     is_active: bool = True
     motivo_desactivacion: str | None = None
     desactivado_en: datetime | None = None
+    debe_cambiar_password: bool = False
+
+
+class PasswordTemporalResponse(BaseModel):
+    """BE-025: la contraseña temporal se muestra una sola vez, en esta
+    respuesta (no se guarda en claro en ninguna parte)."""
+
+    usuario: UsuarioResponse
+    password_temporal: str
 
 
 class DesactivarUsuarioRequest(_PeticionEstricta):

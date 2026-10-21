@@ -131,6 +131,11 @@ class Settings(BaseSettings):
     # llegan deshabilitados: sin credenciales configuradas el sistema funciona
     # igual, solo sin notificar. Las credenciales viven en el entorno (RNF-05),
     # nunca en el código.
+    # BE-025: página del frontend que recibe el enlace de recuperación de
+    # contraseña (el token viaja en el fragmento `#token=`). Se envía por el
+    # mismo SMTP de las alertas.
+    password_reset_url: str = "http://localhost:5173/restablecer-password"
+
     smtp_enabled: bool = False
     smtp_host: str = ""
     smtp_port: int = 465
@@ -275,6 +280,10 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "SMTP_ENABLED requiere SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM y SMTP_TO."
                 )
+            # BE-025: con SMTP habilitado se envían enlaces de recuperación; el
+            # token no puede viajar a una página sin TLS.
+            if self.smtp_enabled and not self.password_reset_url.startswith("https://"):
+                raise ValueError("PASSWORD_RESET_URL debe ser una URL HTTPS en producción.")
             if self.telegram_enabled and not all(
                 (self.telegram_bot_token, self.telegram_chat_id)
             ):

@@ -11,6 +11,7 @@ from src.infrastructure.database.models import InvalidatedJtiModel
 MOTIVO_LOGOUT = "logout"
 MOTIVO_PRIVACIDAD_RECHAZADA = "privacidad_rechazada"
 MOTIVO_TICKET_SSE = "ticket_sse"
+MOTIVO_PASSWORD_CAMBIADA = "password_cambiada"
 
 
 class SQLAlchemyJtiRepository:

@@ -26,6 +26,7 @@ def _to_entity(model: UserModel) -> Usuario:
         desactivado_por=model.desactivado_por,
         anonymized_for_gdpr=model.anonymized_for_gdpr,
         tokens_invalidos_antes_de=model.tokens_invalidos_antes_de,
+        debe_cambiar_password=model.debe_cambiar_password,
     )
 
 
@@ -65,6 +66,7 @@ class SQLAlchemyUsuarioRepository(IUsuarioRepository):
             desactivado_por=usuario.desactivado_por,
             anonymized_for_gdpr=usuario.anonymized_for_gdpr,
             tokens_invalidos_antes_de=usuario.tokens_invalidos_antes_de,
+            debe_cambiar_password=usuario.debe_cambiar_password,
         )
         self._session.add(model)
         await self._session.flush()
@@ -106,6 +108,7 @@ class SQLAlchemyUsuarioRepository(IUsuarioRepository):
         model.desactivado_por = usuario.desactivado_por
         model.anonymized_for_gdpr = usuario.anonymized_for_gdpr
         model.tokens_invalidos_antes_de = usuario.tokens_invalidos_antes_de
+        model.debe_cambiar_password = usuario.debe_cambiar_password
         await self._session.flush()
         await self._session.refresh(model, attribute_names=["rol"])
         return _to_entity(model)

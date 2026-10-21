@@ -19,6 +19,8 @@ class ResultadoAutenticacion:
     token_type: str = "bearer"
     # HU-44: el frontend debe bloquear la navegación hasta que se acepte.
     require_privacy_consent: bool = False
+    # BE-025: contraseña temporal pendiente de cambio.
+    require_password_change: bool = False
 
 
 class AutenticarUsuarioUseCase:
@@ -49,4 +51,5 @@ class AutenticarUsuarioUseCase:
             access_token=token,
             usuario_id=usuario.id,
             require_privacy_consent=usuario.requiere_aceptar_privacidad,
+            require_password_change=usuario.debe_cambiar_password,
         )

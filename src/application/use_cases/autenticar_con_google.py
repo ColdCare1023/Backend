@@ -82,4 +82,5 @@ class AutenticarConGoogleUseCase:
             access_token=token,
             usuario_id=UUID(str(usuario.id)),
             require_privacy_consent=usuario.requiere_aceptar_privacidad,
+            require_password_change=usuario.debe_cambiar_password,
         )
