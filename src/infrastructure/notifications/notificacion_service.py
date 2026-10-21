@@ -151,3 +151,20 @@ class NotificacionService:
             logger.info("Aviso por SMS enviado para %s", device_id)
         except Exception:
             logger.exception("No se pudo enviar el aviso por SMS para %s", device_id)
+
+
+_instancia: NotificacionService | None = None
+
+
+def obtener_notificacion_service(settings: Settings) -> NotificacionService:
+    """BE-018: una sola instancia por proceso y configuración.
+
+    El antiflood por dispositivo vive en el estado de la instancia. Crear una
+    por cada lectura (como hacían el consumidor MQTT y la ingesta REST) dejaba
+    el cooldown siempre vacío: cada reapertura de episodio volvía a notificar.
+    `get_settings()` está cacheado, así que la instancia se conserva mientras
+    la configuración no cambie."""
+    global _instancia
+    if _instancia is None or _instancia._settings is not settings:
+        _instancia = NotificacionService(settings)
+    return _instancia

@@ -36,7 +36,7 @@ from src.infrastructure.mqtt.payload_schema import (
     LecturaPayload,
     TipoEventoDispositivo,
 )
-from src.infrastructure.notifications.notificacion_service import NotificacionService
+from src.infrastructure.notifications.notificacion_service import obtener_notificacion_service
 from src.infrastructure.security.rate_limiter import SlidingWindowRateLimiter
 from src.interface.api.alertas_router import router as alertas_router
 from src.interface.api.api_protection import instalar_proteccion_api
@@ -486,7 +486,7 @@ async def _procesar_lectura_mqtt(
             device_repository=SQLAlchemyDeviceRepository(session),
             registro_dispositivos_estricto=settings.device_registry_estricto,
             audit_log_repository=SQLAlchemyAuditLogRepository(session),
-            notificacion_service=NotificacionService(settings),
+            notificacion_service=obtener_notificacion_service(settings),
             ventana_normalizacion_alerta_minutos=settings.alerta_ventana_normalizacion_minutos,
         )
 
