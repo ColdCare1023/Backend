@@ -319,6 +319,26 @@ class DispositivoResponse(BaseModel):
     responsable_telefono: str | None = None
 
 
+class DispositivoResumenResponse(BaseModel):
+    """BE-013: vista de un dispositivo para roles que no lo administran.
+
+    Sin datos de contacto del responsable, sin estado de credenciales ni
+    metadatos de instalación: solo lo que necesitan el estado operativo y el
+    aviso de calibración. La vista completa (`DispositivoResponse`) queda para
+    la administración de dispositivos."""
+
+    id: str
+    nombre: str | None
+    ubicacion: str | None
+    estado_conectividad: str
+    activo: bool
+    firmware_version: str
+    fecha_ultima_calibracion: date | None = None
+    numero_certificado_calibracion: str | None = None
+    fecha_proxima_calibracion: date | None = None
+    sensores_habilitados: list[str] = Field(default_factory=list)
+
+
 class SensorIoTResponse(BaseModel):
     modelo: Literal["DS18B20", "SHT31", "MC-38"]
     estado: Literal["ok", "error", "no_instalado"]
@@ -338,7 +358,7 @@ class IncidenteOperativoResponse(BaseModel):
     recuperado_en: datetime | None = None
 
 
-class EstadoOperativoResponse(DispositivoResponse):
+class EstadoOperativoResponse(DispositivoResumenResponse):
     """HU-33: estado operativo del nodo a partir de su última lectura recibida.
 
     Es independiente de la clasificación térmica: un nodo puede estar

@@ -37,6 +37,7 @@ from src.interface.api.schemas import (
     DispositivoAltaRequest,
     DispositivoBajaRequest,
     DispositivoResponse,
+    DispositivoResumenResponse,
     EstadoOperativoResponse,
     HistorialConfiguracionResponse,
     IncidenteOperativoResponse,
@@ -195,10 +196,11 @@ async def consultar_estado_calibracion(
     como un device_id."""
     use_case = ConsultarEstadoCalibracionUseCase(SQLAlchemyDeviceRepository(session))
     estado = await use_case.execute(datetime.now(tz=timezone.utc).date(), dias_preaviso)
+    # BE-013: vista resumida (sin contacto del responsable ni credenciales).
     return {
-        "vencidos": [DispositivoResponse(**d).model_dump(mode="json") for d in estado["vencidos"]],
+        "vencidos": [DispositivoResumenResponse(**d).model_dump(mode="json") for d in estado["vencidos"]],
         "proximos_a_vencer": [
-            DispositivoResponse(**d).model_dump(mode="json") for d in estado["proximos_a_vencer"]
+            DispositivoResumenResponse(**d).model_dump(mode="json") for d in estado["proximos_a_vencer"]
         ],
     }
 
