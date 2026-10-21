@@ -1,6 +1,8 @@
+import hmac
+import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.gestionar_dispositivos import (
@@ -25,7 +27,7 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
 from src.interface.api.api_protection import limitar_por_ip
-from src.interface.api.deps import DbSessionDep, require_roles
+from src.interface.api.deps import DbSessionDep, SettingsDep, require_roles
 from src.interface.api.schemas import (
     AutenticarDispositivoRequest,
     AutenticarDispositivoResponse,
@@ -45,6 +47,7 @@ from src.interface.api.schemas import (
 )
 
 router = APIRouter(prefix="/api/dispositivos", tags=["dispositivos"])
+logger = logging.getLogger("interface.api.dispositivos")
 
 # HU-43 Escenario 4: la HU pide "ADMINISTRADOR o TÉCNICO con permiso especial".
 # Este backend no modela permisos granulares por usuario (solo RBAC por rol,
@@ -342,19 +345,44 @@ async def revocar_credencial(
     await session.commit()
 
 
+def verificar_llamada_del_broker(
+    settings: SettingsDep, x_broker_auth: str | None = Header(default=None)
+) -> None:
+    """BE-011: solo el broker puede consultar credenciales de dispositivos.
+
+    Sin secreto configurado el webhook no atiende a nadie (503): un oráculo
+    público de credenciales es peor que un webhook deshabilitado. La
+    comparación es de tiempo constante."""
+    secreto = settings.broker_webhook_secret
+    if not secreto:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="La autenticación HTTP del broker no está configurada.",
+        )
+    if x_broker_auth is None or not hmac.compare_digest(x_broker_auth.encode(), secreto.encode()):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Llamada no autorizada.")
+
+
 @router.post(
     "/autenticar",
     response_model=AutenticarDispositivoResponse,
-    dependencies=[limitar_por_ip("dispositivos_autenticar", 30, 60)],
+    dependencies=[
+        limitar_por_ip("dispositivos_autenticar", 30, 60),
+        Depends(verificar_llamada_del_broker),
+    ],
 )
 async def autenticar_dispositivo(
     body: AutenticarDispositivoRequest, session: DbSessionDep
 ) -> AutenticarDispositivoResponse:
-    """Backend de autenticación HTTP para EMQX Cloud (HU-10/HU-44): sin JWT
-    de sesión a propósito — lo llama el broker, no un usuario. La cuota por
-    IP acota el costo de un intento de fuerza bruta contra el hash."""
+    """Backend de autenticación HTTP para el broker (HU-10/HU-44): sin JWT de
+    sesión a propósito — lo llama el broker, autenticado con su secreto
+    compartido (`X-Broker-Auth`), no un usuario. La cuota por IP acota el
+    costo de un intento de fuerza bruta contra el hash."""
     use_case = VerificarCredencialDispositivoUseCase(SQLAlchemyDeviceRepository(session))
     autorizado = await use_case.execute(body.device_id, body.token)
+    if not autorizado:
+        # Sin el token: solo qué identidad intentó conectarse y que falló.
+        logger.warning("Autenticación de dispositivo rechazada para device_id=%s", body.device_id)
     return AutenticarDispositivoResponse(autorizado=autorizado)
 
 

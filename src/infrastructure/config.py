@@ -63,6 +63,12 @@ class Settings(BaseSettings):
     # provisionados en la tabla `devices` pueden registrar lecturas.
     device_registry_estricto: bool = True
 
+    # BE-011: secreto compartido con el broker para el webhook de
+    # autenticación de dispositivos (`POST /api/dispositivos/autenticar`).
+    # El broker lo envía en la cabecera `X-Broker-Auth`. Vacío = el webhook
+    # queda deshabilitado (fallo cerrado), nunca abierto a cualquiera.
+    broker_webhook_secret: str = ""
+
     # Hosts permitidos en producción (mitiga ataques por header Host).
     allowed_hosts: list[str] = []
 
@@ -185,6 +191,8 @@ class Settings(BaseSettings):
                     "GOOGLE_OAUTH_ENABLED requiere GOOGLE_CLIENT_ID (sin él no se "
                     "puede validar la audiencia del ID token)."
                 )
+            if self.broker_webhook_secret and len(self.broker_webhook_secret.encode()) < 32:
+                raise ValueError("BROKER_WEBHOOK_SECRET debe tener al menos 32 bytes en producción.")
             if self.mqtt_enabled:
                 # RNF-05: transmisión sobre TLS y credenciales fuera del código fuente.
                 if not self.mqtt_tls_enabled:

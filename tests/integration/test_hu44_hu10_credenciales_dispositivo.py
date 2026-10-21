@@ -2,9 +2,23 @@
 credenciales MQTT por dispositivo, y el endpoint de autenticación que EMQX
 Cloud puede usar como backend HTTP."""
 
+import pytest
+
+from src.infrastructure.config import get_settings
 from tests.conftest import auth_header
 
 DEVICE_ID = "FARM-HU44-01"
+SECRETO_BROKER = "secreto-del-broker-para-pruebas-0123456789"
+CABECERA_BROKER = {"X-Broker-Auth": SECRETO_BROKER}
+
+
+@pytest.fixture(autouse=True)
+def _broker_configurado(monkeypatch):
+    """BE-011: el webhook solo atiende al broker, identificado por su secreto."""
+    monkeypatch.setenv("BROKER_WEBHOOK_SECRET", SECRETO_BROKER)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 def _provisionar(client, token_tecnico, device_id=DEVICE_ID) -> None:
@@ -46,7 +60,7 @@ def test_token_recien_rotado_autentica_correctamente(client, token_tecnico, toke
     ).json()["token"]
 
     respuesta = client.post(
-        "/api/dispositivos/autenticar", json={"device_id": DEVICE_ID, "token": token}
+        "/api/dispositivos/autenticar", json={"device_id": DEVICE_ID, "token": token}, headers=CABECERA_BROKER
     )
     assert respuesta.status_code == 200
     assert respuesta.json()["autorizado"] is True
@@ -61,7 +75,7 @@ def test_token_incorrecto_no_autentica(client, token_tecnico, token_admin):
     )
 
     respuesta = client.post(
-        "/api/dispositivos/autenticar", json={"device_id": DEVICE_ID, "token": "token-incorrecto"}
+        "/api/dispositivos/autenticar", json={"device_id": DEVICE_ID, "token": "token-incorrecto"}, headers=CABECERA_BROKER
     )
     assert respuesta.status_code == 200
     assert respuesta.json()["autorizado"] is False
@@ -71,7 +85,7 @@ def test_dispositivo_sin_credencial_provisionada_no_autentica(client, token_tecn
     _provisionar(client, token_tecnico)
 
     respuesta = client.post(
-        "/api/dispositivos/autenticar", json={"device_id": DEVICE_ID, "token": "cualquier-cosa"}
+        "/api/dispositivos/autenticar", json={"device_id": DEVICE_ID, "token": "cualquier-cosa"}, headers=CABECERA_BROKER
     )
     assert respuesta.status_code == 200
     assert respuesta.json()["autorizado"] is False
@@ -79,7 +93,7 @@ def test_dispositivo_sin_credencial_provisionada_no_autentica(client, token_tecn
 
 def test_dispositivo_inexistente_no_autentica(client):
     respuesta = client.post(
-        "/api/dispositivos/autenticar", json={"device_id": "NO-EXISTE", "token": "cualquier-cosa"}
+        "/api/dispositivos/autenticar", json={"device_id": "NO-EXISTE", "token": "cualquier-cosa"}, headers=CABECERA_BROKER
     )
     assert respuesta.status_code == 200
     assert respuesta.json()["autorizado"] is False
@@ -101,7 +115,7 @@ def test_revocar_invalida_el_token_de_inmediato(client, token_tecnico, token_adm
     assert revocacion.status_code == 204
 
     respuesta = client.post(
-        "/api/dispositivos/autenticar", json={"device_id": DEVICE_ID, "token": token}
+        "/api/dispositivos/autenticar", json={"device_id": DEVICE_ID, "token": token}, headers=CABECERA_BROKER
     )
     assert respuesta.json()["autorizado"] is False
 
@@ -167,3 +181,23 @@ def test_rotar_no_afecta_telemetria_historica(client, token_tecnico, token_admin
         "/api/lecturas", params={"device_id": DEVICE_ID}, headers=auth_header(token_tecnico)
     ).json()
     assert antes == despues
+
+
+# ── BE-011: el webhook no es un oráculo público ───────────────────────────
+
+
+@pytest.mark.parametrize("cabeceras", [{}, {"X-Broker-Auth": "secreto-equivocado"}])
+def test_autenticar_sin_secreto_del_broker_es_rechazado(client, cabeceras):
+    respuesta = client.post(
+        "/api/dispositivos/autenticar", json={"device_id": DEVICE_ID, "token": "x"}, headers=cabeceras
+    )
+    assert respuesta.status_code == 401
+
+
+def test_autenticar_sin_secreto_configurado_falla_cerrado(client, monkeypatch):
+    monkeypatch.setenv("BROKER_WEBHOOK_SECRET", "")
+    get_settings.cache_clear()
+    respuesta = client.post(
+        "/api/dispositivos/autenticar", json={"device_id": DEVICE_ID, "token": "x"}, headers=CABECERA_BROKER
+    )
+    assert respuesta.status_code == 503

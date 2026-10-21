@@ -10,6 +10,11 @@ from src.infrastructure.security.password_hasher import hash_password, verify_pa
 
 _MOTIVOS_BAJA = frozenset({"falla_hardware", "mantenimiento", "reemplazo", "fin_de_servicio"})
 
+# BE-011: hash señuelo para igualar tiempos. Sin él, "dispositivo inexistente
+# o sin credencial" respondía de inmediato y "token incorrecto" tardaba lo que
+# un Argon2: la diferencia revelaba qué device_id tienen credencial activa.
+_HASH_SENUELO = hash_password("senuelo-credencial-dispositivo")
+
 
 class DarDeBajaDispositivoUseCase:
     """HU-43: retira un ESP32/sensor de operación sin corromper la trazabilidad
@@ -216,8 +221,8 @@ class RevocarCredencialDispositivoUseCase:
 
 class VerificarCredencialDispositivoUseCase:
     """Punto de integración con el broker: EMQX Cloud puede configurarse con
-    un backend de autenticación HTTP que llame a este caso de uso (vía el
-    endpoint no autenticado /api/dispositivos/autenticar) para decidir si
+    un backend de autenticación HTTP que llame a este caso de uso (vía
+    /api/dispositivos/autenticar, protegido por el secreto del broker) para decidir si
     acepta la conexión de un ESP32. Un token revocado o nunca aprovisionado
     se rechaza; el reason code MQTT 5.0 exacto (0x87) lo aplica EMQX según
     la respuesta HTTP, no este caso de uso."""
@@ -227,9 +232,13 @@ class VerificarCredencialDispositivoUseCase:
 
     async def execute(self, device_id: str, token: str) -> bool:
         credencial = await self._device_repository.obtener_credencial(device_id)
-        if credencial is None or not credencial["mqtt_token_activo"]:
-            return False
-        if credencial["mqtt_token_hash"] is None:
+        utilizable = (
+            credencial is not None
+            and credencial["mqtt_token_activo"]
+            and credencial["mqtt_token_hash"] is not None
+        )
+        if not utilizable:
+            verify_password(token, _HASH_SENUELO)
             return False
         return verify_password(token, credencial["mqtt_token_hash"])
 
