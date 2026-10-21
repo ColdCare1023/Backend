@@ -1,0 +1,5 @@
+# Entorno OFFLINE de entrenamiento del modelo preventivo (fuente); se instala
+# `requirements-ml.txt`. No forma parte de la imagen del servicio ni de CI:
+# las figuras de docs/ml/ son lo único que necesita matplotlib.
+-r requirements-dev.in
+matplotlib>=3.9.0

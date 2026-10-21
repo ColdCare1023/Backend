@@ -20,3 +20,6 @@ infra-local/evidencia
 infra-local/emqx/bootstrap_users.csv
 infra-local/emqx/api_keys.txt
 **/.DS_Store
+# Datasets externos y derivados del entrenamiento offline: no van en la imagen
+# (los modelos registrados sí, en src/infrastructure/ai/models/preventivo/).
+data/

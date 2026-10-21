@@ -10,3 +10,8 @@ __pycache__/
 # Cobertura de pruebas
 .coverage
 htmlcov/
+# Datos externos y derivados del pipeline ML: voluminosos y con licencia
+# propia. Se versionan sus hashes, la procedencia y los scripts que los
+# reproducen (docs/ml/), no los datos.
+data/ml/external_inputs/
+data/ml/work/

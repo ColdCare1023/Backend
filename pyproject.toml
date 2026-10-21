@@ -4,6 +4,9 @@
 target-version = "py312"
 line-length = 110
 src = ["."]
+# data/ml/ contiene archivos externos (incluido un notebook de terceros que
+# no se ejecuta ni se mantiene aquí).
+extend-exclude = ["data"]
 
 [tool.ruff.lint]
 select = [
