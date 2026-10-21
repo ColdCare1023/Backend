@@ -1,0 +1,22 @@
+# BE-022: nada de secretos, historial ni artefactos locales en la imagen.
+.git
+.github
+.env
+.env.*
+!.env.example
+**/.venv*
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+*.db
+*.sqlite
+infra-local/.env
+infra-local/certs
+infra-local/secrets
+infra-local/evidencia
+infra-local/emqx/bootstrap_users.csv
+infra-local/emqx/api_keys.txt
+**/.DS_Store

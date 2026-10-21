@@ -734,18 +734,24 @@ def create_app() -> FastAPI:
     # propias de esta fábrica (las pruebas la sustituyen por la suya).
     app.state.session_factory = _session_factory
 
+    # BE-022: Starlette ejecuta primero el ÚLTIMO middleware añadido. Orden
+    # efectivo de fuera hacia dentro: cabeceras de seguridad → CORS → hosts
+    # de confianza → límites de la API. Así las respuestas 413/429 de los
+    # límites también llevan las cabeceras de seguridad y las de CORS (sin
+    # ellas el navegador ni siquiera deja leer el 429 al frontend).
+    instalar_proteccion_api(app, settings)
     if es_produccion:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
-
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
+        # El frontend necesita leer cuándo reintentar tras un 429/503.
+        expose_headers=["Retry-After"],
     )
     instalar_security_headers(app, hsts=es_produccion)
-    instalar_proteccion_api(app, settings)
 
     app.include_router(auth_router)
     app.include_router(usuarios_router)

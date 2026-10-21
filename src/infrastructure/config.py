@@ -27,7 +27,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://user:pass@localhost:5432/farmacia_db"
 
     jwt_secret_key: str = _SECRETO_POR_DEFECTO
-    jwt_algorithm: str = "HS256"
+    # BE-022: solo HMAC. Un valor arbitrario (p. ej. "none" o uno asimétrico
+    # con la clave simétrica) se rechaza al arrancar, no al primer login.
+    jwt_algorithm: Literal["HS256", "HS384", "HS512"] = "HS256"
     jwt_access_token_expire_minutes: int = 60
     jwt_issuer: str = "cadena-frio-backend"
     jwt_audience: str = "cadena-frio-api"

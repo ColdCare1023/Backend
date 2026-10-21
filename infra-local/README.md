@@ -68,8 +68,11 @@ DTR/RTS bajos). Requiere `pyserial`.
 - El ESP32 (mbedTLS 2.x) valida el host contra entradas DNS del certificado: la IP va como `DNS:` e `IP:`.
   Si cambia la IP de la PC: `./scripts/init.sh <nueva_IP> --force` y reaprovisionar el nodo.
 - Certificados válidos 365 días.
-- `DEVICE_REGISTRY_ESTRICTO=false`: el backend registra el nodo con su primera lectura. Con `true` hay
-  que darlo de alta antes (HU-43).
+- `DEVICE_REGISTRY_ESTRICTO=true` (por defecto, como en producción): solo los nodos dados de alta con
+  `scripts/crear_dispositivo.py` registran lecturas (HU-43). Con `false` el backend registraría el nodo con
+  su primera lectura; úsese solo para pruebas aisladas.
+- Las migraciones corren en el servicio `migraciones` antes de arrancar `backend`; el contenedor del
+  backend corre como usuario sin privilegios (uid 10001).
 - Expiración de sesión (HU-39): `JWT_EXPIRE_MIN=1 docker compose --profile backend up -d backend`.
 - Windows: `aiomqtt` no funciona con el loop Proactor; por eso el backend va en contenedor y los scripts
   usan `SelectorEventLoop`.

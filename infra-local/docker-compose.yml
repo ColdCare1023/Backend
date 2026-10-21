@@ -6,7 +6,8 @@ name: thermotrace
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # BE-022: imágenes fijadas por digest (índice multi-arquitectura).
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
@@ -23,7 +24,7 @@ services:
       retries: 10
 
   emqx:
-    image: emqx/emqx:5.8.6
+    image: emqx/emqx:5.8.6@sha256:a1e3d10fa1dcc8c94325b815a93b5b5974253a97cb36470b44e47d5d3ef9cd13
     restart: unless-stopped
     environment:
       EMQX_NODE__NAME: emqx@127.0.0.1
@@ -72,6 +73,23 @@ services:
       timeout: 5s
       retries: 10
 
+  # BE-022: las migraciones corren una vez, antes del backend, y no en cada
+  # arranque de cada réplica.
+  migraciones:
+    profiles: ["backend"]
+    build:
+      context: ..
+      dockerfile: infra-local/backend/Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      TRAZABILIDAD_HMAC_KEY: ${TRAZABILIDAD_HMAC_KEY}
+    restart: "no"
+
   backend:
     profiles: ["backend"]
     build:
@@ -80,6 +98,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       emqx: { condition: service_healthy }
+      migraciones: { condition: service_completed_successfully }
     environment:
       ENVIRONMENT: development
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -99,7 +118,9 @@ services:
       BROKER_API_URL: http://emqx:18083/api/v5
       BROKER_API_KEY: ${EMQX_API_KEY}
       BROKER_API_SECRET: ${EMQX_API_SECRET}
-      DEVICE_REGISTRY_ESTRICTO: ${DEVICE_REGISTRY_ESTRICTO:-false}
+      # BE-022: estricto también en local; los nodos se dan de alta con
+      # scripts/crear_dispositivo.py (que además emite su credencial MQTT).
+      DEVICE_REGISTRY_ESTRICTO: ${DEVICE_REGISTRY_ESTRICTO:-true}
       ALLOWED_HOSTS: '["localhost","127.0.0.1","backend"]'
       CORS_ORIGINS: '["http://localhost:5173"]'
     ports:
