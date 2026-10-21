@@ -22,6 +22,12 @@ ITEMS_CHECKLIST_BPA: tuple[str, ...] = (
 )
 
 
+# BE-020: el checklist declara una verificación física hecha ese día. Se
+# admite el día anterior (turnos nocturnos y desfase entre la hora de Lima y
+# UTC); declaraciones más antiguas serían cumplimiento retroactivo.
+DIAS_RETROACTIVOS_MAXIMOS = 1
+
+
 def _utcnow() -> datetime:
     return datetime.now(tz=timezone.utc)
 

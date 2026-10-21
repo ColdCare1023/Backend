@@ -12,7 +12,7 @@ from src.application.use_cases.registrar_accion_correctiva import (
     CorregirAccionCorrectivaUseCase,
     RegistrarAccionCorrectivaUseCase,
 )
-from src.domain.exceptions import DomainError, RecursoNoEncontradoError
+from src.domain.exceptions import DomainError, PermisoDenegadoError, RecursoNoEncontradoError
 from src.domain.value_objects.device_id import PATRON_DEVICE_ID
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.database.repositories.accion_correctiva_repository import (
@@ -189,9 +189,11 @@ async def rectificar_accion_correctiva(
     trazabilidad_repository = SQLAlchemyTrazabilidadRepository(session)
     use_case = CorregirAccionCorrectivaUseCase(accion_repository, alerta_repository, trazabilidad_repository)
     try:
-        accion = await use_case.execute(accion_id, usuario.id, body.descripcion)
+        accion = await use_case.execute(accion_id, usuario.id, body.descripcion, usuario.rol)
     except RecursoNoEncontradoError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PermisoDenegadoError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
     alerta_para_auditoria = await alerta_repository.obtener_por_id(accion.alert_id)
     auditoria_repository = SQLAlchemyAuditLogRepository(session)

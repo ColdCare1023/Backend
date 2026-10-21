@@ -169,6 +169,10 @@ class ExportarReporteBPAPDFUseCase:
                     "total_conformes": c.total_conformes(),
                     "conforme": c.es_conforme(),
                     "observaciones": c.observaciones,
+                    # BE-020: la fecha declarada junto a cuándo se registró y
+                    # modificó realmente; una declaración tardía queda a la vista.
+                    "registrado_en": c.created_at,
+                    "modificado_en": c.updated_at,
                 }
                 for c in checklists
             ],

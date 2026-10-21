@@ -7,7 +7,7 @@ se instala como wheel sin dependencias nativas, que es el requisito real aquí:
 el reporte debe poder generarse en cualquier equipo donde corra el backend.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Any
 from xml.sax.saxutils import escape
@@ -157,6 +157,25 @@ def _fmt_dt(valor: Any) -> str:
     if isinstance(valor, datetime):
         return valor.strftime("%Y-%m-%d %H:%M:%S")
     return str(valor or "—")
+
+
+def _utc(valor: datetime) -> datetime:
+    """SQLite devuelve datetimes naive aunque la columna sea timezone-aware."""
+    return valor if valor.tzinfo is not None else valor.replace(tzinfo=timezone.utc)
+
+
+def _registro_checklist(checklist: dict) -> str:
+    """BE-020: markup (ya escapado) con cuándo se registró realmente el
+    checklist y, si se corrigió después, cuándo. Una declaración tardía o
+    modificada queda visible junto a la fecha declarada."""
+    registrado = checklist.get("registrado_en")
+    modificado = checklist.get("modificado_en")
+    if not isinstance(registrado, datetime):
+        return _texto(None)
+    lineas = [_texto(registrado.strftime("%Y-%m-%d %H:%M"))]
+    if isinstance(modificado, datetime) and _utc(modificado) - _utc(registrado) > timedelta(minutes=1):
+        lineas.append(_texto(f"modif. {modificado.strftime('%Y-%m-%d %H:%M')}"))
+    return "<br/>".join(lineas)
 
 
 def _fmt_num(valor: Any, sufijo: str = "", decimales: int = 1) -> str:
@@ -576,22 +595,23 @@ class GeneradorReporteBPAPDF:
             )
             return bloques
 
-        filas = [["Fecha", "Ítems conformes", "Resultado", "Observaciones"]]
+        filas = [["Fecha", "Registrado (UTC)", "Ítems conformes", "Resultado", "Observaciones"]]
         for checklist in checklists:
             conforme = checklist.get("conforme")
             filas.append(
                 [
                     str(checklist.get("fecha") or "—"),
+                    Paragraph(_registro_checklist(checklist), e["celda"]),
                     f"{checklist.get('total_conformes', 0)} / 10",
                     "Conforme" if conforme else "Con observaciones",
                     Paragraph(_texto(checklist.get("observaciones")), e["celda"]),
                 ]
             )
-        tabla = Table(filas, colWidths=[26 * mm, 30 * mm, 36 * mm, 80 * mm], repeatRows=1)
-        estilo = _estilo_tabla_base([("ALIGN", (1, 1), (2, -1), "CENTER")])
+        tabla = Table(filas, colWidths=[22 * mm, 32 * mm, 24 * mm, 32 * mm, 62 * mm], repeatRows=1)
+        estilo = _estilo_tabla_base([("ALIGN", (2, 1), (3, -1), "CENTER")])
         for indice, checklist in enumerate(checklists, start=1):
             color = VERDE if checklist.get("conforme") else AMBAR
-            estilo.add("TEXTCOLOR", (2, indice), (2, indice), color)
+            estilo.add("TEXTCOLOR", (3, indice), (3, indice), color)
         tabla.setStyle(estilo)
         bloques.append(tabla)
         return bloques

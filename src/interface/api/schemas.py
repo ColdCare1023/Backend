@@ -1,9 +1,10 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator
 
+from src.domain.entities.checklist_bpa import DIAS_RETROACTIVOS_MAXIMOS
 from src.domain.value_objects.device_id import PATRON_DEVICE_ID
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 from src.domain.value_objects.rol import Rol
@@ -566,8 +567,14 @@ class ChecklistBPARequest(_PeticionEstricta):
             raise ValueError("fecha debe tener formato YYYY-MM-DD") from exc
         # Un checklist no puede declararse por adelantado: se firma el día que
         # se realiza la verificación física del refrigerador.
-        if fecha > datetime.now(tz=timezone.utc).date():
+        hoy = datetime.now(tz=timezone.utc).date()
+        if fecha > hoy:
             raise ValueError("La fecha del checklist no puede ser futura")
+        if fecha < hoy - timedelta(days=DIAS_RETROACTIVOS_MAXIMOS):
+            raise ValueError(
+                "El checklist solo puede registrarse para hoy o el día anterior: "
+                "una declaración retroactiva no es evidencia de la verificación física"
+            )
         return valor
 
 

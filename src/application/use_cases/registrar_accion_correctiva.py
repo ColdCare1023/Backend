@@ -3,10 +3,11 @@ from uuid import UUID
 
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.domain.entities.accion_correctiva import AccionCorrectiva
-from src.domain.exceptions import DomainError, RecursoNoEncontradoError
+from src.domain.exceptions import DomainError, PermisoDenegadoError, RecursoNoEncontradoError
 from src.domain.repositories.i_accion_correctiva_repository import IAccionCorrectivaRepository
 from src.domain.repositories.i_alerta_repository import IAlertaRepository
 from src.domain.repositories.i_trazabilidad_repository import ITrazabilidadRepository
+from src.domain.value_objects.rol import Rol
 
 
 class RegistrarAccionCorrectivaUseCase:
@@ -61,7 +62,11 @@ class RegistrarAccionCorrectivaUseCase:
 class CorregirAccionCorrectivaUseCase:
     """HU-28: corregir una justificación previamente registrada crea un
     NUEVO evento que referencia a la acción anterior, en vez de sobrescribir
-    su contenido — la original permanece intacta y auditable."""
+    su contenido — la original permanece intacta y auditable.
+
+    BE-020: la rectificación sustituye a la justificación vigente en la
+    cronología de la alerta, así que solo puede hacerla su autor o el
+    farmacéutico (responsable técnico de la cadena de frío)."""
 
     def __init__(
         self,
@@ -74,11 +79,15 @@ class CorregirAccionCorrectivaUseCase:
         self._registrar_hash = RegistrarHashEncadenadoUseCase(trazabilidad_repository)
 
     async def execute(
-        self, accion_anterior_id: UUID, usuario_id: UUID, nueva_descripcion: str
+        self, accion_anterior_id: UUID, usuario_id: UUID, nueva_descripcion: str, rol_actor: Rol
     ) -> AccionCorrectiva:
         anterior = await self._accion_repository.obtener_por_id(accion_anterior_id)
         if anterior is None:
             raise RecursoNoEncontradoError(f"Acción correctiva {accion_anterior_id} no encontrada")
+        if anterior.usuario_id != usuario_id and rol_actor != Rol.FARMACEUTICO:
+            raise PermisoDenegadoError(
+                "Solo el autor de la acción o el farmacéutico responsable puede rectificarla"
+            )
 
         rectificacion = AccionCorrectiva(
             alert_id=anterior.alert_id,
