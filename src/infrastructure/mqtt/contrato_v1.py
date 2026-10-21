@@ -12,6 +12,7 @@ reportes— no distingue entre el contrato anterior y v1.0.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Literal
 
@@ -21,6 +22,8 @@ from src.domain.value_objects.device_id import PATRON_DEVICE_ID
 
 SCHEMA_VERSION = "1.0"
 PAYLOAD_MAX_BYTES = 768
+MAX_CLAVES_DETALLE = 32
+MAX_BYTES_DETALLE = 1024
 DEVICE_ID_PATRON = PATRON_DEVICE_ID
 
 Fallo = Literal["no_response", "crc_error", "timeout", "implausible", "power_on_reset"]
@@ -105,6 +108,15 @@ class EventoV1(BaseModel):
     time_quality: Literal["sntp_synced", "sntp_backfilled", "unsynced"] | None = None
     uptime_s: int | None = Field(default=None, ge=0, le=UINT32)
     detail: dict | None = None
+
+    @model_validator(mode="after")
+    def _detalle_acotado(self) -> EventoV1:
+        # BE-019: el detalle termina en audit_logs y en la cadena; un nodo no
+        # puede inflarlos con estructuras arbitrarias.
+        if self.detail is not None:
+            if len(self.detail) > MAX_CLAVES_DETALLE or len(json.dumps(self.detail)) > MAX_BYTES_DETALLE:
+                raise ValueError("detail excede el tamaño admitido")
+        return self
 
     @model_validator(mode="after")
     def _lwt_minimo(self) -> EventoV1:

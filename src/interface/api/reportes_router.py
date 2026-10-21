@@ -22,7 +22,7 @@ from src.infrastructure.database.repositories.reporte_repository import SQLAlche
 from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
-from src.interface.api.api_protection import limitar_por_usuario
+from src.interface.api.api_protection import limitar_concurrencia, limitar_por_usuario
 from src.interface.api.deps import DbSessionDep, require_roles
 from src.interface.api.mappers import alerta_to_response, lectura_to_response, trazabilidad_to_response
 from src.interface.api.schemas import ReporteBPAResponse
@@ -59,7 +59,7 @@ def _validar_rango(fecha_desde: datetime, fecha_hasta: datetime) -> None:
     # Exportar es la operación más cara de la API (tres consultas amplias y una
     # serialización grande). Sin cuota propia, el límite global por IP la deja
     # repetir cientos de veces por minuto.
-    dependencies=[limitar_por_usuario("reportes_bpa", 10, 60)],
+    dependencies=[limitar_por_usuario("reportes_bpa", 10, 60), limitar_concurrencia("reportes")],
 )
 async def exportar_reporte_bpa(
     fecha_desde: datetime,
@@ -117,7 +117,7 @@ async def exportar_reporte_bpa(
     "/bpa/pdf",
     response_class=StreamingResponse,
     responses={200: {"content": {"application/pdf": {}}, "description": "Reporte BPA en PDF"}},
-    dependencies=[limitar_por_usuario("reportes_bpa_pdf", 10, 60)],
+    dependencies=[limitar_por_usuario("reportes_bpa_pdf", 10, 60), limitar_concurrencia("reportes")],
 )
 async def exportar_reporte_bpa_pdf(
     fecha_desde: datetime,

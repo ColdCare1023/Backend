@@ -73,12 +73,25 @@ class VerificarIntegridadRegistroUseCase:
         chain_id"). Cada registro se compara con la fórmula de su propio
         hash_version, así los registros anteriores a la introducción de
         chain_id (hash_version=1) siguen siendo verificables sin recálculo."""
-        registros = await self._trazabilidad_repository.listar_todos_ordenados(chain_id)
-
+        # BE-019: recorrido en streaming, sin materializar la cadena entera en
+        # memoria (es una tabla que solo crece, en una instancia de 512 MB).
         clave = clave_hmac_trazabilidad()
         previous_hash_por_cadena: dict[str, str] = {}
         ultimo_hash_integro_por_cadena: dict[str, str] = {}
-        for indice, registro in enumerate(registros):
+        total = 0
+        ultimo_hash: str | None = None
+        detalle: DetalleInconsistencia | None = None
+        indice_inconsistente: int | None = None
+        cadena_inconsistente: str | None = None
+        posteriores = 0
+        async for registro in self._trazabilidad_repository.iterar_todos_ordenados(chain_id):
+            indice = total
+            total += 1
+            ultimo_hash = registro.hash_actual
+            if detalle is not None:
+                if chain_id is None or registro.chain_id == cadena_inconsistente:
+                    posteriores += 1
+                continue
             previous_hash_esperado = previous_hash_por_cadena.get(registro.chain_id, GENESIS_HASH)
             calculado = hash_esperado(
                 registro.hash_version,
@@ -90,7 +103,6 @@ class VerificarIntegridadRegistroUseCase:
             )
             esperado = calculado or ""
             if registro.previous_hash != previous_hash_esperado or registro.hash_actual != esperado:
-                posteriores = [r for r in registros[indice + 1 :] if chain_id is None or r.chain_id == registro.chain_id]
                 detalle = DetalleInconsistencia(
                     id=registro.id,
                     tipo_evento=registro.tipo_evento,
@@ -99,25 +111,30 @@ class VerificarIntegridadRegistroUseCase:
                     hash_almacenado=registro.hash_actual,
                     **({} if calculado is not None else {"mensaje": _MENSAJE_SIN_CLAVE}),
                 )
-                ultimo_hash_integro = ultimo_hash_integro_por_cadena.get(registro.chain_id, GENESIS_HASH)
-                await self._notificar_corrupcion(
-                    registro.id, registro.chain_id, detalle, ultimo_hash_integro, len(posteriores)
-                )
-                return ResultadoVerificacion(
-                    integra=False,
-                    total_registros=len(registros),
-                    primer_registro_inconsistente=indice,
-                    detalle_inconsistencia=detalle,
-                    registros_posteriores_afectados=len(posteriores),
-                )
+                indice_inconsistente = indice
+                cadena_inconsistente = registro.chain_id
+                continue
             previous_hash_por_cadena[registro.chain_id] = registro.hash_actual
             ultimo_hash_integro_por_cadena[registro.chain_id] = registro.hash_actual
 
+        if detalle is not None:
+            ultimo_hash_integro = ultimo_hash_integro_por_cadena.get(cadena_inconsistente, GENESIS_HASH)
+            await self._notificar_corrupcion(
+                detalle.id, cadena_inconsistente, detalle, ultimo_hash_integro, posteriores
+            )
+            return ResultadoVerificacion(
+                integra=False,
+                total_registros=total,
+                primer_registro_inconsistente=indice_inconsistente,
+                detalle_inconsistencia=detalle,
+                registros_posteriores_afectados=posteriores,
+            )
+
         return ResultadoVerificacion(
             integra=True,
-            total_registros=len(registros),
+            total_registros=total,
             primer_registro_inconsistente=None,
-            hash_final=registros[-1].hash_actual if registros else None,
+            hash_final=ultimo_hash,
         )
 
     async def _notificar_corrupcion(

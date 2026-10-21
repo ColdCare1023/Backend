@@ -4,12 +4,13 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 
 from src.domain.exceptions import CredencialesInvalidasError
 from src.infrastructure.database.repositories.jti_repository import MOTIVO_TICKET_SSE, SQLAlchemyJtiRepository
 from src.infrastructure.database.repositories.usuario_repository import SQLAlchemyUsuarioRepository
 from src.infrastructure.security.jwt_handler import TicketSSE
-from src.interface.api.deps import DbSessionDep, JWTHandlerDep
+from src.interface.api.deps import DbSessionDep, JWTHandlerDep, SettingsDep
 
 router = APIRouter(prefix="/api/sse", tags=["sse"])
 
@@ -36,7 +37,9 @@ async def sesion_del_ticket_vigente(fabrica, ticket: TicketSSE) -> bool:
     return ticket.token_padre_iat is None or usuario.token_vigente(ticket.token_padre_iat)
 
 
-async def _event_stream(request: Request, sesion_vigente: SesionVigente | None = None) -> AsyncGenerator[str, None]:
+async def _event_stream(
+    request: Request, sesion_vigente: SesionVigente | None = None, al_cerrar: Callable[[], None] | None = None
+) -> AsyncGenerator[str, None]:
     broadcaster = request.app.state.sse_broadcaster
     queue = broadcaster.subscribe()
     try:
@@ -63,11 +66,13 @@ async def _event_stream(request: Request, sesion_vigente: SesionVigente | None =
                 yield ": keep-alive\n\n"
     finally:
         broadcaster.unsubscribe(queue)
+        if al_cerrar is not None:
+            al_cerrar()
 
 
 @router.get("/lecturas")
 async def stream_lecturas(
-    request: Request, ticket: str, jwt_handler: JWTHandlerDep, session: DbSessionDep
+    request: Request, ticket: str, jwt_handler: JWTHandlerDep, session: DbSessionDep, settings: SettingsDep
 ) -> StreamingResponse:
     """RF-11: el dashboard consume actualizaciones en tiempo real vía SSE.
 
@@ -104,7 +109,34 @@ async def stream_lecturas(
     async def sesion_vigente() -> bool:
         return await sesion_del_ticket_vigente(fabrica, datos_ticket)
 
+    # BE-019: cada stream retiene una cola y una conexión durante horas; un
+    # usuario no puede abrir un número ilimitado de ellos.
+    abiertos = request.app.state.sse_streams_por_usuario
+    usuario = datos_ticket.usuario_id
+    if abiertos.get(usuario, 0) >= settings.sse_max_streams_por_usuario:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Demasiadas conexiones en tiempo real abiertas para esta cuenta.",
+            headers={"Retry-After": "15"},
+        )
+    abiertos[usuario] = abiertos.get(usuario, 0) + 1
+    liberado = False
+
+    def liberar() -> None:
+        # Idempotente: lo llama el `finally` del generador y, por si Starlette
+        # cancela el stream antes de iniciarlo, la tarea de fondo de la respuesta.
+        nonlocal liberado
+        if liberado:
+            return
+        liberado = True
+        restantes = abiertos.get(usuario, 1) - 1
+        if restantes <= 0:
+            abiertos.pop(usuario, None)
+        else:
+            abiertos[usuario] = restantes
+
     return StreamingResponse(
-        _event_stream(request, sesion_vigente),
+        _event_stream(request, sesion_vigente, liberar),
         media_type="text/event-stream",
+        background=BackgroundTask(liberar),
     )

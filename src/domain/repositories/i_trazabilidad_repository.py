@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from datetime import datetime
 from uuid import UUID
 
@@ -28,6 +29,10 @@ class ITrazabilidadRepository(ABC):
         con un candado consultivo derivado de chain_id (HU-25 criterio 3):
         cadenas distintas no se bloquean entre sí."""
         ...
+
+    @abstractmethod
+    def iterar_todos_ordenados(self, chain_id: str | None = None) -> AsyncIterator[RegistroTrazabilidad]:
+        """BE-019: mismo orden que listar_todos_ordenados, sin materializarlo."""
 
     @abstractmethod
     async def listar_todos_ordenados(self, chain_id: str | None = None) -> list[RegistroTrazabilidad]:

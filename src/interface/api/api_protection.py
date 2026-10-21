@@ -1,4 +1,5 @@
-from collections.abc import Awaitable, Callable
+import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
@@ -210,5 +211,29 @@ def limitar_ingesta_lecturas():
             settings.ingesta_rate_limit_max_solicitudes,
             settings.ingesta_rate_limit_ventana_segundos,
         )
+
+    return Depends(dependencia)
+
+
+def limitar_concurrencia(nombre: str):
+    """BE-019: tope de ejecuciones simultáneas de una operación costosa
+    (recorrer toda la cadena, generar un reporte). Las cuotas por usuario
+    limitan la frecuencia, no la simultaneidad entre usuarios distintos; sin
+    este tope, unos pocos usuarios podían agotar la memoria a la vez."""
+
+    async def dependencia(request: Request, settings: SettingsDep) -> AsyncIterator[None]:
+        semaforos = request.app.state.semaforos_costosos
+        semaforo = semaforos.setdefault(nombre, asyncio.Semaphore(settings.operaciones_costosas_concurrentes))
+        if semaforo.locked():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Operación en curso por otros usuarios. Intenta nuevamente en unos segundos.",
+                headers={"Retry-After": "5"},
+            )
+        await semaforo.acquire()
+        try:
+            yield
+        finally:
+            semaforo.release()
 
     return Depends(dependencia)

@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     # pequeños; cualquier cosa mayor es anómala).
     max_body_bytes: int = 64 * 1024
 
+    # BE-019: operaciones que recorren toda la cadena o generan reportes que
+    # se ejecutan a la vez en el proceso, y streams SSE simultáneos por
+    # usuario. Por encima, 503/429 en vez de agotar memoria o conexiones.
+    operaciones_costosas_concurrentes: int = 2
+    sse_max_streams_por_usuario: int = 3
+
     # Mínimo privilegio de dispositivos: en estricto, solo device_id
     # provisionados en la tabla `devices` pueden registrar lecturas.
     device_registry_estricto: bool = True

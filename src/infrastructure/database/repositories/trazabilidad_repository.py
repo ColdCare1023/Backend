@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from datetime import datetime
 from uuid import UUID
 
@@ -76,17 +77,28 @@ class SQLAlchemyTrazabilidadRepository(ITrazabilidadRepository):
         hash_actual, chain_seq = fila
         return hash_actual, chain_seq
 
-    async def listar_todos_ordenados(self, chain_id: str | None = None) -> list[RegistroTrazabilidad]:
+    @staticmethod
+    def _consulta_ordenada(chain_id: str | None):
         stmt = select(TraceabilityRecordModel)
         if chain_id is not None:
             stmt = stmt.where(TraceabilityRecordModel.chain_id == chain_id)
-            stmt = stmt.order_by(TraceabilityRecordModel.chain_seq.asc(), TraceabilityRecordModel.id.asc())
-        else:
-            # Orden global de inserción: mismo criterio de desempate que
-            # obtener_ultimo_eslabon(), en sentido inverso.
-            stmt = stmt.order_by(TraceabilityRecordModel.created_at.asc(), TraceabilityRecordModel.id.asc())
-        result = await self._session.execute(stmt)
+            return stmt.order_by(TraceabilityRecordModel.chain_seq.asc(), TraceabilityRecordModel.id.asc())
+        # Orden global de inserción: mismo criterio de desempate que
+        # obtener_ultimo_eslabon(), en sentido inverso.
+        return stmt.order_by(TraceabilityRecordModel.created_at.asc(), TraceabilityRecordModel.id.asc())
+
+    async def listar_todos_ordenados(self, chain_id: str | None = None) -> list[RegistroTrazabilidad]:
+        result = await self._session.execute(self._consulta_ordenada(chain_id))
         return [_to_entity(m) for m in result.scalars().all()]
+
+    async def iterar_todos_ordenados(self, chain_id: str | None = None) -> AsyncIterator[RegistroTrazabilidad]:
+        """BE-019: lotes de 500 filas con cursor del servidor."""
+        consulta = self._consulta_ordenada(chain_id).execution_options(yield_per=500)
+        resultado = await self._session.stream_scalars(consulta)
+        async for modelo in resultado:
+            yield _to_entity(modelo)
+            # Las filas ya verificadas no deben quedar retenidas en la sesión.
+            self._session.expunge(modelo)
 
     async def listar(
         self,

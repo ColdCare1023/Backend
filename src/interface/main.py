@@ -239,9 +239,16 @@ async def _procesar_evento_v1(
 
 
 async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadcaster) -> None:
+    # BE-019: el mismo techo que las lecturas, ANTES de deserializar.
+    if len(message.payload) > MAX_BYTES_PAYLOAD_MQTT:
+        logger.warning(
+            "Descartado: evento MQTT de %d bytes en %s (máximo %d).",
+            len(message.payload), message.topic, MAX_BYTES_PAYLOAD_MQTT,
+        )
+        return
     try:
         crudo = json.loads(message.payload)
-    except ValueError:
+    except (ValueError, RecursionError):
         crudo = None
     if contrato_v1.es_v1(crudo):
         await _procesar_evento_v1(message, crudo, broadcaster)
@@ -714,6 +721,9 @@ def create_app() -> FastAPI:
         ventana_segundos=settings.login_ventana_segundos,
         max_claves=settings.security_state_max_entries,
     )
+    # BE-019: semáforos de operaciones costosas y streams SSE por usuario.
+    app.state.semaforos_costosos = {}
+    app.state.sse_streams_por_usuario = {}
     app.state.login_cuenta_rate_limiter = SlidingWindowRateLimiter(
         max_intentos=settings.login_cuenta_max_intentos,
         ventana_segundos=settings.login_cuenta_ventana_segundos,
