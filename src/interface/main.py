@@ -631,6 +631,13 @@ async def _procesar_lectura_mqtt(
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     app.state.sse_broadcaster = SSEBroadcaster()
+    if settings.environment == "production" and settings.mqtt_enabled and not settings.broker_webhook_secret:
+        # BE-002: sin el webhook, el broker no consulta al backend y revocar o
+        # rotar una credencial de dispositivo no tiene efecto en el broker.
+        logger.warning(
+            "BROKER_WEBHOOK_SECRET no configurado: la autenticación de dispositivos no pasa por el "
+            "backend y la revocación de credenciales no se aplica en el broker."
+        )
 
     if settings.mqtt_enabled and settings.environment != "test":
 

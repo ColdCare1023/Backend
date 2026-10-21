@@ -3,15 +3,15 @@ paralelo y latencia recepción→emisión SSE, contra el stack local real.
 
 Uso:  python scripts/hu12_hu19_carga.py [dispositivos] [lecturas]
 
-Crea (una vez) usuarios MQTT de prueba FARM-1N-TEST en EMQX vía su API, inicia
-sesión como el farmacéutico demo (credenciales de scripts/seed_dev.py),
+Da de alta los dispositivos de prueba FARM-1N-TEST en el backend y emite sus
+credenciales MQTT (BE-002), inicia sesión como el farmacéutico demo
+(credenciales de scripts/seed_dev.py),
 abre el stream SSE y mide. No imprime secretos.
 """
 import asyncio
 import json
 import random
 import re
-import secrets
 import ssl
 import statistics
 import sys
@@ -21,11 +21,11 @@ from pathlib import Path
 
 import aiomqtt
 import httpx
+from aprovisionar import aprovisionar, cabecera_admin
 
 RAIZ = Path(__file__).resolve().parent.parent
 ENV = dict(linea.split("=", 1) for linea in (RAIZ / ".env").read_text().splitlines() if "=" in linea)
 API = "http://localhost:8000"
-EMQX_API = "http://localhost:18083/api/v5"
 N_DISP = int(sys.argv[1]) if len(sys.argv) > 1 else 5
 N_LECT = int(sys.argv[2]) if len(sys.argv) > 2 else 10
 
@@ -37,24 +37,14 @@ def credenciales_demo() -> tuple[str, str]:
     return m.group(1), m.group(2)
 
 
-async def asegurar_dispositivos(http: httpx.AsyncClient) -> dict[str, str]:
-    r = await http.post(f"{EMQX_API}/login", json={"username": ENV["EMQX_DASHBOARD_USER"],
-                                                   "password": ENV["EMQX_DASHBOARD_PASSWORD"]})
-    r.raise_for_status()
-    cab = {"Authorization": f"Bearer {r.json()['token']}"}
+async def asegurar_dispositivos(_http: httpx.AsyncClient) -> dict[str, str]:
+    """BE-002: credenciales emitidas por el backend, no creadas en EMQX."""
     tokens = {}
-    for i in range(1, N_DISP + 1):
-        dev = f"FARM-{10 + i}-TEST"
-        archivo = RAIZ / "secrets" / f"{dev}.token"
-        if not archivo.exists():
-            archivo.write_text(secrets.token_hex(16))
-        tok = archivo.read_text()
-        r = await http.post(f"{EMQX_API}/authentication/password_based:built_in_database/users",
-                            headers=cab, json={"user_id": dev, "password": tok})
-        if r.status_code == 409:  # ya existe: se le reasigna la clave del archivo
-            await http.put(f"{EMQX_API}/authentication/password_based:built_in_database/users/{dev}",
-                           headers=cab, json={"password": tok})
-        tokens[dev] = tok
+    with httpx.Client(timeout=15) as http:
+        cabecera = cabecera_admin(http)
+        for i in range(1, N_DISP + 1):
+            dev = f"FARM-{10 + i}-TEST"
+            tokens[dev] = aprovisionar(http, cabecera, dev, "prueba de carga HU-12/HU-19")
     return tokens
 
 

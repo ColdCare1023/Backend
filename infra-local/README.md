@@ -10,10 +10,26 @@ cd infra-local
 ./scripts/init.sh 192.168.18.21        # IP de ESTA PC en la red del ESP32
 docker compose --profile backend up -d --build
 docker compose exec backend python -m scripts.seed_dev   # usuarios demo
+python scripts/crear_dispositivo.py FARM-01-CDL          # alta + credencial MQTT (secrets/)
+python scripts/crear_dispositivo.py FARM-02-TEST
 ```
 
 `init.sh` genera `certs/` (CA, certificado del broker y certificados para los casos negativos de HU-09),
-`.env` con secretos aleatorios, `emqx/bootstrap_users.csv` y `secrets/*.token`. Todo ignorado por git.
+`.env` con secretos aleatorios, `emqx/bootstrap_users.csv` (solo la cuenta del backend) y
+`emqx/api_keys.txt`. Todo ignorado por git.
+
+### Credenciales de dispositivos (BE-002)
+
+EMQX autentica en cadena: primero su base interna, que solo contiene `backend_service`; después, el
+webhook `POST /api/dispositivos/autenticar` del backend (cabecera `X-Broker-Auth` con
+`BROKER_WEBHOOK_SECRET`). La credencial de cada nodo la emite el backend y vive en la tabla `devices`,
+así que **rotarla o revocarla desde la API tiene efecto en el broker**: el backend además expulsa la
+sesión abierta con la API de EMQX (`EMQX_API_KEY`/`EMQX_API_SECRET`). Sin el backend en marcha ningún
+nodo puede autenticarse (fallo cerrado). No crear usuarios de dispositivo en la base interna de EMQX.
+
+En EMQX Cloud (producción) hay que configurar lo mismo: autenticador HTTP hacia
+`https://<backend>/api/dispositivos/autenticar` con la cabecera `X-Broker-Auth`, y una API key para
+`BROKER_API_URL`/`BROKER_API_KEY`/`BROKER_API_SECRET` del backend.
 
 | Servicio | Acceso |
 |---|---|
@@ -28,7 +44,7 @@ docker compose exec backend python -m scripts.seed_dev   # usuarios demo
 WIFI_SSID="MiRed" WIFI_PASS="clave" ./scripts/flash_coldcare.sh COM6 ESP32_FARMACIA_01
 ```
 
-Da de alta el dispositivo en EMQX, copia la CA a `data/certs/root_ca.pem` del firmware, sube LittleFS
+Da de alta el dispositivo en el backend y emite su credencial, copia la CA a `data/certs/root_ca.pem` del firmware, sube LittleFS
 y el firmware, y aprovisiona Wi-Fi/host/token por la consola serie (`nvs set …`). `uploadfs` borra el
 buffer offline; `SOLO_APP=1` lo evita. Ver variables en la cabecera del script.
 

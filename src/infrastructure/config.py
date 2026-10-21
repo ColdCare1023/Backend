@@ -68,6 +68,16 @@ class Settings(BaseSettings):
     # El broker lo envía en la cabecera `X-Broker-Auth`. Vacío = el webhook
     # queda deshabilitado (fallo cerrado), nunca abierto a cualquiera.
     broker_webhook_secret: str = ""
+    # BE-002: API REST de administración del broker (EMQX), para expulsar la
+    # sesión de un dispositivo al revocar o rotar su credencial. Sin estos
+    # valores la revocación solo aplica en la siguiente reconexión.
+    broker_api_url: str = ""
+    broker_api_key: str = ""
+    broker_api_secret: str = ""
+    # Vida máxima de una autenticación de dispositivo (`expire_at` en la
+    # respuesta del webhook, EMQX >= 5.8): fuerza reautenticación periódica
+    # aunque la expulsión activa falle. 0 = sin caducidad.
+    broker_auth_ttl_seconds: int = 0
 
     # Hosts permitidos en producción (mitiga ataques por header Host).
     allowed_hosts: list[str] = []

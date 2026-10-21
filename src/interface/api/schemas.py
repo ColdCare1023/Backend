@@ -411,6 +411,9 @@ class CredencialDispositivoResponse(BaseModel):
     device_id: str
     token: str
     generado_en: datetime
+    # BE-002: True si el broker cerró la sesión anterior; None si la API del
+    # broker no está configurada (la credencial vieja muere al reconectar).
+    sesion_broker_cerrada: bool | None = None
 
 
 class AutenticarDispositivoRequest(BaseModel):
@@ -422,6 +425,13 @@ class AutenticarDispositivoRequest(BaseModel):
 
 
 class AutenticarDispositivoResponse(BaseModel):
+    """BE-002: formato del autenticador HTTP de EMQX (`result`,
+    `is_superuser`, `expire_at` opcional). `autorizado` se conserva por
+    compatibilidad con clientes anteriores."""
+
+    result: Literal["allow", "deny"]
+    is_superuser: bool = False
+    expire_at: int | None = None
     autorizado: bool
 
 

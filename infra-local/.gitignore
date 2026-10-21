@@ -1,5 +1,6 @@
 .env
 certs/
 emqx/bootstrap_users.csv
+emqx/api_keys.txt
 secrets/
 evidencia/

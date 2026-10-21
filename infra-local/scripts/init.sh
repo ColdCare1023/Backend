@@ -61,7 +61,7 @@ printf '[req]\ndistinguished_name = dn\n[dn]\n' > certs/openssl_min.cnf
 
 # --- Secretos y usuarios MQTT ----------------------------------------------
 PG_PASS=$(rand 16); JWT=$(rand 32); EMQX_DASH=$(rand 12)
-MQTT_BACKEND=$(rand 16); TOKEN_NODO=$(rand 16); TOKEN_OTRO=$(rand 16)
+MQTT_BACKEND=$(rand 16); WEBHOOK=$(rand 32); API_KEY=$(rand 8); API_SECRET=$(rand 32)
 
 cat > .env <<ENV
 POSTGRES_USER=farmacia
@@ -71,24 +71,27 @@ JWT_SECRET_KEY=${JWT}
 EMQX_DASHBOARD_USER=admin
 EMQX_DASHBOARD_PASSWORD=${EMQX_DASH}
 MQTT_BACKEND_PASSWORD=${MQTT_BACKEND}
+BROKER_WEBHOOK_SECRET=${WEBHOOK}
+EMQX_API_KEY=${API_KEY}
+EMQX_API_SECRET=${API_SECRET}
 DEVICE_REGISTRY_ESTRICTO=false
 BROKER_IP=${IP}
 ENV
 
-# usuario,clave,es_superusuario  (EMQX los hashea al importar)
+# usuario,clave,es_superusuario  (EMQX los hashea al importar).
+# BE-002: solo la cuenta de servicio del backend vive en la base interna de
+# EMQX. Los dispositivos se autentican contra el backend (webhook HTTP) con el
+# token que emite POST /api/dispositivos/{id}/credenciales/rotar.
 cat > emqx/bootstrap_users.csv <<CSV
 user_id,password,is_superuser
 backend_service,${MQTT_BACKEND},false
-FARM-01-CDL,${TOKEN_NODO},false
-FARM-02-TEST,${TOKEN_OTRO},false
 CSV
 
-# Credenciales del nodo para aprovisionar el ESP32 (no se imprimen en pantalla).
-printf '%s' "$TOKEN_NODO" > secrets/FARM-01-CDL.token
-printf '%s' "$TOKEN_OTRO" > secrets/FARM-02-TEST.token
+# API key del backend para expulsar sesiones de dispositivos (formato key:secret).
+printf '%s:%s\n' "$API_KEY" "$API_SECRET" > emqx/api_keys.txt
 
 echo "Listo."
 echo "  Certificados : infra-local/certs  (ca.crt -> data/certs/root_ca.pem del firmware)"
 echo "  Variables    : infra-local/.env"
-echo "  Tokens nodo  : infra-local/secrets/*.token"
-echo "Siguiente: docker compose up -d"
+echo "Siguiente: docker compose --profile backend up -d --build"
+echo "Luego, por dispositivo: python scripts/crear_dispositivo.py FARM-01-CDL  (token en secrets/)"

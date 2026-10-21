@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Flashea el firmware ColdCare1023/IoT y lo aprovisiona contra el EMQX local
-# por la consola serie (nvs set ...). El token sale de secrets/ y la wifi de
-# variables de entorno: no se escriben en ningún repositorio ni se imprimen.
+# Flashea el firmware ColdCare1023/IoT y lo aprovisiona contra el stack local
+# por la consola serie (nvs set ...). El token lo emite el backend (BE-002) y se
+# guarda en secrets/; la wifi sale de variables de entorno: no se escriben en
+# ningún repositorio ni se imprimen. Requiere el backend en marcha.
 #
 # Uso (Git Bash, desde infra-local/):
 #   WIFI_SSID="MiRed" WIFI_PASS="clave" ./scripts/flash_coldcare.sh [COM6] [ESP32_FARMACIA_01] [entorno_pio]

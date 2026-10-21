@@ -26,6 +26,7 @@ from src.infrastructure.database.repositories.lectura_repository import SQLAlche
 from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
+from src.infrastructure.mqtt.broker_admin import BrokerAdmin, obtener_broker_admin
 from src.interface.api.api_protection import limitar_por_ip
 from src.interface.api.deps import DbSessionDep, SettingsDep, require_roles
 from src.interface.api.schemas import (
@@ -48,6 +49,10 @@ from src.interface.api.schemas import (
 
 router = APIRouter(prefix="/api/dispositivos", tags=["dispositivos"])
 logger = logging.getLogger("interface.api.dispositivos")
+
+
+def get_broker_admin(settings: SettingsDep) -> BrokerAdmin:
+    return obtener_broker_admin(settings)
 
 # HU-43 Escenario 4: la HU pide "ADMINISTRADOR o TÉCNICO con permiso especial".
 # Este backend no modela permisos granulares por usuario (solo RBAC por rol,
@@ -284,6 +289,7 @@ async def rotar_credencial(
     session: DbSessionDep,
     request: Request,
     admin=Depends(router_dep),
+    broker: BrokerAdmin = Depends(get_broker_admin),
 ) -> CredencialDispositivoResponse:
     """HU-44 Escenario 2: genera y aprovisiona un nuevo token MQTT. El valor
     en claro solo se devuelve en ESTA respuesta — el backend únicamente
@@ -309,8 +315,11 @@ async def rotar_credencial(
         ip_origen=request.client.host if request.client else None,
     )
     await session.commit()
+    # BE-002: tras el COMMIT, para que la reconexión ya vea el token nuevo.
+    cerrada = await broker.desconectar_cliente(device_id)
     return CredencialDispositivoResponse(
-        device_id=device_id, token=token, generado_en=datetime.now(tz=timezone.utc)
+        device_id=device_id, token=token, generado_en=datetime.now(tz=timezone.utc),
+        sesion_broker_cerrada=cerrada,
     )
 
 
@@ -321,6 +330,7 @@ async def revocar_credencial(
     session: DbSessionDep,
     request: Request,
     admin=Depends(router_dep),
+    broker: BrokerAdmin = Depends(get_broker_admin),
 ) -> None:
     """HU-44 Escenario 1: invalida de inmediato la credencial de un
     dispositivo cuyas credenciales se sospechan comprometidas."""
@@ -343,6 +353,10 @@ async def revocar_credencial(
         ip_origen=request.client.host if request.client else None,
     )
     await session.commit()
+    # BE-002: revocar sin cerrar la sesión abierta dejaba al dispositivo (o a
+    # quien tuviera su token) publicando hasta la próxima reconexión.
+    if await broker.desconectar_cliente(device_id) is not True:
+        logger.warning("Credencial de %s revocada, pero su sesión MQTT no se pudo expulsar.", device_id)
 
 
 def verificar_llamada_del_broker(
@@ -366,13 +380,14 @@ def verificar_llamada_del_broker(
 @router.post(
     "/autenticar",
     response_model=AutenticarDispositivoResponse,
+    response_model_exclude_none=True,
     dependencies=[
         limitar_por_ip("dispositivos_autenticar", 30, 60),
         Depends(verificar_llamada_del_broker),
     ],
 )
 async def autenticar_dispositivo(
-    body: AutenticarDispositivoRequest, session: DbSessionDep
+    body: AutenticarDispositivoRequest, session: DbSessionDep, settings: SettingsDep
 ) -> AutenticarDispositivoResponse:
     """Backend de autenticación HTTP para el broker (HU-10/HU-44): sin JWT de
     sesión a propósito — lo llama el broker, autenticado con su secreto
@@ -383,7 +398,11 @@ async def autenticar_dispositivo(
     if not autorizado:
         # Sin el token: solo qué identidad intentó conectarse y que falló.
         logger.warning("Autenticación de dispositivo rechazada para device_id=%s", body.device_id)
-    return AutenticarDispositivoResponse(autorizado=autorizado)
+        return AutenticarDispositivoResponse(result="deny", autorizado=False)
+    expira = None
+    if settings.broker_auth_ttl_seconds > 0:
+        expira = int(datetime.now(tz=timezone.utc).timestamp()) + settings.broker_auth_ttl_seconds
+    return AutenticarDispositivoResponse(result="allow", expire_at=expira, autorizado=True)
 
 
 @router.patch("/{device_id}/instalacion", response_model=DispositivoResponse)

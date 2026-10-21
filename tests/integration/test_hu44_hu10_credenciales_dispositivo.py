@@ -5,6 +5,7 @@ Cloud puede usar como backend HTTP."""
 import pytest
 
 from src.infrastructure.config import get_settings
+from src.interface.api.dispositivos_router import get_broker_admin
 from tests.conftest import auth_header
 
 DEVICE_ID = "FARM-HU44-01"
@@ -201,3 +202,73 @@ def test_autenticar_sin_secreto_configurado_falla_cerrado(client, monkeypatch):
         "/api/dispositivos/autenticar", json={"device_id": DEVICE_ID, "token": "x"}, headers=CABECERA_BROKER
     )
     assert respuesta.status_code == 503
+
+
+# ── BE-002: el broker aplica la revocación ────────────────────────────────
+
+
+class _BrokerEspia:
+    def __init__(self) -> None:
+        self.expulsados: list[str] = []
+
+    async def desconectar_cliente(self, client_id: str) -> bool:
+        self.expulsados.append(client_id)
+        return True
+
+
+@pytest.fixture
+def broker_espia(app):
+    espia = _BrokerEspia()
+    app.dependency_overrides[get_broker_admin] = lambda: espia
+    return espia
+
+
+def test_respuesta_del_webhook_usa_el_formato_de_emqx(client, token_tecnico, token_admin):
+    _provisionar(client, token_tecnico)
+    token = client.post(
+        f"/api/dispositivos/{DEVICE_ID}/credenciales/rotar", json={"motivo": "alta"}, headers=auth_header(token_admin)
+    ).json()["token"]
+
+    ok = client.post("/api/dispositivos/autenticar", json={"device_id": DEVICE_ID, "token": token}, headers=CABECERA_BROKER)
+    mal = client.post("/api/dispositivos/autenticar", json={"device_id": DEVICE_ID, "token": "no"}, headers=CABECERA_BROKER)
+
+    assert ok.json() == {"result": "allow", "is_superuser": False, "autorizado": True}
+    assert mal.json() == {"result": "deny", "is_superuser": False, "autorizado": False}
+
+
+def test_ttl_configurado_devuelve_expire_at(client, token_tecnico, token_admin, monkeypatch):
+    monkeypatch.setenv("BROKER_AUTH_TTL_SECONDS", "3600")
+    get_settings.cache_clear()
+    _provisionar(client, token_tecnico)
+    token = client.post(
+        f"/api/dispositivos/{DEVICE_ID}/credenciales/rotar", json={"motivo": "alta"}, headers=auth_header(token_admin)
+    ).json()["token"]
+
+    cuerpo = client.post(
+        "/api/dispositivos/autenticar", json={"device_id": DEVICE_ID, "token": token}, headers=CABECERA_BROKER
+    ).json()
+    assert cuerpo["result"] == "allow"
+    assert isinstance(cuerpo["expire_at"], int)
+
+
+def test_revocar_expulsa_la_sesion_del_broker(client, token_tecnico, token_admin, broker_espia):
+    _provisionar(client, token_tecnico)
+    client.post(
+        f"/api/dispositivos/{DEVICE_ID}/credenciales/rotar", json={"motivo": "alta"}, headers=auth_header(token_admin)
+    )
+    respuesta = client.post(
+        f"/api/dispositivos/{DEVICE_ID}/credenciales/revocar",
+        json={"motivo": "token filtrado"},
+        headers=auth_header(token_admin),
+    )
+    assert respuesta.status_code == 204
+    assert broker_espia.expulsados[-1] == DEVICE_ID
+
+
+def test_rotar_expulsa_la_sesion_con_el_token_anterior(client, token_tecnico, token_admin, broker_espia):
+    _provisionar(client, token_tecnico)
+    cuerpo = client.post(
+        f"/api/dispositivos/{DEVICE_ID}/credenciales/rotar", json={"motivo": "alta"}, headers=auth_header(token_admin)
+    ).json()
+    assert cuerpo["sesion_broker_cerrada"] is True
+    assert broker_espia.expulsados == [DEVICE_ID]
