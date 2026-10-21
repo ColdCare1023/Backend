@@ -1,0 +1,996 @@
+{
+  "generado_en": "2026-10-21T16:13:06.895554+00:00",
+  "entradas": [
+    {
+      "archivo": "Raw.zip",
+      "bytes": 5056109,
+      "sha256": "3590d19a2002cb473061af9ffbffacd7036e962b0f79b86d237590a74f0ec324",
+      "fuente": "hohenheim"
+    },
+    {
+      "archivo": "Preprocessed.zip",
+      "bytes": 5819018,
+      "sha256": "0b25c63ea246063991b6a1e7422b50ca1f8ae4abc77450190aa964135811d55d",
+      "fuente": "hohenheim"
+    },
+    {
+      "archivo": "overview.csv",
+      "bytes": 73881,
+      "sha256": "faeeaa33ffc5cd0771a9c5218c4c8ab478cec90895627f9ca2b28cfcf34ca173",
+      "fuente": "hohenheim"
+    },
+    {
+      "archivo": "experiment_actions.csv",
+      "bytes": 5362,
+      "sha256": "8ac92d6c4c628233aa083ef53cdf86e30275ec73d01670ca342922c5dc8b4f2e",
+      "fuente": "hohenheim"
+    },
+    {
+      "archivo": "DataPreprocessing.ipynb",
+      "bytes": 11978,
+      "sha256": "933057fb881862f3bb9cf9274986c4f1b4db154ffee77abc90bc8ec0133a5d93",
+      "fuente": "hohenheim"
+    },
+    {
+      "archivo": "bio_data_10mindata_4d.csv",
+      "bytes": 2807187,
+      "sha256": "0685420043e661e12292fd00157279a84362fe5829d1475f66ad7fea25605124",
+      "fuente": "hospital"
+    }
+  ],
+  "configuracion": {
+    "horizonte_min": 30,
+    "paso_rejilla_s": 60,
+    "agregacion_s": 90,
+    "ventanas_min": [
+      5,
+      10,
+      15
+    ],
+    "hueco_max_s": 180,
+    "cobertura_min_ventana": 0.8,
+    "cobertura_min_horizonte": 0.9,
+    "fusion_episodios_min": 10,
+    "rango_min_c": 2.0,
+    "rango_max_c": 8.0
+  },
+  "hohenheim": {
+    "procedencia": {
+      "titulo": "Temperature and Humidity Time Series of Cold Storage Room Monitoring",
+      "autores": "Henrichs, E.; Stoll, F.; Krupitzer, C. (University of Hohenheim)",
+      "doi": "10.5281/zenodo.15130001",
+      "licencia": "Creative Commons Attribution 4.0 International (CC BY 4.0)",
+      "publicado": "2025-04-03 (v1)",
+      "articulo_relacionado": "Henrichs, Stoll, Krupitzer. Towards Self-Adaptive Monitoring of Storage Environments with Distributed Sensor Systems. IEEE ACSOS-C 2025, pp. 85-90. DOI 10.1109/ACSOS-C66519.2025.00033",
+      "sensor": "DHT22 (9 unidades) en registradores Arduino, muestreo 5 s"
+    },
+    "importacion": {
+      "fuente": "hohenheim",
+      "archivos": {
+        "SENSOR01.CSV": 156019,
+        "SENSOR02.CSV": 156980,
+        "SENSOR03.CSV": 84450,
+        "SENSOR04.CSV": 151248,
+        "SENSOR05.CSV": 31146,
+        "SENSOR06.CSV": 156887,
+        "SENSOR07.CSV": 156885,
+        "SENSOR08.CSV": 156863,
+        "SENSOR09.CSV": 32717
+      },
+      "filas_leidas": 1083195,
+      "filas_validas": 1083195,
+      "descartes": {
+        "cabecera_repetida": 4
+      },
+      "advertencias": []
+    },
+    "esquema_original": "CSV ';' sin zona horaria: Date (dd.mm.yyyy); Time (HH:MM:SS); Temperature (C); Humidity (%). Cabecera repetida en cada reinicio del registrador.",
+    "zona_horaria": "Supuesta CEST (UTC+2) para datos y acciones; convertida a UTC.",
+    "periodo_experimento_utc": [
+      "2024-09-02T07:45:00+00:00",
+      "2024-09-11T09:22:00+00:00"
+    ],
+    "perfil_crudo_por_sensor": {
+      "SENSOR01": {
+        "registros": 156019,
+        "temperaturas_validas": 156019,
+        "nulos_temperatura": 0,
+        "inicio_utc": "2024-09-02T07:26:30+00:00",
+        "fin_utc": "2024-09-11T09:28:30+00:00",
+        "duracion_h": 218.03,
+        "intervalo_mediana_s": 5.0,
+        "intervalo_p95_s": 5.0,
+        "intervalos_irregulares": 1,
+        "huecos_mayores_hueco_max": 1,
+        "hueco_max_s": 4835.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 5.3,
+        "temp_max": 42.2,
+        "temp_mediana": 9.4,
+        "pct_en_rango": 39.96,
+        "pct_sobre_max": 60.04,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      },
+      "SENSOR02": {
+        "registros": 156980,
+        "temperaturas_validas": 156980,
+        "nulos_temperatura": 0,
+        "inicio_utc": "2024-09-02T07:26:20+00:00",
+        "fin_utc": "2024-09-11T09:27:55+00:00",
+        "duracion_h": 218.03,
+        "intervalo_mediana_s": 5.0,
+        "intervalo_p95_s": 5.0,
+        "intervalos_irregulares": 0,
+        "huecos_mayores_hueco_max": 0,
+        "hueco_max_s": 5.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 5.8,
+        "temp_max": 38.7,
+        "temp_mediana": 9.3,
+        "pct_en_rango": 38.82,
+        "pct_sobre_max": 61.18,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      },
+      "SENSOR03": {
+        "registros": 84450,
+        "temperaturas_validas": 84450,
+        "nulos_temperatura": 0,
+        "inicio_utc": "2024-09-02T07:27:50+00:00",
+        "fin_utc": "2024-09-11T09:24:55+00:00",
+        "duracion_h": 217.95,
+        "intervalo_mediana_s": 5.0,
+        "intervalo_p95_s": 5.0,
+        "intervalos_irregulares": 2,
+        "huecos_mayores_hueco_max": 1,
+        "hueco_max_s": 362295.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 4.8,
+        "temp_max": 21.2,
+        "temp_mediana": 6.0,
+        "pct_en_rango": 86.07,
+        "pct_sobre_max": 13.93,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      },
+      "SENSOR04": {
+        "registros": 151248,
+        "temperaturas_validas": 151248,
+        "nulos_temperatura": 0,
+        "inicio_utc": "2024-09-02T07:28:45+00:00",
+        "fin_utc": "2024-09-11T01:32:40+00:00",
+        "duracion_h": 210.07,
+        "intervalo_mediana_s": 5.0,
+        "intervalo_p95_s": 5.0,
+        "intervalos_irregulares": 0,
+        "huecos_mayores_hueco_max": 0,
+        "hueco_max_s": 5.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 5.6,
+        "temp_max": 22.0,
+        "temp_mediana": 7.4,
+        "pct_en_rango": 53.4,
+        "pct_sobre_max": 46.6,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      },
+      "SENSOR05": {
+        "registros": 31146,
+        "temperaturas_validas": 31146,
+        "nulos_temperatura": 0,
+        "inicio_utc": "2024-09-09T14:13:15+00:00",
+        "fin_utc": "2024-09-11T09:28:40+00:00",
+        "duracion_h": 43.26,
+        "intervalo_mediana_s": 5.0,
+        "intervalo_p95_s": 5.0,
+        "intervalos_irregulares": 0,
+        "huecos_mayores_hueco_max": 0,
+        "hueco_max_s": 5.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 6.9,
+        "temp_max": 13.3,
+        "temp_mediana": 7.7,
+        "pct_en_rango": 65.07,
+        "pct_sobre_max": 34.93,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      },
+      "SENSOR06": {
+        "registros": 156887,
+        "temperaturas_validas": 156887,
+        "nulos_temperatura": 0,
+        "inicio_utc": "2024-09-02T07:31:55+00:00",
+        "fin_utc": "2024-09-11T09:25:45+00:00",
+        "duracion_h": 217.9,
+        "intervalo_mediana_s": 5.0,
+        "intervalo_p95_s": 5.0,
+        "intervalos_irregulares": 0,
+        "huecos_mayores_hueco_max": 0,
+        "hueco_max_s": 5.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 5.1,
+        "temp_max": 22.5,
+        "temp_mediana": 6.7,
+        "pct_en_rango": 58.25,
+        "pct_sobre_max": 41.75,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      },
+      "SENSOR07": {
+        "registros": 156885,
+        "temperaturas_validas": 156885,
+        "nulos_temperatura": 0,
+        "inicio_utc": "2024-09-02T07:33:30+00:00",
+        "fin_utc": "2024-09-11T09:27:10+00:00",
+        "duracion_h": 217.89,
+        "intervalo_mediana_s": 5.0,
+        "intervalo_p95_s": 5.0,
+        "intervalos_irregulares": 0,
+        "huecos_mayores_hueco_max": 0,
+        "hueco_max_s": 5.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 6.0,
+        "temp_max": 22.8,
+        "temp_mediana": 7.5,
+        "pct_en_rango": 53.48,
+        "pct_sobre_max": 46.52,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      },
+      "SENSOR08": {
+        "registros": 156863,
+        "temperaturas_validas": 156863,
+        "nulos_temperatura": 0,
+        "inicio_utc": "2024-09-02T07:35:25+00:00",
+        "fin_utc": "2024-09-11T09:27:15+00:00",
+        "duracion_h": 217.86,
+        "intervalo_mediana_s": 5.0,
+        "intervalo_p95_s": 5.0,
+        "intervalos_irregulares": 0,
+        "huecos_mayores_hueco_max": 0,
+        "hueco_max_s": 5.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 9.0,
+        "temp_max": 22.3,
+        "temp_mediana": 10.8,
+        "pct_en_rango": 0.0,
+        "pct_sobre_max": 100.0,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      },
+      "SENSOR09": {
+        "registros": 32717,
+        "temperaturas_validas": 32717,
+        "nulos_temperatura": 0,
+        "inicio_utc": "2024-09-09T12:00:00+00:00",
+        "fin_utc": "2024-09-11T09:26:20+00:00",
+        "duracion_h": 45.44,
+        "intervalo_mediana_s": 5.0,
+        "intervalo_p95_s": 5.0,
+        "intervalos_irregulares": 0,
+        "huecos_mayores_hueco_max": 0,
+        "hueco_max_s": 5.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 5.4,
+        "temp_max": 12.7,
+        "temp_mediana": 6.6,
+        "pct_en_rango": 76.08,
+        "pct_sobre_max": 23.92,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      }
+    },
+    "perfil_periodo_por_sensor": {
+      "SENSOR01": {
+        "registros": 155719,
+        "temperaturas_validas": 155719,
+        "nulos_temperatura": 0,
+        "inicio_utc": "2024-09-02T07:45:00+00:00",
+        "fin_utc": "2024-09-11T09:22:00+00:00",
+        "duracion_h": 217.62,
+        "intervalo_mediana_s": 5.0,
+        "intervalo_p95_s": 5.0,
+        "intervalos_irregulares": 1,
+        "huecos_mayores_hueco_max": 1,
+        "hueco_max_s": 4835.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 5.3,
+        "temp_max": 42.2,
+        "temp_mediana": 9.4,
+        "pct_en_rango": 39.99,
+        "pct_sobre_max": 60.01,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      },
+      "SENSOR02": {
+        "registros": 156685,
+        "temperaturas_validas": 156685,
+        "nulos_temperatura": 0,
+        "inicio_utc": "2024-09-02T07:45:00+00:00",
+        "fin_utc": "2024-09-11T09:22:00+00:00",
+        "duracion_h": 217.62,
+        "intervalo_mediana_s": 5.0,
+        "intervalo_p95_s": 5.0,
+        "intervalos_irregulares": 0,
+        "huecos_mayores_hueco_max": 0,
+        "hueco_max_s": 5.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 5.8,
+        "temp_max": 38.7,
+        "temp_mediana": 9.3,
+        "pct_en_rango": 38.86,
+        "pct_sobre_max": 61.14,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      },
+      "SENSOR03": {
+        "registros": 84409,
+        "temperaturas_validas": 84409,
+        "nulos_temperatura": 0,
+        "inicio_utc": "2024-09-06T12:08:00+00:00",
+        "fin_utc": "2024-09-11T09:22:00+00:00",
+        "duracion_h": 117.23,
+        "intervalo_mediana_s": 5.0,
+        "intervalo_p95_s": 5.0,
+        "intervalos_irregulares": 0,
+        "huecos_mayores_hueco_max": 0,
+        "hueco_max_s": 5.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 4.8,
+        "temp_max": 12.3,
+        "temp_mediana": 6.0,
+        "pct_en_rango": 86.07,
+        "pct_sobre_max": 13.93,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      },
+      "SENSOR04": {
+        "registros": 151053,
+        "temperaturas_validas": 151053,
+        "nulos_temperatura": 0,
+        "inicio_utc": "2024-09-02T07:45:00+00:00",
+        "fin_utc": "2024-09-11T01:32:40+00:00",
+        "duracion_h": 209.79,
+        "intervalo_mediana_s": 5.0,
+        "intervalo_p95_s": 5.0,
+        "intervalos_irregulares": 0,
+        "huecos_mayores_hueco_max": 0,
+        "hueco_max_s": 5.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 5.6,
+        "temp_max": 19.7,
+        "temp_mediana": 7.4,
+        "pct_en_rango": 53.47,
+        "pct_sobre_max": 46.53,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      },
+      "SENSOR05": {
+        "registros": 31066,
+        "temperaturas_validas": 31066,
+        "nulos_temperatura": 0,
+        "inicio_utc": "2024-09-09T14:13:15+00:00",
+        "fin_utc": "2024-09-11T09:22:00+00:00",
+        "duracion_h": 43.15,
+        "intervalo_mediana_s": 5.0,
+        "intervalo_p95_s": 5.0,
+        "intervalos_irregulares": 0,
+        "huecos_mayores_hueco_max": 0,
+        "hueco_max_s": 5.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 6.9,
+        "temp_max": 13.3,
+        "temp_mediana": 7.7,
+        "pct_en_rango": 65.01,
+        "pct_sobre_max": 34.99,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      },
+      "SENSOR06": {
+        "registros": 156685,
+        "temperaturas_validas": 156685,
+        "nulos_temperatura": 0,
+        "inicio_utc": "2024-09-02T07:45:00+00:00",
+        "fin_utc": "2024-09-11T09:22:00+00:00",
+        "duracion_h": 217.62,
+        "intervalo_mediana_s": 5.0,
+        "intervalo_p95_s": 5.0,
+        "intervalos_irregulares": 0,
+        "huecos_mayores_hueco_max": 0,
+        "hueco_max_s": 5.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 5.1,
+        "temp_max": 17.2,
+        "temp_mediana": 6.7,
+        "pct_en_rango": 58.29,
+        "pct_sobre_max": 41.71,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      },
+      "SENSOR07": {
+        "registros": 156685,
+        "temperaturas_validas": 156685,
+        "nulos_temperatura": 0,
+        "inicio_utc": "2024-09-02T07:45:00+00:00",
+        "fin_utc": "2024-09-11T09:22:00+00:00",
+        "duracion_h": 217.62,
+        "intervalo_mediana_s": 5.0,
+        "intervalo_p95_s": 5.0,
+        "intervalos_irregulares": 0,
+        "huecos_mayores_hueco_max": 0,
+        "hueco_max_s": 5.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 6.0,
+        "temp_max": 17.2,
+        "temp_mediana": 7.5,
+        "pct_en_rango": 53.51,
+        "pct_sobre_max": 46.49,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      },
+      "SENSOR08": {
+        "registros": 156685,
+        "temperaturas_validas": 156685,
+        "nulos_temperatura": 0,
+        "inicio_utc": "2024-09-02T07:45:00+00:00",
+        "fin_utc": "2024-09-11T09:22:00+00:00",
+        "duracion_h": 217.62,
+        "intervalo_mediana_s": 5.0,
+        "intervalo_p95_s": 5.0,
+        "intervalos_irregulares": 0,
+        "huecos_mayores_hueco_max": 0,
+        "hueco_max_s": 5.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 9.0,
+        "temp_max": 19.3,
+        "temp_mediana": 10.8,
+        "pct_en_rango": 0.0,
+        "pct_sobre_max": 100.0,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      },
+      "SENSOR09": {
+        "registros": 32665,
+        "temperaturas_validas": 32665,
+        "nulos_temperatura": 0,
+        "inicio_utc": "2024-09-09T12:00:00+00:00",
+        "fin_utc": "2024-09-11T09:22:00+00:00",
+        "duracion_h": 45.37,
+        "intervalo_mediana_s": 5.0,
+        "intervalo_p95_s": 5.0,
+        "intervalos_irregulares": 0,
+        "huecos_mayores_hueco_max": 0,
+        "hueco_max_s": 5.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 5.4,
+        "temp_max": 12.7,
+        "temp_mediana": 6.6,
+        "pct_en_rango": 76.11,
+        "pct_sobre_max": 23.89,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      }
+    },
+    "decisiones_inclusion": {
+      "SENSOR01": {
+        "incluido": false,
+        "motivo": "sensor_movil_sin_registro_de_movimientos",
+        "detalle": "Declarado móvil por los autores; alcanza 42.2 °C (fuera de la cámara) y el CSV de acciones no registra sus movimientos."
+      },
+      "SENSOR02": {
+        "incluido": false,
+        "motivo": "sensor_movil_sin_registro_de_movimientos",
+        "detalle": "Declarado móvil por los autores; alcanza 38.7 °C (fuera de la cámara) y el CSV de acciones no registra sus movimientos."
+      },
+      "SENSOR03": {
+        "incluido": true,
+        "motivo": "incluido",
+        "detalle": ""
+      },
+      "SENSOR04": {
+        "incluido": true,
+        "motivo": "incluido",
+        "detalle": ""
+      },
+      "SENSOR05": {
+        "incluido": true,
+        "motivo": "incluido",
+        "detalle": ""
+      },
+      "SENSOR06": {
+        "incluido": true,
+        "motivo": "incluido",
+        "detalle": ""
+      },
+      "SENSOR07": {
+        "incluido": true,
+        "motivo": "incluido",
+        "detalle": ""
+      },
+      "SENSOR08": {
+        "incluido": false,
+        "motivo": "sin_lecturas_en_rango",
+        "detalle": "Mínimo 9.0 °C: nunca dentro de 2-8 °C, no aporta instantes preventivos y su episodio permanente fundiría todos los incidentes del recinto."
+      },
+      "SENSOR09": {
+        "incluido": true,
+        "motivo": "incluido",
+        "detalle": ""
+      }
+    },
+    "limpieza": {
+      "descartes": {
+        "duplicados_exactos": 0,
+        "timestamps_en_conflicto": 0,
+        "temperaturas_fisicamente_imposibles": 0
+      },
+      "por_serie": {
+        "SENSOR03": {
+          "duplicados_exactos": 0,
+          "timestamps_en_conflicto": 0,
+          "temperaturas_fisicamente_imposibles": 0
+        },
+        "SENSOR04": {
+          "duplicados_exactos": 0,
+          "timestamps_en_conflicto": 0,
+          "temperaturas_fisicamente_imposibles": 0
+        },
+        "SENSOR05": {
+          "duplicados_exactos": 0,
+          "timestamps_en_conflicto": 0,
+          "temperaturas_fisicamente_imposibles": 0
+        },
+        "SENSOR06": {
+          "duplicados_exactos": 0,
+          "timestamps_en_conflicto": 0,
+          "temperaturas_fisicamente_imposibles": 0
+        },
+        "SENSOR07": {
+          "duplicados_exactos": 0,
+          "timestamps_en_conflicto": 0,
+          "temperaturas_fisicamente_imposibles": 0
+        },
+        "SENSOR09": {
+          "duplicados_exactos": 0,
+          "timestamps_en_conflicto": 0,
+          "temperaturas_fisicamente_imposibles": 0
+        }
+      }
+    },
+    "acciones": {
+      "Door opened": 56,
+      "Door closed": 51,
+      "Products in": 9,
+      "Products out": 9,
+      "Begin": 1,
+      "End": 1
+    },
+    "aperturas_puerta": 56,
+    "duracion_aperturas_min": {
+      "count": 56.0,
+      "mean": 18.96,
+      "std": 10.63,
+      "min": 1.0,
+      "25%": 12.5,
+      "50%": 15.0,
+      "75%": 30.0,
+      "max": 30.0
+    },
+    "preprocessed_zip": {
+      "usado": false,
+      "motivo": "Derivado de Raw.zip con relleno NaN a 5 s para alinear sensores; se trabaja sobre los datos originales y se tratan los huecos explícitamente.",
+      "archivos": {
+        "SENSOR01_preprocessed.csv": {
+          "filas": 156835,
+          "nan_temperatura": 966
+        },
+        "SENSOR02_preprocessed.csv": {
+          "filas": 156835,
+          "nan_temperatura": 0
+        },
+        "SENSOR03_preprocessed.csv": {
+          "filas": 156835,
+          "nan_temperatura": 72391
+        },
+        "SENSOR04_preprocessed.csv": {
+          "filas": 156835,
+          "nan_temperatura": 5667
+        },
+        "SENSOR05_preprocessed.csv": {
+          "filas": 156835,
+          "nan_temperatura": 125734
+        },
+        "SENSOR06_preprocessed.csv": {
+          "filas": 156835,
+          "nan_temperatura": 0
+        },
+        "SENSOR07_preprocessed.csv": {
+          "filas": 156835,
+          "nan_temperatura": 0
+        },
+        "SENSOR08_preprocessed.csv": {
+          "filas": 156835,
+          "nan_temperatura": 0
+        },
+        "SENSOR09_preprocessed.csv": {
+          "filas": 156835,
+          "nan_temperatura": 124135
+        }
+      }
+    },
+    "overview_csv": {
+      "usado": false,
+      "comparacion_inicio_fin": {
+        "SENSOR01": {
+          "overview_inicio": "2024-09-02 09:26:30",
+          "overview_fin": "2024-09-11 11:28:30"
+        },
+        "SENSOR02": {
+          "overview_inicio": "2024-09-02 09:26:20",
+          "overview_fin": "2024-09-11 11:27:55"
+        },
+        "SENSOR03": {
+          "overview_inicio": "2024-09-02 09:27:50",
+          "overview_fin": "2024-09-11 11:24:55"
+        },
+        "SENSOR04": {
+          "overview_inicio": "2024-09-02 09:28:45",
+          "overview_fin": "2024-09-11 03:32:40"
+        },
+        "SENSOR05": {
+          "overview_inicio": "2024-09-09 16:13:15",
+          "overview_fin": "2024-09-11 11:28:40"
+        },
+        "SENSOR06": {
+          "overview_inicio": "2024-09-02 09:31:55",
+          "overview_fin": "2024-09-11 11:25:45"
+        },
+        "SENSOR07": {
+          "overview_inicio": "2024-09-02 09:33:30",
+          "overview_fin": "2024-09-11 11:27:10"
+        },
+        "SENSOR08": {
+          "overview_inicio": "2024-09-02 09:35:25",
+          "overview_fin": "2024-09-11 11:27:15"
+        },
+        "SENSOR09": {
+          "overview_inicio": "2024-09-09 14:00:00",
+          "overview_fin": "2024-09-11 11:26:20"
+        }
+      }
+    },
+    "notebook": {
+      "ejecutado": false,
+      "celdas_codigo": 7,
+      "importaciones": [
+        "csv",
+        "os",
+        "pandas"
+      ],
+      "escribe_archivos": true,
+      "sensores_moviles_declarados": [
+        "[\"SENSOR01\", \"SENSOR02\"]"
+      ],
+      "observacion": "Elimina cabeceras repetidas, recorta al periodo común y rellena con NaN a 5 s los sensores incompletos. No accede a red ni ejecuta comandos del sistema."
+    },
+    "eventos": {
+      "puntos_rejilla": 51052,
+      "segmentos": 6,
+      "puntos_cercanos_a_limite_0_5c": 2416,
+      "episodios_total": 50,
+      "episodios_inicio_no_observado": 6,
+      "episodios_altos": 50,
+      "episodios_bajos": 0,
+      "incidentes_independientes": 10,
+      "incidentes_solo_arranque_en_caliente": 0,
+      "por_serie": {
+        "SENSOR03": {
+          "episodios": 9,
+          "inicio_no_observado": 1,
+          "altas": 9,
+          "bajas": 0,
+          "duracion_mediana_min": 67.0,
+          "duracion_max_min": 536.0
+        },
+        "SENSOR04": {
+          "episodios": 7,
+          "inicio_no_observado": 1,
+          "altas": 7,
+          "bajas": 0,
+          "duracion_mediana_min": 565.0,
+          "duracion_max_min": 3496.0
+        },
+        "SENSOR05": {
+          "episodios": 5,
+          "inicio_no_observado": 1,
+          "altas": 5,
+          "bajas": 0,
+          "duracion_mediana_min": 56.0,
+          "duracion_max_min": 505.0
+        },
+        "SENSOR06": {
+          "episodios": 12,
+          "inicio_no_observado": 1,
+          "altas": 12,
+          "bajas": 0,
+          "duracion_mediana_min": 92.5,
+          "duracion_max_min": 2602.0
+        },
+        "SENSOR07": {
+          "episodios": 11,
+          "inicio_no_observado": 1,
+          "altas": 11,
+          "bajas": 0,
+          "duracion_mediana_min": 88.0,
+          "duracion_max_min": 3522.0
+        },
+        "SENSOR09": {
+          "episodios": 6,
+          "inicio_no_observado": 1,
+          "altas": 6,
+          "bajas": 0,
+          "duracion_mediana_min": 38.5,
+          "duracion_max_min": 318.0
+        }
+      },
+      "estados_etiqueta": {
+        "negativo": 29502,
+        "fuera_de_rango": 20052,
+        "positivo": 1174,
+        "no_etiquetable_horizonte_incompleto": 180,
+        "en_episodio": 144
+      }
+    }
+  },
+  "hospital": {
+    "procedencia": {
+      "titulo": "Multi-Node IoT Dataset for Real-Time Hospital Cold-Chain Monitoring",
+      "autores": "Lon Kan Perez, I. B. K. (Universidad Autónoma del Perú)",
+      "doi": "10.5281/zenodo.22101912",
+      "licencia": "Creative Commons Attribution 4.0 International (CC BY 4.0)",
+      "publicado": "2026-08-25 (v1)",
+      "sensor": "dsTemperature (por su nombre, DS18B20; no documentado en el registro)"
+    },
+    "importacion": {
+      "fuente": "hospital",
+      "archivos": {
+        "bio_data_10mindata_4d.csv": 16379
+      },
+      "filas_leidas": 16379,
+      "filas_validas": 16311,
+      "descartes": {
+        "dsTemperature_vacia": 68
+      },
+      "advertencias": [
+        "13279 filas traen 12 campos con una cabecera de 9: los 3 campos finales no están nombrados en el archivo."
+      ]
+    },
+    "esquema_original": "CSV ',' con cabecera de 9 nombres (_id, __v, createdAt, datetime, doorStatus, dsTemperature, humidity, time_slot, username); 13 279 filas traen 3 campos más sin nombre.",
+    "columnas_sin_nombre": {
+      "interpretacion": "ref_dispositivo (ObjectId), temperatura auxiliar ~20-25 °C (probable sensor ambiental) y updatedAt. Semántica INFERIDA, no documentada: no se usan como variables.",
+      "comparacion_9_vs_12_campos": {
+        "BLD26-001": {
+          "9": {
+            "filas": 1032,
+            "dsTemperature_mediana": 5.1,
+            "temp_aux_mediana": null,
+            "humidity_mediana": 52.0
+          },
+          "12": {
+            "filas": 4416,
+            "dsTemperature_mediana": 5.0,
+            "temp_aux_mediana": 21.8,
+            "humidity_mediana": 52.0
+          }
+        },
+        "MHT2025-001": {
+          "9": {
+            "filas": 1036,
+            "dsTemperature_mediana": 4.6,
+            "temp_aux_mediana": null,
+            "humidity_mediana": 54.0
+          },
+          "12": {
+            "filas": 4423,
+            "dsTemperature_mediana": 4.6,
+            "temp_aux_mediana": 21.6,
+            "humidity_mediana": 54.0
+          }
+        },
+        "ULT26-001": {
+          "9": {
+            "filas": 1032,
+            "dsTemperature_mediana": -31.6,
+            "temp_aux_mediana": null,
+            "humidity_mediana": 48.0
+          },
+          "12": {
+            "filas": 4440,
+            "dsTemperature_mediana": -31.4,
+            "temp_aux_mediana": 23.3,
+            "humidity_mediana": 48.0
+          }
+        }
+      },
+      "desplazamiento_detectado": false
+    },
+    "zona_horaria": "Timestamps ISO 8601 con 'Z' (UTC).",
+    "perfil_por_equipo": {
+      "BLD26-001": {
+        "registros": 5448,
+        "temperaturas_validas": 5392,
+        "nulos_temperatura": 56,
+        "inicio_utc": "2026-08-21T17:28:03+00:00",
+        "fin_utc": "2026-08-25T14:12:00+00:00",
+        "duracion_h": 92.73,
+        "intervalo_mediana_s": 60.0,
+        "intervalo_p95_s": 61.0,
+        "intervalos_irregulares": 8,
+        "huecos_mayores_hueco_max": 7,
+        "hueco_max_s": 1800.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 4.4,
+        "temp_max": 9.9,
+        "temp_mediana": 5.0,
+        "pct_en_rango": 99.83,
+        "pct_sobre_max": 0.17,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      },
+      "MHT2025-001": {
+        "registros": 5459,
+        "temperaturas_validas": 5448,
+        "nulos_temperatura": 11,
+        "inicio_utc": "2026-08-21T17:17:15+00:00",
+        "fin_utc": "2026-08-25T14:12:01+00:00",
+        "duracion_h": 92.91,
+        "intervalo_mediana_s": 60.0,
+        "intervalo_p95_s": 61.0,
+        "intervalos_irregulares": 13,
+        "huecos_mayores_hueco_max": 10,
+        "hueco_max_s": 1800.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": 3.1,
+        "temp_max": 5.4,
+        "temp_mediana": 4.6,
+        "pct_en_rango": 100.0,
+        "pct_sobre_max": 0.0,
+        "pct_bajo_min": 0.0,
+        "clase_equipo": "refrigeracion_compatible"
+      },
+      "ULT26-001": {
+        "registros": 5472,
+        "temperaturas_validas": 5471,
+        "nulos_temperatura": 1,
+        "inicio_utc": "2026-08-21T17:43:38+00:00",
+        "fin_utc": "2026-08-25T14:12:00+00:00",
+        "duracion_h": 92.47,
+        "intervalo_mediana_s": 60.0,
+        "intervalo_p95_s": 61.0,
+        "intervalos_irregulares": 8,
+        "huecos_mayores_hueco_max": 5,
+        "hueco_max_s": 2401.0,
+        "timestamps_duplicados": 0,
+        "timestamps_no_monotonos": 0,
+        "temperaturas_fisicamente_imposibles": 0,
+        "temp_min": -32.1,
+        "temp_max": -29.9,
+        "temp_mediana": -31.5,
+        "pct_en_rango": 0.0,
+        "pct_sobre_max": 0.0,
+        "pct_bajo_min": 100.0,
+        "clase_equipo": "ultracongelacion_incompatible"
+      }
+    },
+    "decisiones_inclusion": {
+      "BLD26-001": {
+        "incluido": true,
+        "motivo": "incluido",
+        "detalle": ""
+      },
+      "MHT2025-001": {
+        "incluido": true,
+        "motivo": "incluido",
+        "detalle": ""
+      },
+      "ULT26-001": {
+        "incluido": false,
+        "motivo": "ultracongelacion_incompatible",
+        "detalle": "Mediana -31.5 °C: equipo no comparable con un refrigerador de 2-8 °C; no se transforma para parecerlo."
+      }
+    },
+    "limpieza": {
+      "descartes": {
+        "duplicados_exactos": 0,
+        "timestamps_en_conflicto": 0,
+        "temperaturas_fisicamente_imposibles": 0
+      },
+      "por_serie": {
+        "BLD26-001": {
+          "duplicados_exactos": 0,
+          "timestamps_en_conflicto": 0,
+          "temperaturas_fisicamente_imposibles": 0
+        },
+        "MHT2025-001": {
+          "duplicados_exactos": 0,
+          "timestamps_en_conflicto": 0,
+          "temperaturas_fisicamente_imposibles": 0
+        }
+      }
+    },
+    "aperturas_puerta_registradas": {
+      "BLD26-001": 12,
+      "MHT2025-001": 5
+    },
+    "eventos": {
+      "puntos_rejilla": 10911,
+      "segmentos": 18,
+      "puntos_cercanos_a_limite_0_5c": 8,
+      "episodios_total": 5,
+      "episodios_inicio_no_observado": 0,
+      "episodios_altos": 5,
+      "episodios_bajos": 0,
+      "incidentes_independientes": 5,
+      "incidentes_solo_arranque_en_caliente": 0,
+      "por_serie": {
+        "BLD26-001": {
+          "episodios": 5,
+          "inicio_no_observado": 0,
+          "altas": 5,
+          "bajas": 0,
+          "duracion_mediana_min": 1.0,
+          "duracion_max_min": 6.0
+        }
+      },
+      "estados_etiqueta": {
+        "negativo": 10595,
+        "no_etiquetable_horizonte_incompleto": 138,
+        "positivo": 131,
+        "sin_dato": 36,
+        "fuera_de_rango": 9,
+        "en_episodio": 2
+      }
+    }
+  }
+}

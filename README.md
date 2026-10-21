@@ -14,6 +14,7 @@ mensajes con el nodo ColdCare1023/IoT. Es la API que consume ColdCare1023/Fronte
 | [`simulacion_excursiones/`](simulacion_excursiones/README.md) | Excursiones simuladas para la demostración |
 | [`infra-local/`](infra-local/README.md) | PostgreSQL + EMQX (TLS, ACL) + backend en Docker, para probar todo en una PC |
 | `docs/evidencias/` | Evidencia de QA por historia de usuario |
+| [`docs/ml/`](docs/ml/) | Modelo preventivo Random Forest: auditoría de datos, metodología, resultados, integración, reproducibilidad y alcance del entrenamiento (`10_TRAINING_EXTENT_AND_BEST_SCENARIO.md`) |
 
 ## Ejecutar
 

@@ -17,6 +17,12 @@ omit =
     src/infrastructure/ai/train_model.py
     src/infrastructure/ai/train_model_v2.py
     src/infrastructure/ai/train_model_v3.py
+    # Pipeline offline del modelo preventivo: orquestación, figuras y CLI.
+    # Sus piezas (ingesta, features, etiquetas, partición, métricas, registro,
+    # servicio) sí se miden: tienen pruebas en tests/unit/test_preventivo_*.
+    src/infrastructure/ai/prediccion_preventiva/experimentos.py
+    src/infrastructure/ai/prediccion_preventiva/reporte.py
+    src/infrastructure/ai/prediccion_preventiva/__main__.py
 
 [report]
 exclude_also =
