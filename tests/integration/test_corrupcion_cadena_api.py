@@ -160,3 +160,36 @@ async def test_aislamiento_marca_registro_corrupto_en_bd(client, token_admin, to
 
         model = await session.get(TraceabilityRecordModel, uuid.UUID(registro_id))
         assert model.is_corrupted is True
+
+
+# ── BE-006: solo se aísla corrupción verificada ───────────────────────────
+
+
+async def test_no_se_puede_aislar_un_registro_integro(client, token_admin, token_tecnico, db_session_factory):
+    _ingestar_lectura(client, token_tecnico, "esp32-integro-01")
+    async with db_session_factory() as session:
+        registro = (
+            await session.execute(select(TraceabilityRecordModel).order_by(TraceabilityRecordModel.created_at.asc()))
+        ).scalars().first()
+
+    response = client.post(f"/api/trazabilidad/corrupcion/{registro.id}/aislar", headers=auth_header(token_admin))
+
+    assert response.status_code == 409
+    async with db_session_factory() as session:
+        assert (await session.get(TraceabilityRecordModel, registro.id)).is_corrupted is False
+
+
+async def test_aislar_registro_inexistente_da_404(client, token_admin):
+    response = client.post(
+        "/api/trazabilidad/corrupcion/00000000-0000-0000-0000-000000000000/aislar", headers=auth_header(token_admin)
+    )
+    assert response.status_code == 404
+
+
+async def test_no_se_puede_aislar_dos_veces(client, token_admin, token_tecnico, db_session_factory):
+    _ingestar_lectura(client, token_tecnico, "esp32-corrupto-08")
+    registro_id = await _corromper_primer_registro(db_session_factory)
+    ruta = f"/api/trazabilidad/corrupcion/{registro_id}/aislar"
+
+    assert client.post(ruta, headers=auth_header(token_admin)).status_code == 204
+    assert client.post(ruta, headers=auth_header(token_admin)).status_code == 409

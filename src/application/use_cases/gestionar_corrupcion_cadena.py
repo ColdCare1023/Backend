@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
+from src.application.use_cases.verificar_integridad_registro import VerificarIntegridadRegistroUseCase
+from src.domain.exceptions import DomainError, RecursoNoEncontradoError
 from src.domain.repositories.i_corrupcion_repository import ICorrupcionRepository
 from src.domain.repositories.i_trazabilidad_repository import ITrazabilidadRepository
 from src.domain.value_objects.hash_encadenado import GENESIS_HASH
@@ -37,7 +39,25 @@ class AislarCorrupcionUseCase:
         todos = await self._trazabilidad_repository.listar_todos_ordenados()
         corrupto = next((r for r in todos if r.id == registro_corrupto_id), None)
         if corrupto is None:
-            raise ValueError(f"Registro de trazabilidad no encontrado: {registro_corrupto_id}")
+            raise RecursoNoEncontradoError(f"Registro de trazabilidad no encontrado: {registro_corrupto_id}")
+
+        if await self._trazabilidad_repository.esta_marcado_corrupto(registro_corrupto_id):
+            raise DomainError("El registro ya fue aislado.")
+
+        # BE-006: solo se aísla lo que la verificación demuestra corrupto. Sin
+        # esta comprobación, cualquier eslabón íntegro podía declararse roto
+        # (junto con todo lo posterior de su cadena) y el indicador global de
+        # cadena comprometida quedaba limpio sin que nada lo justificara.
+        resultado = await VerificarIntegridadRegistroUseCase(self._trazabilidad_repository).execute(
+            corrupto.chain_id
+        )
+        if resultado.integra or resultado.detalle_inconsistencia is None:
+            raise DomainError("La cadena del registro es íntegra: no hay corrupción que aislar.")
+        if resultado.detalle_inconsistencia.id != registro_corrupto_id:
+            raise DomainError(
+                "Solo se puede aislar el primer registro inconsistente verificado de la cadena "
+                f"({resultado.detalle_inconsistencia.id})."
+            )
 
         ids_posteriores = [
             r.id

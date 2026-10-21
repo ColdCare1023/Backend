@@ -16,6 +16,10 @@ class ITrazabilidadRepository(ABC):
     async def marcar_posteriores_como_afectados(self, ids: list[UUID]) -> None: ...
 
     @abstractmethod
+    async def esta_marcado_corrupto(self, registro_id: UUID) -> bool:
+        """BE-006: si el registro ya fue aislado como corrupto."""
+
+    @abstractmethod
     async def obtener_ultimo_eslabon(self, chain_id: str) -> tuple[str, int]:
         """Devuelve (hash_actual, chain_seq) del último registro de esa
         cadena, o (GENESIS_HASH, 0) si la cadena aún no tiene registros.

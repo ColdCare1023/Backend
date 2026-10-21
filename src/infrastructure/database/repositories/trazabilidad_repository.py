@@ -124,6 +124,12 @@ class SQLAlchemyTrazabilidadRepository(ITrazabilidadRepository):
         )
         await self._session.flush()
 
+    async def esta_marcado_corrupto(self, registro_id: UUID) -> bool:
+        resultado = await self._session.execute(
+            select(TraceabilityRecordModel.is_corrupted).where(TraceabilityRecordModel.id == registro_id)
+        )
+        return bool(resultado.scalar_one_or_none())
+
     async def marcar_posteriores_como_afectados(self, ids: list[UUID]) -> None:
         if not ids:
             return

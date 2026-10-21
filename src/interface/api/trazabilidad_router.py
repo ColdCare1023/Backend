@@ -10,6 +10,7 @@ from src.application.use_cases.verificar_integridad_registro import (
     VerificarIntegridadPorDispositivoYPeriodoUseCase,
     VerificarIntegridadRegistroUseCase,
 )
+from src.domain.exceptions import DomainError, RecursoNoEncontradoError
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.database.repositories.audit_log_repository import (
     SQLAlchemyAuditLogRepository,
@@ -175,7 +176,12 @@ async def aislar_corrupcion(
         SQLAlchemyCorrupcionRepository(session),
         RegistrarHashEncadenadoUseCase(repositorio),
     )
-    await use_case.execute(registro_id, usuario_id=admin.id)
+    try:
+        await use_case.execute(registro_id, usuario_id=admin.id)
+    except RecursoNoEncontradoError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     # RF-16: dar por rota la evidencia y arrancar una cadena nueva es la
     # intervención manual más sensible del sistema. Antes solo dejaba rastro en
