@@ -108,6 +108,8 @@ class AckLogicoV1(BaseModel):
     boot_id: int = Field(ge=0, le=UINT32)
     seq_no: int = Field(ge=1, le=UINT32)
     status: Literal["committed", "duplicate", "rejected"]
+    # IOT-008: huella SHA-256 (hex) de los bytes exactos recibidos.
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class EventoV1(BaseModel):

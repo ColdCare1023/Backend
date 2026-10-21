@@ -24,6 +24,7 @@ Uso (banco local, ver README.md de esta carpeta):
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -54,7 +55,7 @@ class Almacen:
         self._db.commit()
 
     def guardar(self, t, crudo: str) -> str:
-        """Devuelve 'committed' o 'duplicate'. Conflicto de payload → se audita."""
+        """Devuelve 'committed', 'duplicate' o, ante un conflicto (se audita), 'rejected'."""
         with self._lock:
             ahora = datetime.now(timezone.utc).isoformat()
             try:
@@ -71,6 +72,9 @@ class Almacen:
                     self._db.execute("INSERT INTO conflictos VALUES (?,?,?,?,?)",
                                      (t.device_id, t.boot_id, t.seq_no, ahora, crudo))
                     self._db.commit()
+                    # BE-001 / IOT-008: un conflicto NO libera el registro del
+                    # nodo (se conserva en su cuarentena), como en el backend real.
+                    return "rejected"
                 return "duplicate"
 
     def resumen(self) -> str:
@@ -102,8 +106,11 @@ def main(argv: list[str] | None = None) -> int:
     rng = random.Random(2026)
     contadores = {"recibidos": 0, "invalidos": 0, "acuses": 0}
 
-    def acusar(cliente, device_id: str, boot_id: int, seq_no: int, estado: str, motivo: str | None = None):
+    def acusar(cliente, device_id: str, boot_id: int, seq_no: int, estado: str, motivo: str | None = None,
+               contenido: bytes = b""):
         cuerpo = {"device_id": device_id, "boot_id": boot_id, "seq_no": seq_no, "status": estado}
+        # IOT-008: huella de los bytes recibidos, como el backend real.
+        cuerpo["content_sha256"] = hashlib.sha256(contenido).hexdigest()
         if motivo:
             cuerpo["reason"] = motivo[:120]
         cliente.publish(f"farmacias/{device_id}/ack", json.dumps(cuerpo), qos=1)
@@ -123,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{hora} ✗ mensaje ilegible en {msg.topic}: descartado sin acuse")
                 return
             print(f"{hora} ✗ {ident} no cumple el contrato → rejected ({str(e).splitlines()[0]})")
-            acusar(cliente, *ident, "rejected", "schema")
+            acusar(cliente, *ident, "rejected", "schema", msg.payload)
             return
 
         ident = (t.device_id, t.boot_id, t.seq_no)
@@ -131,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
         sim = " [SIMULADA]" if t.simulated else ""
         if a.modo == "rechazar":
             print(f"{hora} → {ident} {temp}{sim}: rejected (modo rechazar)")
-            acusar(cliente, *ident, "rejected", "modo_rechazar")
+            acusar(cliente, *ident, "rejected", "modo_rechazar", msg.payload)
             return
         estado = almacen.guardar(t, msg.payload.decode())
         if a.modo == "sin_ack" or (a.modo == "intermitente" and rng.random() > a.prob):
@@ -142,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
             threading.Timer(a.retraso, acusar, (cliente, *ident, estado)).start()
             return
         print(f"{hora} ✓ {ident} {temp}{sim}: {estado}")
-        acusar(cliente, *ident, estado)
+        acusar(cliente, *ident, estado, None, msg.payload)
 
     cliente = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"backend-qa-{os.getpid()}",
                           protocol=mqtt.MQTTv311)

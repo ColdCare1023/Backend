@@ -1,4 +1,5 @@
 import contextlib
+import hashlib
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -82,6 +83,7 @@ async def _publicar_ack_lectura(
     estado: str = "commit_confirmado",
     boot_id: int | None = None,
     seq_no: int | None = None,
+    contenido: bytes | None = None,
 ) -> None:
     """HU-07 Escenario 1: el acuse lógico se publica DESPUÉS de que la
     transacción de la lectura ya hizo COMMIT (se llama tras `session.commit()`
@@ -110,6 +112,11 @@ async def _publicar_ack_lectura(
     # y decide por `status` si libera el registro o lo pasa a cuarentena.
     if boot_id is not None and seq_no is not None:
         acuse.update(boot_id=boot_id, seq_no=seq_no, status=contrato_v1.STATUS_ACK.get(estado, "rejected"))
+    # IOT-008: huella de los bytes EXACTOS recibidos. El nodo solo libera el
+    # registro si coincide con la del JSON que publicó: un acuse ajeno (ACL
+    # mal puesta, broker o backend comprometido) no borra evidencia.
+    if contenido is not None:
+        acuse["content_sha256"] = hashlib.sha256(contenido).hexdigest()
     cuerpo = json.dumps(
         acuse,
         # Compacto a propósito: el firmware extrae `reading_id` con una búsqueda de
@@ -401,6 +408,7 @@ async def _rechazar_payload_invalido(
         await _publicar_ack_lectura(
             client, device_id, reading_id, datetime.now(timezone.utc), estado="payload_rechazado",
             boot_id=boot_id, seq_no=seq_no,
+            contenido=message.payload,
         )
 
 
@@ -478,6 +486,7 @@ async def _procesar_lectura_mqtt(
                 await _publicar_ack_lectura(
                     client, payload.device_id, payload.reading_id, payload.timestamp,
                     estado="payload_rechazado", boot_id=payload.boot_id, seq_no=payload.seq_no,
+                    contenido=message.payload,
                 )
                 return
 
@@ -566,6 +575,7 @@ async def _procesar_lectura_mqtt(
                 await _publicar_ack_lectura(
                     client, payload.device_id, payload.reading_id, payload.timestamp,
                     estado="conflicto_payload", boot_id=payload.boot_id, seq_no=payload.seq_no,
+                    contenido=message.payload,
                 )
                 return
             # HU-07 Escenario 2: el nodo puede reenviar un bloque cuyo COMMIT
@@ -575,6 +585,7 @@ async def _procesar_lectura_mqtt(
             await _publicar_ack_lectura(
                 client, payload.device_id, payload.reading_id or existente.reading_id, payload.timestamp,
                 estado="duplicado", boot_id=payload.boot_id, seq_no=payload.seq_no,
+                contenido=message.payload,
             )
             return
 
@@ -600,6 +611,7 @@ async def _procesar_lectura_mqtt(
             await _publicar_ack_lectura(
                 client, payload.device_id, payload.reading_id, payload.timestamp,
                 estado="dispositivo_no_autorizado", boot_id=payload.boot_id, seq_no=payload.seq_no,
+                contenido=message.payload,
             )
             return
         except LecturaInvalidaError as exc:
@@ -615,6 +627,7 @@ async def _procesar_lectura_mqtt(
             await _publicar_ack_lectura(
                 client, payload.device_id, payload.reading_id, payload.timestamp,
                 estado="lectura_invalida", boot_id=payload.boot_id, seq_no=payload.seq_no,
+                contenido=message.payload,
             )
             return
         episodio_actual = await alerta_repository.obtener_episodio_abierto(payload.device_id)
@@ -632,6 +645,7 @@ async def _procesar_lectura_mqtt(
     await _publicar_ack_lectura(
         client, lectura_guardada.device_id, lectura_guardada.reading_id, lectura_guardada.timestamp,
         boot_id=lectura_guardada.boot_id, seq_no=lectura_guardada.seq_no,
+        contenido=message.payload,
     )
 
     evento_lectura = lectura_to_response(lectura_guardada).model_dump(mode="json")

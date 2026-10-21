@@ -7,6 +7,7 @@ fuera de la ventana de antigüedad máxima (48 h) y, donde hace falta, `seq_no`
 para no chocar entre casos.
 """
 
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -248,3 +249,17 @@ async def test_eventos_de_la_consola_del_nodo_se_auditan(entorno, event_type, de
         acciones = {a.accion for a in (await session.execute(select(AuditLogModel))).scalars().all()}
     assert accion in acciones
     assert mudo.eventos[0][1] == event_type
+
+
+@pytest.mark.asyncio
+async def test_el_acuse_lleva_la_huella_de_los_bytes_recibidos(entorno):
+    """IOT-008: el nodo solo libera el registro si `content_sha256` coincide
+    con la huella del JSON exacto que publicó."""
+    espia = _Espia()
+    cuerpo = json.dumps(_ejemplo("telemetria_normal", seq_no=31))
+    await main._procesar_lectura_mqtt(_Mensaje(TOPIC, cuerpo), _Mudo(), espia)
+    await main._procesar_lectura_mqtt(_Mensaje(TOPIC, cuerpo), _Mudo(), espia)
+
+    esperado = hashlib.sha256(cuerpo.encode("utf-8")).hexdigest()
+    assert [a["status"] for a in espia.acks] == ["committed", "duplicate"]
+    assert all(a["content_sha256"] == esperado for a in espia.acks)
