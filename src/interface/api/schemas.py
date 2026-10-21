@@ -295,6 +295,8 @@ class DispositivoResponse(BaseModel):
     ubicacion: str | None
     estado_conectividad: str
     activo: bool
+    # BE-015: dispositivo de demostración (admite lecturas `simulated`).
+    es_demo: bool = False
     firmware_version: str
     motivo_baja: str | None = None
     descripcion_baja: str | None = None
@@ -387,6 +389,8 @@ class DispositivoAltaRequest(_PeticionEstricta):
     nombre: str | None = Field(default=None, max_length=120)
     ubicacion: str | None = Field(default=None, max_length=200)
     sensores_habilitados: list[str] = Field(default_factory=list)
+    # BE-015: solo para el nodo de la demostración; nunca un equipo del local.
+    es_demo: bool = False
 
 
 class InstalacionDispositivoRequest(_PeticionEstricta):

@@ -451,6 +451,29 @@ async def _procesar_lectura_mqtt(
         return
 
     async with _session_factory() as session:
+        # BE-015: una lectura simulada (firmware de demostración) solo se acepta
+        # de un dispositivo dado de alta como demo. En un equipo del local
+        # contaminaría alertas, notificaciones y reportes BPA con datos falsos.
+        if telemetria_v1 is not None and telemetria_v1.simulated:
+            dispositivo = await SQLAlchemyDeviceRepository(session).obtener(payload.device_id)
+            if dispositivo is None or not dispositivo.get("es_demo"):
+                await AuditarAccionCriticaUseCase(
+                    SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+                ).execute(
+                    usuario_id=None,
+                    accion="LECTURA_SIMULADA_RECHAZADA",
+                    recurso="mqtt/lecturas",
+                    detalle={"device_id": payload.device_id, "reading_id": payload.reading_id},
+                    ip_origen=None,
+                )
+                await session.commit()
+                logger.warning("Lectura simulada rechazada de un dispositivo no demo: %s", payload.device_id)
+                await _publicar_ack_lectura(
+                    client, payload.device_id, payload.reading_id, payload.timestamp,
+                    estado="payload_rechazado", boot_id=payload.boot_id, seq_no=payload.seq_no,
+                )
+                return
+
         lectura_repository = SQLAlchemyLecturaRepository(session)
         alerta_repository = SQLAlchemyAlertaRepository(session)
         trazabilidad_repository = SQLAlchemyTrazabilidadRepository(session)

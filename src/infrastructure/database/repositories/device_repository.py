@@ -16,6 +16,7 @@ def _to_dict(model: DeviceModel) -> dict:
         "estado_conectividad": model.estado_conectividad,
         "created_at": model.created_at,
         "activo": model.activo,
+        "es_demo": bool(model.es_demo),
         "firmware_version": model.firmware_version,
         "motivo_baja": model.motivo_baja,
         "descripcion_baja": model.descripcion_baja,
@@ -59,6 +60,7 @@ class SQLAlchemyDeviceRepository(IDeviceRepository):
         ubicacion: str | None,
         sensores_habilitados: list[str],
         admin_id: UUID,
+        es_demo: bool = False,
     ) -> dict:
         model = DeviceModel(
             id=device_id,
@@ -66,6 +68,7 @@ class SQLAlchemyDeviceRepository(IDeviceRepository):
             ubicacion=ubicacion,
             sensores_habilitados={"habilitados": sensores_habilitados},
             dado_de_alta_por=admin_id,
+            es_demo=es_demo,
         )
         self._session.add(model)
         await self._session.flush()

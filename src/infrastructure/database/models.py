@@ -54,6 +54,9 @@ class DeviceModel(Base):
 
     # HU-43: ciclo de vida (baja/reemplazo) sin borrar el histórico.
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
+    # BE-015: solo un dispositivo marcado como de demostración puede enviar
+    # lecturas `simulated`; en cualquier otro se rechazan.
+    es_demo: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_text("false"))
     firmware_version: Mapped[str] = mapped_column(String(20), default="1.0.0")
     motivo_baja: Mapped[str | None] = mapped_column(String(50), nullable=True)
     descripcion_baja: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -25,6 +25,7 @@ class IDeviceRepository(ABC):
         ubicacion: str | None,
         sensores_habilitados: list[str],
         admin_id: UUID,
+        es_demo: bool = False,
     ) -> dict: ...
 
     @abstractmethod

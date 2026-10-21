@@ -269,6 +269,7 @@ class RegistrarAltaDispositivoUseCase:
         ubicacion: str | None,
         sensores_habilitados: list[str],
         admin_id: UUID,
+        es_demo: bool = False,
     ) -> dict:
         if await self._device_repository.existio_alguna_vez(device_id):
             raise DomainError(
@@ -276,7 +277,7 @@ class RegistrarAltaDispositivoUseCase:
             )
 
         creado = await self._device_repository.crear(
-            device_id, nombre, ubicacion, sensores_habilitados, admin_id
+            device_id, nombre, ubicacion, sensores_habilitados, admin_id, es_demo=es_demo
         )
 
         await self._registrar_hash.execute(
@@ -287,6 +288,7 @@ class RegistrarAltaDispositivoUseCase:
                 "ubicacion": ubicacion,
                 "sensores_habilitados": sensores_habilitados,
                 "admin_id": str(admin_id),
+                "es_demo": es_demo,
             },
             device_id=device_id,
             usuario_id=admin_id,

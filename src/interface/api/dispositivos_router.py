@@ -87,7 +87,8 @@ async def dar_de_alta(
     )
     try:
         dispositivo = await use_case.execute(
-            body.device_id, body.nombre, body.ubicacion, body.sensores_habilitados, admin.id
+            body.device_id, body.nombre, body.ubicacion, body.sensores_habilitados, admin.id,
+            es_demo=body.es_demo,
         )
     except DomainError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -98,7 +99,7 @@ async def dar_de_alta(
         usuario_id=admin.id,
         accion="ALTA_DISPOSITIVO",
         recurso=f"dispositivos/{body.device_id}",
-        detalle={"nombre": body.nombre, "sensores_habilitados": body.sensores_habilitados},
+        detalle={"nombre": body.nombre, "sensores_habilitados": body.sensores_habilitados, "es_demo": body.es_demo},
         ip_origen=request.client.host if request.client else None,
     )
     await session.commit()
