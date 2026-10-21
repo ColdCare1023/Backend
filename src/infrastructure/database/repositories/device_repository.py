@@ -204,7 +204,14 @@ class SQLAlchemyDeviceRepository(IDeviceRepository):
             "mqtt_token_hash": model.mqtt_token_hash,
             "mqtt_token_activo": model.mqtt_token_activo,
             "activo": model.activo,
+            "exige_certificado": model.exige_certificado,
         }
+
+    async def exigir_certificado(self, device_id: str) -> None:
+        model = await self._session.get(DeviceModel, device_id)
+        if model is not None:
+            model.exige_certificado = True
+            await self._session.flush()
 
     # ── HU-51: ubicación y metadatos de instalación ────────────────────────
     async def actualizar_ubicacion_y_metadata(

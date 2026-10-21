@@ -31,6 +31,27 @@ En EMQX Cloud (producción) hay que configurar lo mismo: autenticador HTTP hacia
 `https://<backend>/api/dispositivos/autenticar` con la cabecera `X-Broker-Auth`, y una API key para
 `BROKER_API_URL`/`BROKER_API_KEY`/`BROKER_API_SECRET` del backend.
 
+### Certificado de cliente por nodo (IOT-006)
+
+El token es un secreto portátil: copiado de un nodo, sirve desde cualquier equipo. Para ligar la identidad
+a una clave que no sale del nodo, EMQX pide certificado de cliente (`verify_peer`), lo verifica contra la
+CA local y pasa su CN al webhook (`cert_common_name`). El backend exige que el CN sea el `device_id`, y la
+**primera** conexión con certificado liga el dispositivo: desde entonces el token solo ya no basta (queda
+en la cadena de trazabilidad como `CERTIFICADO_DISPOSITIVO_VINCULADO`). `BROKER_EXIGIR_CERTIFICADO=true`
+en `.env` lo exige a todos los nodos.
+
+```bash
+# en la consola del nodo (desbloqueada, con Wi-Fi configurado): tls csr  → copiar la CSR a nodo.csr
+./scripts/firmar_csr_nodo.sh ESP32_FARMACIA_01 nodo.csr   # imprime "tls certificado <base64>"
+# en la consola del nodo: pegar esa línea y luego reiniciar
+```
+
+La clave se genera en el nodo y nunca se muestra; el script solo firma la CSR si su sujeto es exactamente
+`CN=<device_id>`, con uso `clientAuth`. Un nodo ligado que pierde la clave (`tls borrar`, NVS borrada)
+necesita una CSR nueva firmada para volver a conectarse; revocar el token sigue cortándolo aunque tenga
+certificado. En EMQX Cloud solo aplica si el plan admite TLS mutuo y el autenticador HTTP envía
+`${cert_common_name}`; si no, los nodos siguen autenticándose solo con el token.
+
 | Servicio | Acceso |
 |---|---|
 | EMQX MQTT/TLS | `<IP_LAN>:8883` (usuario = device_id) |

@@ -491,6 +491,17 @@ class AutenticarDispositivoRequest(BaseModel):
 
     device_id: DeviceId
     token: str = Field(min_length=1, max_length=200)
+    # IOT-006: CN del certificado de cliente verificado por el broker
+    # (placeholder `${cert_common_name}` de EMQX). Sin certificado, EMQX lo
+    # envía vacío o como "undefined".
+    cert_common_name: str | None = Field(default=None, max_length=256)
+
+    @field_validator("cert_common_name")
+    @classmethod
+    def _sin_certificado_es_none(cls, valor: str | None) -> str | None:
+        if valor is None or valor.strip() in ("", "undefined", "null"):
+            return None
+        return valor
 
 
 class AutenticarDispositivoResponse(BaseModel):

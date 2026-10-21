@@ -405,12 +405,25 @@ async def autenticar_dispositivo(
     sesión a propósito — lo llama el broker, autenticado con su secreto
     compartido (`X-Broker-Auth`), no un usuario. La cuota por IP acota el
     costo de un intento de fuerza bruta contra el hash."""
-    use_case = VerificarCredencialDispositivoUseCase(SQLAlchemyDeviceRepository(session))
-    autorizado = await use_case.execute(body.device_id, body.token)
+    use_case = VerificarCredencialDispositivoUseCase(
+        SQLAlchemyDeviceRepository(session),
+        RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session)),
+    )
+    autorizado = await use_case.execute(
+        body.device_id,
+        body.token,
+        cert_common_name=body.cert_common_name,
+        exigir_certificado=settings.broker_exigir_certificado,
+    )
     if not autorizado:
         # Sin el token: solo qué identidad intentó conectarse y que falló.
-        logger.warning("Autenticación de dispositivo rechazada para device_id=%s", body.device_id)
+        logger.warning(
+            "Autenticación de dispositivo rechazada para device_id=%s (certificado: %s)",
+            body.device_id,
+            "sí" if body.cert_common_name else "no",
+        )
         return AutenticarDispositivoResponse(result="deny", autorizado=False)
+    await session.commit()  # IOT-006: el vínculo con el certificado, si es el primero
     expira = None
     if settings.broker_auth_ttl_seconds > 0:
         expira = int(datetime.now(tz=timezone.utc).timestamp()) + settings.broker_auth_ttl_seconds

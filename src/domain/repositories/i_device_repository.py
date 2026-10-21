@@ -83,8 +83,14 @@ class IDeviceRepository(ABC):
     @abstractmethod
     async def obtener_credencial(self, device_id: str) -> dict | None:
         """None si el dispositivo no existe. Si existe, incluye
-        mqtt_token_hash (puede ser None si nunca se aprovisionó) y
-        mqtt_token_activo."""
+        mqtt_token_hash (puede ser None si nunca se aprovisionó),
+        mqtt_token_activo y exige_certificado (IOT-006)."""
+        ...
+
+    @abstractmethod
+    async def exigir_certificado(self, device_id: str) -> None:
+        """IOT-006: desde ahora el dispositivo solo se autentica con su
+        certificado de cliente (además del token)."""
         ...
 
     # ── HU-51: ubicación y metadatos de instalación ────────────────────────

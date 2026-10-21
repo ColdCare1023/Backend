@@ -81,6 +81,9 @@ class DeviceModel(Base):
     mqtt_credencial_actualizada_en: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # IOT-006: tras la primera conexión con un certificado de cliente cuyo CN
+    # es este device_id, el token solo ya no basta para autenticarse.
+    exige_certificado: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_text("false"))
 
     # HU-43: metadatos capturados en el alta explícita del dispositivo.
     sensores_habilitados: Mapped[dict | None] = mapped_column(JSONVariant, nullable=True)

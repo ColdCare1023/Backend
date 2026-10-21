@@ -238,12 +238,29 @@ class VerificarCredencialDispositivoUseCase:
     /api/dispositivos/autenticar, protegido por el secreto del broker) para decidir si
     acepta la conexión de un ESP32. Un token revocado o nunca aprovisionado
     se rechaza; el reason code MQTT 5.0 exacto (0x87) lo aplica EMQX según
-    la respuesta HTTP, no este caso de uso."""
+    la respuesta HTTP, no este caso de uso.
 
-    def __init__(self, device_repository: IDeviceRepository) -> None:
+    IOT-006: si el broker verificó un certificado de cliente, su CN debe ser
+    el device_id. La primera conexión con certificado liga el dispositivo a
+    él: desde entonces el token solo ya no basta (quien lo copie necesita
+    además la clave privada, que no sale del nodo). `exigir_certificado`
+    aplica esa regla a todos los dispositivos."""
+
+    def __init__(
+        self,
+        device_repository: IDeviceRepository,
+        registrar_hash: RegistrarHashEncadenadoUseCase | None = None,
+    ) -> None:
         self._device_repository = device_repository
+        self._registrar_hash = registrar_hash
 
-    async def execute(self, device_id: str, token: str) -> bool:
+    async def execute(
+        self,
+        device_id: str,
+        token: str,
+        cert_common_name: str | None = None,
+        exigir_certificado: bool = False,
+    ) -> bool:
         credencial = await self._device_repository.obtener_credencial(device_id)
         utilizable = (
             credencial is not None
@@ -256,7 +273,24 @@ class VerificarCredencialDispositivoUseCase:
         if not utilizable:
             verify_password(token, _HASH_SENUELO)
             return False
-        return verify_password(token, credencial["mqtt_token_hash"])
+        if not verify_password(token, credencial["mqtt_token_hash"]):
+            return False
+
+        if cert_common_name is not None and cert_common_name != device_id:
+            return False  # certificado válido, pero de otro dispositivo
+        ligado = credencial.get("exige_certificado", False)
+        if cert_common_name is None:
+            return not (exigir_certificado or ligado)
+        if not ligado:
+            await self._device_repository.exigir_certificado(device_id)
+            if self._registrar_hash is not None:
+                await self._registrar_hash.execute(
+                    tipo_evento="CERTIFICADO_DISPOSITIVO_VINCULADO",
+                    payload={"device_id": device_id},
+                    device_id=device_id,
+                    timestamp=datetime.now(timezone.utc),
+                )
+        return True
 
 
 class RegistrarAltaDispositivoUseCase:

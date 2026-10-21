@@ -111,6 +111,12 @@ class Settings(BaseSettings):
     # respuesta del webhook, EMQX >= 5.8): fuerza reautenticación periódica
     # aunque la expulsión activa falle. 0 = sin caducidad.
     broker_auth_ttl_seconds: int = 0
+    # IOT-006: exigir certificado de cliente (TLS mutuo, CN = device_id) a
+    # TODOS los dispositivos. Aun en falso, un dispositivo que ya se conectó
+    # una vez con su certificado no vuelve a aceptarse solo con el token.
+    # Requiere un broker que pida certificado de cliente y pase su CN al
+    # webhook (`cert_common_name`).
+    broker_exigir_certificado: bool = False
 
     # Hosts permitidos en producción (mitiga ataques por header Host).
     allowed_hosts: list[str] = []
