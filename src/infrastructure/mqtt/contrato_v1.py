@@ -101,6 +101,8 @@ class EventoV1(BaseModel):
         "registros_en_cuarentena", "wifi_reconexion_prolongada", "credencial_rotada", "puerta",
         "conmutacion_respaldo", "suministro_restablecido", "respaldo_autonomia_critica",
         "estado_nodo",
+        # IOT-002: auditoría de la consola de aprovisionamiento del nodo.
+        "config_modificada", "reinicio_manual", "consola_desbloqueada", "consola_desbloqueo_fallido",
     ]
     # El LWT lo publica el broker: no lleva boot_id, hora ni detalle.
     boot_id: int | None = Field(default=None, ge=0, le=UINT32)

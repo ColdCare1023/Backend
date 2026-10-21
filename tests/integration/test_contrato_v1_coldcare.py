@@ -224,3 +224,27 @@ async def test_evento_estado_nodo_va_por_sse_sin_auditar(entorno):
     async with entorno() as session:
         assert (await session.execute(select(AuditLogModel))).scalars().all() == []
     assert mudo.eventos[0][1] == "estado_nodo"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("event_type", "detalle", "accion"),
+    [
+        ("config_modificada", {"clave": "mqtt_host", "accion": "set"}, "CONFIG_MODIFICADA"),
+        ("reinicio_manual", None, "REINICIO_MANUAL"),
+        ("consola_desbloqueada", None, "CONSOLA_DESBLOQUEADA"),
+        ("consola_desbloqueo_fallido", {"intentos": 5}, "CONSOLA_DESBLOQUEO_FALLIDO"),
+    ],
+)
+async def test_eventos_de_la_consola_del_nodo_se_auditan(entorno, event_type, detalle, accion):
+    """IOT-002: los cambios hechos por la consola serie del nodo quedan en la
+    bitácora (qué clave, nunca el valor) y llegan al dashboard por SSE."""
+    mudo = _Mudo()
+    datos = {"schema_version": "1.0", "device_id": DEV, "event_type": event_type, "boot_id": 42,
+             "time_quality": "sntp_synced", "uptime_s": 300, "detail": detalle}
+    await main._procesar_evento_mqtt(_Mensaje(f"farmacias/{DEV}/eventos", json.dumps(datos)), mudo)
+
+    async with entorno() as session:
+        acciones = {a.accion for a in (await session.execute(select(AuditLogModel))).scalars().all()}
+    assert accion in acciones
+    assert mudo.eventos[0][1] == event_type
