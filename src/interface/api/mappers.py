@@ -4,6 +4,7 @@ from numbers import Real
 from src.domain.entities.alerta_termica import AlertaTermica
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.entities.registro_trazabilidad import RegistroTrazabilidad
+from src.domain.value_objects.rol import Rol
 from src.interface.api.schemas import AlertaResponse, LecturaResponse, TrazabilidadResponse
 
 
@@ -94,13 +95,38 @@ def alerta_to_response(alerta: AlertaTermica) -> AlertaResponse:
     )
 
 
-def trazabilidad_to_response(registro: RegistroTrazabilidad) -> TrazabilidadResponse:
+# BE-005: campos con datos personales o de la bitácora administrativa que la
+# cadena conserva (forman parte del hash y no se pueden borrar) pero que solo
+# deben ver los roles con función de auditoría. Al resto se le muestran
+# redactados; el hash y el resto del eslabón siguen siendo verificables.
+CAMPOS_SENSIBLES_POR_EVENTO: dict[str, frozenset[str]] = {
+    "AUDIT_LOG": frozenset({"detalle", "ip_origen"}),
+    "ACEPTACION_PRIVACIDAD": frozenset({"email", "ip_origen"}),
+    "RECHAZO_PRIVACIDAD": frozenset({"email", "ip_origen"}),
+    "DESACTIVACION_USUARIO": frozenset({"ip_origen_admin"}),
+    "RESPONSABLE_DISPOSITIVO_ACTUALIZADO": frozenset({"responsable_email", "responsable_telefono"}),
+}
+REDACTADO = "[redactado]"
+ROLES_CON_VISTA_COMPLETA = frozenset({Rol.ADMINISTRADOR, Rol.AUDITOR})
+
+
+def payload_visible(tipo_evento: str, payload: dict, rol: Rol | None) -> dict:
+    """Payload del eslabón tal como lo puede ver `rol` (BE-005)."""
+    sensibles = CAMPOS_SENSIBLES_POR_EVENTO.get(tipo_evento)
+    if not sensibles or rol in ROLES_CON_VISTA_COMPLETA:
+        return payload
+    return {clave: (REDACTADO if clave in sensibles else valor) for clave, valor in payload.items()}
+
+
+def trazabilidad_to_response(registro: RegistroTrazabilidad, rol: Rol | None = None) -> TrazabilidadResponse:
+    """`rol=None` solo para usos internos sin destinatario humano; las rutas
+    de la API siempre pasan el rol de quien consulta."""
     return TrazabilidadResponse(
         id=registro.id,
         tipo_evento=registro.tipo_evento,
         device_id=registro.device_id,
         usuario_id=registro.usuario_id,
-        payload=registro.payload,
+        payload=payload_visible(registro.tipo_evento, registro.payload, rol) if rol is not None else registro.payload,
         timestamp=registro.timestamp,
         previous_hash=registro.previous_hash,
         hash_actual=registro.hash_actual,

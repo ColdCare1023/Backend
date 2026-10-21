@@ -45,7 +45,9 @@ async def test_rechazar_privacidad_revoca_token_y_bloquea_sesion(client, crear_u
     assert intento_posterior.status_code == 401
 
 
-async def test_aceptacion_privacidad_queda_en_trazabilidad_encadenada(client, crear_usuario, token_tecnico):
+async def test_aceptacion_privacidad_queda_en_trazabilidad_encadenada(
+    client, crear_usuario, token_tecnico, token_auditor
+):
     from src.domain.value_objects.rol import Rol
 
     await crear_usuario("Auditado", "auditado@farmacia.example.org", "password123", Rol.TECNICO)
@@ -57,4 +59,9 @@ async def test_aceptacion_privacidad_queda_en_trazabilidad_encadenada(client, cr
     )
     assert trazabilidad.status_code == 200
     assert len(trazabilidad.json()) == 1
-    assert trazabilidad.json()[0]["payload"]["email"] == "auditado@farmacia.example.org"
+    # BE-005: el correo queda encadenado, pero solo lo ve el rol de auditoría.
+    assert trazabilidad.json()[0]["payload"]["email"] == "[redactado]"
+    completa = client.get(
+        "/api/trazabilidad", params={"tipo_evento": "ACEPTACION_PRIVACIDAD"}, headers=auth_header(token_auditor)
+    )
+    assert completa.json()[0]["payload"]["email"] == "auditado@farmacia.example.org"

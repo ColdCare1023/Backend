@@ -101,7 +101,9 @@ async def exportar_reporte_bpa(
         fecha_hasta=reporte.fecha_hasta,
         lecturas=[lectura_to_response(lectura) for lectura in reporte.lecturas],
         alertas=[alerta_to_response(a) for a in reporte.alertas],
-        registros_trazabilidad=[trazabilidad_to_response(r) for r in reporte.registros_trazabilidad],
+        registros_trazabilidad=[
+            trazabilidad_to_response(r, usuario.rol) for r in reporte.registros_trazabilidad
+        ],
         truncado=reporte.truncado,
         lecturas_truncadas=reporte.lecturas_truncadas,
         alertas_truncadas=reporte.alertas_truncadas,

@@ -36,7 +36,7 @@ router = APIRouter(prefix="/api/trazabilidad", tags=["trazabilidad"])
 @router.get("", response_model=list[TrazabilidadResponse])
 async def listar_trazabilidad(
     session: DbSessionDep,
-    _usuario=Depends(require_roles(Rol.TECNICO, Rol.FARMACEUTICO, Rol.AUDITOR)),
+    usuario=Depends(require_roles(Rol.TECNICO, Rol.FARMACEUTICO, Rol.AUDITOR)),
     tipo_evento: str | None = None,
     device_id: str | None = None,
     chain_id: str | None = None,
@@ -47,7 +47,9 @@ async def listar_trazabilidad(
     registros = await repositorio.listar(
         tipo_evento=tipo_evento, device_id=device_id, chain_id=chain_id, limite=limite, offset=offset
     )
-    return [trazabilidad_to_response(r) for r in registros]
+    # BE-005: la bitácora y los datos personales encadenados solo los ven
+    # ADMINISTRADOR y AUDITOR, igual que en /api/auditoria.
+    return [trazabilidad_to_response(r, usuario.rol) for r in registros]
 
 
 @router.get(
