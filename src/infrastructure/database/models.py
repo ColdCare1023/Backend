@@ -133,9 +133,28 @@ class UserModel(Base):
         Uuid(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
     anonymized_for_gdpr: Mapped[bool] = mapped_column(Boolean, default=False)
+    # BE-009: todo access token emitido antes de este instante deja de valer
+    # (desactivación, cambio de rol o de contraseña).
+    tokens_invalidos_antes_de: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = _created_at_column()
 
     rol: Mapped[RoleModel] = relationship(back_populates="usuarios")
+
+
+class InvalidatedJtiModel(Base):
+    """BE-009: identificadores JWT que ya no valen (logout, rechazo de la
+    política de privacidad) o que ya se usaron (tickets SSE de un solo uso).
+
+    En la base de datos y no en memoria: sobrevive a reinicios, es común a
+    todas las instancias y no se expulsa por capacidad. La clave primaria
+    hace atómico el consumo de un ticket entre instancias."""
+
+    __tablename__ = "jti_invalidados"
+
+    jti: Mapped[str] = mapped_column(String(64), primary_key=True)
+    motivo: Mapped[str] = mapped_column(String(30), nullable=False)
+    expira_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = _created_at_column()
 
 
 class ThermalReadingModel(Base):

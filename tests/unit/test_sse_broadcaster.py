@@ -8,11 +8,9 @@ ejercitar el broadcaster y el generador directamente.
 
 import asyncio
 import json
-import time
 
 import pytest
 
-from src.infrastructure.security.revocation_store import JtiStore
 from src.interface.api.sse_broadcaster import SSEBroadcaster
 from src.interface.api.sse_router import _event_stream
 
@@ -83,17 +81,10 @@ async def test_desuscribir_dos_veces_no_falla():
 
 
 class _RequestFalsa:
-    """Request mínima: broadcaster, store de revocación y control de desconexión."""
+    """Request mínima: broadcaster y control de desconexión."""
 
-    def __init__(self, broadcaster, desconectar_tras: int, revocacion=None):
-        estado = type(
-            "S",
-            (),
-            {
-                "sse_broadcaster": broadcaster,
-                "token_revocation": revocacion or JtiStore(100),
-            },
-        )()
+    def __init__(self, broadcaster, desconectar_tras: int):
+        estado = type("S", (), {"sse_broadcaster": broadcaster})()
         self.app = type("App", (), {"state": estado})()
         self._restantes = desconectar_tras
 
@@ -138,20 +129,23 @@ async def test_cerrar_sesion_corta_el_stream_abierto():
     que el navegador se cerrara, lo que contradice la revocación de JWT que el
     sistema presenta como control de seguridad (RF-17)."""
     broadcaster = SSEBroadcaster()
-    revocacion = JtiStore(100)
-    jti_sesion = "jti-de-la-sesion"
+    sesion = {"vigente": True}
+
+    async def sesion_vigente() -> bool:
+        return sesion["vigente"]
+
     # Muchas vueltas disponibles: quien debe cortar es la revocación, no el
     # contador de desconexión del cliente.
-    request = _RequestFalsa(broadcaster, desconectar_tras=50, revocacion=revocacion)
+    request = _RequestFalsa(broadcaster, desconectar_tras=50)
 
-    generador = _event_stream(request, jti_sesion)
+    generador = _event_stream(request, sesion_vigente)
     assert await generador.__anext__() == ": connected\n\n"
 
     await broadcaster.publicar({"n": 1}, "lectura")
     assert (await generador.__anext__()).startswith("event: lectura\n")
 
     # Logout: el access token que pidió el ticket queda revocado.
-    revocacion.registrar(jti_sesion, time.time() + 3600)
+    sesion["vigente"] = False
     await broadcaster.publicar({"n": 2}, "lectura")
 
     with pytest.raises(StopAsyncIteration):

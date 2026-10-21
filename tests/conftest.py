@@ -55,6 +55,8 @@ def app(db_session_factory):
             yield session
 
     application.dependency_overrides[deps.get_db] = override_get_db
+    # BE-009: el stream SSE revalida la sesión con su propia fábrica.
+    application.state.session_factory = db_session_factory
     return application
 
 

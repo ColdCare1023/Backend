@@ -49,6 +49,8 @@ class CambiarRolUsuarioUseCase:
         if not usuario.is_active:
             raise DomainError("No se puede cambiar el rol de un usuario desactivado")
         usuario.rol = nuevo_rol
+        # BE-009: el token viaja con el rol anterior; se fuerza un login nuevo.
+        usuario.invalidar_sesiones(datetime.now(tz=timezone.utc))
         return await self._usuario_repository.actualizar(usuario)
 
 
@@ -78,4 +80,6 @@ class DesactivarUsuarioUseCase:
         usuario.desactivado_en = datetime.now(tz=timezone.utc)
         usuario.desactivado_por = admin_id
         usuario.anonymized_for_gdpr = True
+        # BE-009: corta de inmediato toda sesión abierta del usuario.
+        usuario.invalidar_sesiones(usuario.desactivado_en)
         return await self._usuario_repository.actualizar(usuario)

@@ -1,18 +1,21 @@
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from src.domain.exceptions import CredencialesInvalidasError
-from src.interface.api.deps import JWTHandlerDep
+from src.infrastructure.database.repositories.jti_repository import MOTIVO_TICKET_SSE, SQLAlchemyJtiRepository
+from src.interface.api.deps import DbSessionDep, JWTHandlerDep
 
 router = APIRouter(prefix="/api/sse", tags=["sse"])
 
+# Devuelve False en cuanto la sesión que abrió el stream deja de ser válida.
+SesionVigente = Callable[[], Awaitable[bool]]
 
-async def _event_stream(request: Request, token_padre_jti: str | None = None) -> AsyncGenerator[str, None]:
+
+async def _event_stream(request: Request, sesion_vigente: SesionVigente | None = None) -> AsyncGenerator[str, None]:
     broadcaster = request.app.state.sse_broadcaster
-    revocacion = request.app.state.token_revocation
     queue = broadcaster.subscribe()
     try:
         # Chunk inicial: fuerza el envío de headers a través de proxies y
@@ -26,7 +29,7 @@ async def _event_stream(request: Request, token_padre_jti: str | None = None) ->
             # sesión dejaría el caudal de datos térmicos fluyendo hasta que el
             # navegador se cerrase, contradiciendo la revocación de JWT que el
             # sistema declara como control de seguridad (RF-17).
-            if token_padre_jti is not None and revocacion.contiene(token_padre_jti):
+            if sesion_vigente is not None and not await sesion_vigente():
                 break
             try:
                 mensaje = await asyncio.wait_for(queue.get(), timeout=15.0)
@@ -39,7 +42,7 @@ async def _event_stream(request: Request, token_padre_jti: str | None = None) ->
 
 @router.get("/lecturas")
 async def stream_lecturas(
-    request: Request, ticket: str, jwt_handler: JWTHandlerDep
+    request: Request, ticket: str, jwt_handler: JWTHandlerDep, session: DbSessionDep
 ) -> StreamingResponse:
     """RF-11: el dashboard consume actualizaciones en tiempo real vía SSE.
 
@@ -47,6 +50,9 @@ async def stream_lecturas(
     EventSource no puede enviar el header Authorization. El ticket es de UN
     SOLO USO: viaja como query param (puede quedar en logs de proxies), así
     que reutilizarlo se rechaza aunque no haya expirado.
+
+    BE-009: el consumo del ticket y la revocación de la sesión se resuelven
+    contra `jti_invalidados`, comunes a todas las instancias del backend.
     """
     try:
         datos_ticket = jwt_handler.validar_ticket_sse(ticket)
@@ -55,22 +61,29 @@ async def stream_lecturas(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)
         ) from exc
 
-    if not request.app.state.sse_ticket_store.consumir(
-        datos_ticket.jti, datos_ticket.exp.timestamp()
-    ):
+    jtis = SQLAlchemyJtiRepository(session)
+    if not await jtis.invalidar(datos_ticket.jti, datos_ticket.exp, MOTIVO_TICKET_SSE):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Ticket SSE ya utilizado"
         )
+    await session.commit()
 
+    padre = datos_ticket.token_padre_jti
     # Un ticket cuya sesión ya se cerró entre la emisión y el uso no abre nada.
-    if datos_ticket.token_padre_jti is not None and request.app.state.token_revocation.contiene(
-        datos_ticket.token_padre_jti
-    ):
+    if padre is not None and await jtis.esta_invalidado(padre):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="La sesión fue cerrada"
         )
 
+    fabrica = request.app.state.session_factory
+
+    async def sesion_vigente() -> bool:
+        if padre is None:
+            return True
+        async with fabrica() as sesion:
+            return not await SQLAlchemyJtiRepository(sesion).esta_invalidado(padre)
+
     return StreamingResponse(
-        _event_stream(request, datos_ticket.token_padre_jti),
+        _event_stream(request, sesion_vigente),
         media_type="text/event-stream",
     )

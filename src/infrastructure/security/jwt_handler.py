@@ -16,6 +16,8 @@ class TokenPayload:
     rol: Rol
     exp: datetime
     jti: str
+    # BE-009: se compara con users.tokens_invalidos_antes_de.
+    iat: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +77,7 @@ class JWTHandler:
                 rol=Rol(data["rol"]),
                 exp=datetime.fromtimestamp(data["exp"], tz=timezone.utc),
                 jti=data["jti"],
+                iat=datetime.fromtimestamp(data["iat"], tz=timezone.utc),
             )
         except (KeyError, ValueError) as exc:
             raise CredencialesInvalidasError("Token con estructura inválida") from exc
@@ -107,7 +110,7 @@ class JWTHandler:
 
     def validar_ticket_sse(self, ticket: str) -> TicketSSE:
         """Valida el ticket y devuelve sus datos; el consumo de un solo uso
-        (por jti) lo aplica la capa de interface con un JtiStore."""
+        (por jti) lo aplica la capa de interface contra `jti_invalidados`."""
         try:
             data = jwt.decode(
                 ticket,

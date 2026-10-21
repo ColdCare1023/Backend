@@ -37,7 +37,6 @@ from src.infrastructure.mqtt.payload_schema import (
 )
 from src.infrastructure.notifications.notificacion_service import NotificacionService
 from src.infrastructure.security.rate_limiter import SlidingWindowRateLimiter
-from src.infrastructure.security.revocation_store import JtiStore
 from src.interface.api.alertas_router import router as alertas_router
 from src.interface.api.api_protection import instalar_proteccion_api
 from src.interface.api.auditoria_router import router as auditoria_router
@@ -697,9 +696,10 @@ def create_app() -> FastAPI:
         ventana_segundos=settings.login_cuenta_ventana_segundos,
         max_claves=settings.security_state_max_entries,
     )
-    # Revocación de access tokens (logout) y consumo único de tickets SSE.
-    app.state.token_revocation = JtiStore(settings.security_state_max_entries)
-    app.state.sse_ticket_store = JtiStore(settings.security_state_max_entries)
+    # BE-009: la revocación de tokens y el consumo de tickets SSE viven en la
+    # tabla `jti_invalidados`. El stream SSE revalida la sesión con sesiones
+    # propias de esta fábrica (las pruebas la sustituyen por la suya).
+    app.state.session_factory = _session_factory
 
     if es_produccion:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)

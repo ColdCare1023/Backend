@@ -15,6 +15,11 @@ from src.domain.exceptions import CredencialesInvalidasError
 from src.infrastructure.database.repositories.audit_log_repository import (
     SQLAlchemyAuditLogRepository,
 )
+from src.infrastructure.database.repositories.jti_repository import (
+    MOTIVO_LOGOUT,
+    MOTIVO_PRIVACIDAD_RECHAZADA,
+    SQLAlchemyJtiRepository,
+)
 from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
@@ -265,7 +270,7 @@ async def rechazar_privacidad(
 ) -> None:
     """HU-44 Escenario 3: rechazar revoca el token — sin política aceptada no hay sesión."""
     payload = jwt_handler.decodificar_token(token)
-    request.app.state.token_revocation.registrar(payload.jti, payload.exp.timestamp())
+    await SQLAlchemyJtiRepository(session).invalidar(payload.jti, payload.exp, MOTIVO_PRIVACIDAD_RECHAZADA)
 
     use_case = RechazarPrivacidadUseCase(
         RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session))
@@ -292,7 +297,8 @@ async def logout(
     siendo válido si fue copiado. La revocación server-side cierra esa ventana.
     """
     payload = jwt_handler.decodificar_token(token)
-    request.app.state.token_revocation.registrar(payload.jti, payload.exp.timestamp())
+    # BE-009: persistente y común a todas las instancias del backend.
+    await SQLAlchemyJtiRepository(session).invalidar(payload.jti, payload.exp, MOTIVO_LOGOUT)
 
     auditoria = AuditarAccionCriticaUseCase(
         SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
