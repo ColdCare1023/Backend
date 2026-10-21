@@ -13,6 +13,7 @@ from src.domain.repositories.i_lectura_repository import ILecturaRepository
 from src.domain.repositories.i_trazabilidad_repository import ITrazabilidadRepository
 
 if TYPE_CHECKING:
+    from src.application.use_cases.predecir_riesgo_preventivo import PredecirRiesgoPreventivoUseCase
     from src.infrastructure.notifications.notificacion_service import NotificacionService
 
 
@@ -39,6 +40,7 @@ class RegistrarLecturaTermicaUseCase:
         audit_log_repository: IAuditLogRepository | None = None,
         notificacion_service: "NotificacionService | None" = None,
         ventana_normalizacion_alerta_minutos: int | None = None,
+        prediccion_preventiva: "PredecirRiesgoPreventivoUseCase | None" = None,
     ) -> None:
         self._lectura_repository = lectura_repository
         self._generar_alerta = GenerarAlertaUseCase(
@@ -56,6 +58,9 @@ class RegistrarLecturaTermicaUseCase:
         self._device_repository = device_repository
         self._estricto = registro_dispositivos_estricto
         self._audit_log_repository = audit_log_repository
+        # Modelo preventivo temporal (docs/ml/06_BACKEND_INTEGRATION.md).
+        # None = desactivado: el flujo es exactamente el anterior.
+        self._prediccion_preventiva = prediccion_preventiva
 
     async def _autorizar_dispositivo(self, device_id: str) -> None:
         if self._device_repository is None:
@@ -155,6 +160,14 @@ class RegistrarLecturaTermicaUseCase:
         lectura.probabilidades_ia = clasificacion.probabilidades_por_clase
         lectura.vector_features_ia = clasificacion.vector_features
 
+        # Predicción preventiva temporal: en sombra solo se registra; en modo
+        # activo (modelo aprobado) reemplaza la clasificación anterior. Nunca
+        # interviene en la excursión confirmada, que se calcula justo abajo.
+        prediccion = None
+        if self._prediccion_preventiva is not None:
+            prediccion = await self._prediccion_preventiva.predecir(lectura)
+            self._prediccion_preventiva.aplicar_a_lectura(lectura, prediccion)
+
         # HU-18/21/34: excursión confirmada y riesgo efectivo se calculan
         # SIEMPRE aquí, sobre la lectura ya validada como físicamente
         # plausible — independientemente de si la IA pudo clasificar o no.
@@ -166,6 +179,8 @@ class RegistrarLecturaTermicaUseCase:
         lectura.riesgo_efectivo = lectura.calcular_riesgo_efectivo()
 
         lectura_guardada = await self._lectura_repository.agregar(lectura)
+        if prediccion is not None and lectura_guardada.id is not None:
+            await self._prediccion_preventiva.registrar(prediccion, lectura_guardada.id)
 
         await self._registrar_hash.execute(
             tipo_evento="LECTURA_TERMICA",

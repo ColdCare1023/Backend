@@ -176,6 +176,17 @@ class Settings(BaseSettings):
     # del mismo episodio en vez de crear uno nuevo (evita flapping).
     alerta_ventana_normalizacion_minutos: int = 15
 
+    # Modelo preventivo temporal (docs/ml/06_BACKEND_INTEGRATION.md).
+    # desactivado: el flujo de lecturas es exactamente el anterior.
+    # sombra: predice y guarda en `predicciones_preventivas` sin afectar
+    #   nivel de riesgo, alertas ni trazabilidad (evidencia prospectiva).
+    # activo: decide `nivel_riesgo`; solo carga un modelo APPROVED_FOR_DEPLOYMENT.
+    # La versión es un directorio de src/infrastructure/ai/models/preventivo/;
+    # el SHA-256 fija el artefacto aprobado (rollback = otra versión + su hash).
+    ia_preventivo_modo: Literal["desactivado", "sombra", "activo"] = "desactivado"
+    ia_preventivo_version: str = ""
+    ia_preventivo_sha256: str = ""
+
     cors_origins: list[str] = ["http://localhost:5173"]
 
     mqtt_host: str = "tu-instancia.emqx.cloud"
@@ -277,6 +288,15 @@ class Settings(BaseSettings):
                     )
                 if self.mqtt_host == "tu-instancia.emqx.cloud":
                     raise ValueError("MQTT_HOST no puede usar el valor de ejemplo en producción.")
+            # Un modelo que decide el nivel de riesgo en producción debe estar
+            # identificado por versión Y por el hash del artefacto aprobado: sin
+            # el hash, cambiar el archivo bastaría para cambiar las decisiones.
+            if self.ia_preventivo_modo == "activo" and not (
+                self.ia_preventivo_version and len(self.ia_preventivo_sha256) == 64
+            ):
+                raise ValueError(
+                    "IA_PREVENTIVO_MODO=activo requiere IA_PREVENTIVO_VERSION e IA_PREVENTIVO_SHA256 en producción."
+                )
             # HU-23: habilitar un canal de aviso sin sus credenciales dejaría
             # al sistema creyendo que notifica cuando en realidad falla en cada
             # excursión crítica — el peor modo de fallo posible aquí.

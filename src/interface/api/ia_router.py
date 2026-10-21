@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
@@ -14,14 +14,19 @@ from src.domain.entities.version_modelo_ia import VersionModeloIA
 from src.domain.exceptions import DomainError, RecursoNoEncontradoError
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.ai.features import FeaturesRiesgoTermico
+from src.infrastructure.ai.prediccion_preventiva import registro as registro_preventivo
+from src.infrastructure.ai.prediccion_preventiva.servicio import obtener_servicio_preventivo
 from src.infrastructure.ai.random_forest_service import get_random_forest_service
 from src.infrastructure.database.repositories.audit_log_repository import SQLAlchemyAuditLogRepository
 from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
 from src.infrastructure.database.repositories.modelo_ia_repository import SQLAlchemyModeloIARepository
+from src.infrastructure.database.repositories.prediccion_preventiva_repository import (
+    SQLAlchemyPrediccionPreventivaRepository,
+)
 from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
-from src.interface.api.deps import DbSessionDep, require_roles
+from src.interface.api.deps import DbSessionDep, SettingsDep, require_roles
 from src.interface.api.schemas import (
     InferenciaLecturaResponse,
     RegistrarVersionModeloRequest,
@@ -92,7 +97,58 @@ async def obtener_metadata_modelo(
         "modelo_disponible": True,
         "metadata": servicio.metadata,
         "metricas": metricas,
+        # El modelo legado se entrenó con escenarios SINTÉTICOS etiquetados
+        # por la misma regla que luego imita (train_model_v3.py): sus métricas
+        # no son evidencia de capacidad preventiva. El frontend ya muestra
+        # "no verificado" salvo que datos_simulados sea false
+        # (docs/ml/01_DATASET_AUDIT.md, sección "Modelo existente").
+        "datos_simulados": True,
+        "estado_evaluacion": "ilustrativa_no_reportable",
     }
+
+
+@router.get("/preventivo")
+async def obtener_estado_modelo_preventivo(
+    settings: SettingsDep,
+    _usuario=Depends(require_roles(Rol.FARMACEUTICO, Rol.AUDITOR, Rol.ADMINISTRADOR)),
+) -> dict:
+    """Estado del modelo preventivo temporal: modo configurado, versión
+    cargada, su estado de aprobación, métricas offline y criterios. Solo
+    lectura: entrenar, subir o activar modelos no se expone por HTTP."""
+    servicio = obtener_servicio_preventivo(
+        settings.ia_preventivo_modo, settings.ia_preventivo_version, settings.ia_preventivo_sha256
+    )
+    return {**servicio.estado(), "versiones_registradas": registro_preventivo.listar()}
+
+
+@router.get("/preventivo/predicciones")
+async def listar_predicciones_preventivas(
+    session: DbSessionDep,
+    device_id: str | None = Query(default=None, max_length=50),
+    limite: int = Query(default=100, ge=1, le=1000),
+    _usuario=Depends(require_roles(Rol.FARMACEUTICO, Rol.AUDITOR)),
+) -> list[dict]:
+    """Predicciones registradas (modo sombra o activo), separadas de las
+    mediciones. Evidencia prospectiva para el Experimento D."""
+    predicciones = await SQLAlchemyPrediccionPreventivaRepository(session).listar(device_id=device_id, limite=limite)
+    return [
+        {
+            "id": p.id,
+            "lectura_id": p.lectura_id,
+            "device_id": p.device_id,
+            "timestamp_inferencia": p.timestamp_inferencia,
+            "modo": p.modo,
+            "estado": p.estado,
+            "clase": p.clase.value if p.clase is not None else None,
+            "puntuacion": p.puntuacion,
+            "puntuacion_calibrada": p.puntuacion_calibrada,
+            "umbral": p.umbral,
+            "horizonte_min": p.horizonte_min,
+            "modelo_version": p.modelo_version,
+            "motivo": p.motivo,
+        }
+        for p in predicciones
+    ]
 
 
 @router.post("/clasificar", response_model=ClasificacionResponse)

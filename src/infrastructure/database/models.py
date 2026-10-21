@@ -512,6 +512,37 @@ class ModeloIAVersionModel(Base):
     desactivada_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class PrediccionPreventivaModel(Base):
+    """Predicciones del modelo preventivo temporal (docs/ml/06_BACKEND_INTEGRATION.md).
+
+    Tabla separada de `thermal_readings` a propósito: una predicción no es
+    una medición del sensor. Solo anexado (migración 0025): sirve de
+    evidencia prospectiva para validar el modelo con datos reales (modo
+    sombra) antes de que decida nada.
+    """
+
+    __tablename__ = "predicciones_preventivas"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    lectura_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("thermal_readings.id"), nullable=False, index=True
+    )
+    device_id: Mapped[str] = mapped_column(String(50), ForeignKey("devices.id"), nullable=False, index=True)
+    timestamp_inferencia: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    modo: Mapped[str] = mapped_column(String(20), nullable=False)
+    estado: Mapped[str] = mapped_column(String(30), nullable=False)
+    horizonte_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    clase: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    puntuacion: Mapped[float | None] = mapped_column(Float, nullable=True)
+    umbral: Mapped[float | None] = mapped_column(Float, nullable=True)
+    puntuacion_calibrada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    modelo_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    modelo_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    motivo: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    vector_features: Mapped[dict | None] = mapped_column(JSONVariant, nullable=True)
+    created_at: Mapped[datetime] = _created_at_column()
+
+
 class DeviceConfigHistoryModel(Base):
     """HU-49: historial auditable de cambios de configuración/instalación/
     calibración/reemplazo del hardware — valor anterior, valor nuevo, actor

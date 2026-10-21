@@ -15,10 +15,12 @@ from src.application.use_cases.auditar_accion_critica import AuditarAccionCritic
 from src.application.use_cases.clasificar_riesgo_termico import ClasificarRiesgoTermicoUseCase
 from src.application.use_cases.detectar_anomalia_reloj import anomalias_de_reloj
 from src.application.use_cases.gestionar_firmware import RegistrarResultadoOtaUseCase, normalizar_version
+from src.application.use_cases.predecir_riesgo_preventivo import PredecirRiesgoPreventivoUseCase
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.application.use_cases.registrar_lectura_termica import RegistrarLecturaTermicaUseCase
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.exceptions import DispositivoNoAutorizadoError, LecturaInvalidaError
+from src.infrastructure.ai.prediccion_preventiva.servicio import obtener_servicio_preventivo
 from src.infrastructure.ai.random_forest_service import get_random_forest_service
 from src.infrastructure.config import get_settings
 from src.infrastructure.database.repositories.alerta_repository import SQLAlchemyAlertaRepository
@@ -28,6 +30,9 @@ from src.infrastructure.database.repositories.audit_log_repository import (
 from src.infrastructure.database.repositories.device_repository import SQLAlchemyDeviceRepository
 from src.infrastructure.database.repositories.firmware_repository import SQLAlchemyFirmwareRepository
 from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
+from src.infrastructure.database.repositories.prediccion_preventiva_repository import (
+    SQLAlchemyPrediccionPreventivaRepository,
+)
 from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
@@ -503,6 +508,9 @@ async def _procesar_lectura_mqtt(
         alerta_repository = SQLAlchemyAlertaRepository(session)
         trazabilidad_repository = SQLAlchemyTrazabilidadRepository(session)
         clasificar_use_case = ClasificarRiesgoTermicoUseCase(get_random_forest_service())
+        servicio_preventivo = obtener_servicio_preventivo(
+            settings.ia_preventivo_modo, settings.ia_preventivo_version, settings.ia_preventivo_sha256
+        )
         use_case = RegistrarLecturaTermicaUseCase(
             lectura_repository,
             alerta_repository,
@@ -513,6 +521,13 @@ async def _procesar_lectura_mqtt(
             audit_log_repository=SQLAlchemyAuditLogRepository(session),
             notificacion_service=obtener_notificacion_service(settings),
             ventana_normalizacion_alerta_minutos=settings.alerta_ventana_normalizacion_minutos,
+            prediccion_preventiva=(
+                PredecirRiesgoPreventivoUseCase(
+                    servicio_preventivo, lectura_repository, SQLAlchemyPrediccionPreventivaRepository(session)
+                )
+                if servicio_preventivo.habilitado
+                else None
+            ),
         )
 
         lectura = LecturaTermica(
