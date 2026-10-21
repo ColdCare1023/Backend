@@ -63,6 +63,8 @@ printf '[req]\ndistinguished_name = dn\n[dn]\n' > certs/openssl_min.cnf
 PG_PASS=$(rand 16); JWT=$(rand 32); EMQX_DASH=$(rand 12)
 MQTT_BACKEND=$(rand 16); WEBHOOK=$(rand 32); API_KEY=$(rand 8); API_SECRET=$(rand 32)
 HMAC_TRAZA=$(rand 32)
+# BE-023: contraseñas de los usuarios demo (scripts/seed_dev.py), aleatorias.
+SEED_ADMIN=$(rand 16); SEED_FARMA=$(rand 16); SEED_TECNICO=$(rand 16)
 
 cat > .env <<ENV
 POSTGRES_USER=farmacia
@@ -77,6 +79,9 @@ BROKER_WEBHOOK_SECRET=${WEBHOOK}
 EMQX_API_KEY=${API_KEY}
 EMQX_API_SECRET=${API_SECRET}
 DEVICE_REGISTRY_ESTRICTO=true
+SEED_ADMIN_PASSWORD=${SEED_ADMIN}
+SEED_FARMACEUTICO_PASSWORD=${SEED_FARMA}
+SEED_TECNICO_PASSWORD=${SEED_TECNICO}
 BROKER_IP=${IP}
 ENV
 

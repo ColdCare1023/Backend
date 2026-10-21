@@ -1,3 +1,4 @@
+import hashlib
 import warnings
 from functools import lru_cache
 from typing import Literal
@@ -6,6 +7,19 @@ from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _SECRETO_POR_DEFECTO = "clave_secreta_larga_y_aleatoria_cambiar_en_produccion"
+
+# BE-023: secretos que quedaron publicados en el historial del repositorio
+# (constante `JWT_SECRET` de `src/auth.py`, commits 7ad2696..ab2174a). Se
+# guarda su SHA-256, nunca el valor: cualquiera con acceso al historial lo
+# conoce, así que no puede usarse como secreto en producción.
+_HASHES_SECRETOS_PUBLICADOS = frozenset(
+    {"a178e9bd86ba88b91b7cc9ecbec9297f41ebb34c5b7bea22c5e2cef2158a2d23"}
+)
+
+
+def _secreto_publicado(valor: str) -> bool:
+    return hashlib.sha256(valor.encode()).hexdigest() in _HASHES_SECRETOS_PUBLICADOS
+
 
 # RFC 7518 §3.2: la clave HMAC de HS256 debe tener al menos el tamaño de la
 # salida de la función hash (32 bytes). Con una clave más corta la firma es
@@ -199,6 +213,20 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "JWT_SECRET_KEY debe ser un secreto aleatorio de al menos 32 bytes "
                     "en producción (no usar el valor por defecto)."
+                )
+            publicados = [
+                nombre
+                for nombre, valor in (
+                    ("JWT_SECRET_KEY", self.jwt_secret_key),
+                    ("TRAZABILIDAD_HMAC_KEY", self.trazabilidad_hmac_key),
+                    ("BROKER_WEBHOOK_SECRET", self.broker_webhook_secret),
+                )
+                if valor and _secreto_publicado(valor)
+            ]
+            if publicados:
+                raise ValueError(
+                    f"{', '.join(publicados)} usa un valor publicado en el historial del "
+                    "repositorio; genere uno nuevo y aleatorio."
                 )
             if any(origen == "*" for origen in self.cors_origins):
                 raise ValueError("CORS_ORIGINS no puede contener '*' en producción.")

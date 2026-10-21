@@ -122,6 +122,10 @@ services:
       # scripts/crear_dispositivo.py (que además emite su credencial MQTT).
       DEVICE_REGISTRY_ESTRICTO: ${DEVICE_REGISTRY_ESTRICTO:-true}
       ALLOWED_HOSTS: '["localhost","127.0.0.1","backend"]'
+      # BE-023: solo las usa `python -m scripts.seed_dev` (usuarios demo).
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      SEED_FARMACEUTICO_PASSWORD: ${SEED_FARMACEUTICO_PASSWORD:-}
+      SEED_TECNICO_PASSWORD: ${SEED_TECNICO_PASSWORD:-}
       CORS_ORIGINS: '["http://localhost:5173"]'
     ports:
       - "127.0.0.1:8000:8000"

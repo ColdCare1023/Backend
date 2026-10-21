@@ -5,13 +5,12 @@ Uso:  python scripts/hu12_hu19_carga.py [dispositivos] [lecturas]
 
 Da de alta los dispositivos de prueba FARM-1N-TEST en el backend y emite sus
 credenciales MQTT (BE-002), inicia sesión como el farmacéutico demo
-(credenciales de scripts/seed_dev.py),
+(usuario de scripts/seed_dev.py, contraseña en .env),
 abre el stream SSE y mide. No imprime secretos.
 """
 import asyncio
 import json
 import random
-import re
 import ssl
 import statistics
 import sys
@@ -21,7 +20,7 @@ from pathlib import Path
 
 import aiomqtt
 import httpx
-from aprovisionar import aprovisionar, cabecera_admin
+from aprovisionar import aprovisionar, cabecera_admin, credenciales_semilla
 
 RAIZ = Path(__file__).resolve().parent.parent
 ENV = dict(linea.split("=", 1) for linea in (RAIZ / ".env").read_text().splitlines() if "=" in linea)
@@ -31,10 +30,8 @@ N_LECT = int(sys.argv[2]) if len(sys.argv) > 2 else 10
 
 
 def credenciales_demo() -> tuple[str, str]:
-    """Lee el farmacéutico demo de seed_dev.py (valores de prueba del proyecto)."""
-    seed = (RAIZ.parent / "scripts/seed_dev.py").read_text(encoding="utf-8")
-    m = re.search(r'\("Farmaceutico Demo", "([^"]+)", "([^"]+)"', seed)
-    return m.group(1), m.group(2)
+    """Farmacéutico demo de seed_dev.py; su contraseña está en .env (BE-023)."""
+    return credenciales_semilla("Farmaceutico Demo")
 
 
 async def asegurar_dispositivos(_http: httpx.AsyncClient) -> dict[str, str]:

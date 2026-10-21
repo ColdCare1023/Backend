@@ -9,7 +9,7 @@ CA propia de prueba. Permite probar el nodo ColdCare1023/IoT real, el backend y 
 cd infra-local
 ./scripts/init.sh 192.168.18.21        # IP de ESTA PC en la red del ESP32
 docker compose --profile backend up -d --build
-docker compose exec backend python -m scripts.seed_dev   # usuarios demo
+docker compose exec backend python -m scripts.seed_dev   # usuarios demo (contraseñas SEED_* en .env)
 python scripts/crear_dispositivo.py FARM-01-CDL          # alta + credencial MQTT (secrets/)
 python scripts/crear_dispositivo.py FARM-02-TEST
 ```

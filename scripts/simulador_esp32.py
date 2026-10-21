@@ -15,10 +15,10 @@ Uso:
     python -m scripts.simulador_esp32 --device-id ESP32-002 --intervalo 5 --n 50
     python -m scripts.simulador_esp32 --base-url http://localhost:8000 --forzar-alerta
 
-Variables de entorno (opcionales, tienen default):
+Variables de entorno:
     SIMULADOR_BASE_URL   (default: http://localhost:8000)
     SIMULADOR_EMAIL      (default: tecnico@farmacia.demo.pe)
-    SIMULADOR_PASSWORD   (default: tecni12345)
+    SIMULADOR_PASSWORD   (obligatoria si no se pasa --password; sin default, BE-023)
     SIMULADOR_DEVICE_ID  (default: ESP32-001)
 """
 
@@ -35,7 +35,8 @@ import httpx
 
 BASE_URL_DEFAULT = os.getenv("SIMULADOR_BASE_URL", "http://localhost:8000")
 EMAIL_DEFAULT = os.getenv("SIMULADOR_EMAIL", "tecnico@farmacia.demo.pe")
-PASSWORD_DEFAULT = os.getenv("SIMULADOR_PASSWORD", "tecni12345")
+# BE-023: sin contraseña por defecto en el código.
+PASSWORD_DEFAULT = os.getenv("SIMULADOR_PASSWORD")
 DEVICE_ID_DEFAULT = os.getenv("SIMULADOR_DEVICE_ID", "ESP32-001")
 
 # Rango normal de cadena de frío farmacéutica: 2°C a 8°C.
@@ -110,6 +111,9 @@ async def _enviar_lectura(client: httpx.AsyncClient, base_url: str, token: str, 
 
 
 async def ejecutar(args: argparse.Namespace) -> int:
+    if not args.password:
+        print("Falta la contraseña: use --password o SIMULADOR_PASSWORD.", file=sys.stderr)
+        return 2
     base_url = args.base_url.rstrip("/")
     print("── Simulador ESP32 ──────────────────────────────")
     print(f"Backend:    {base_url}")
@@ -181,7 +185,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--base-url", default=BASE_URL_DEFAULT, help="URL del backend (default: %(default)s)")
     parser.add_argument("--email", default=EMAIL_DEFAULT, help="Email de login (rol tecnico o farmaceutico)")
-    parser.add_argument("--password", default=PASSWORD_DEFAULT, help="Password de login")
+    parser.add_argument("--password", default=PASSWORD_DEFAULT, help="Password de login (o SIMULADOR_PASSWORD)")
     parser.add_argument("--device-id", default=DEVICE_ID_DEFAULT, help="device_id a simular")
     parser.add_argument("--intervalo", type=float, default=10.0, help="Segundos entre lecturas (default: 10)")
     parser.add_argument("--n", type=int, default=0, help="Número de lecturas a enviar (0 = infinito, default: 0)")
