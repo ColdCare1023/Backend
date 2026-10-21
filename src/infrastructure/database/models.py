@@ -121,7 +121,7 @@ class UserModel(Base):
     rol_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("roles.id"), nullable=False)
 
     # HU-44: consentimiento explícito de la Ley N.° 29733.
-    privacy_accepted: Mapped[bool] = mapped_column(Boolean, default=True)
+    privacy_accepted: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_text("false"))
     privacy_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     privacy_version_accepted: Mapped[str | None] = mapped_column(String(10), nullable=True)
 

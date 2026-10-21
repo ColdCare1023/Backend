@@ -29,9 +29,11 @@ class AceptarPrivacidadUseCase:
 
         await self._registrar_hash.execute(
             tipo_evento="ACEPTACION_PRIVACIDAD",
+            # BE-014: el titular queda identificado por usuario_id; su correo no
+            # se graba en una cadena inmutable (la anonimización de HU-45 no
+            # podría alcanzarlo después).
             payload={
                 "usuario_id": str(usuario.id),
-                "email": usuario.email,
                 "ip_origen": ip_origen,
                 "version_politica_aceptada": PRIVACY_POLICY_VERSION,
             },
@@ -50,6 +52,6 @@ class RechazarPrivacidadUseCase:
     async def execute(self, usuario: Usuario, ip_origen: str | None) -> None:
         await self._registrar_hash.execute(
             tipo_evento="RECHAZO_PRIVACIDAD",
-            payload={"usuario_id": str(usuario.id), "email": usuario.email, "ip_origen": ip_origen},
+            payload={"usuario_id": str(usuario.id), "ip_origen": ip_origen},
             usuario_id=usuario.id,
         )

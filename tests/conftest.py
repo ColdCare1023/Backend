@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from src.domain.entities.usuario import Usuario
+from src.domain.entities.usuario import PRIVACY_POLICY_VERSION, Usuario
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.database.base import Base
 from src.infrastructure.database.repositories.usuario_repository import SQLAlchemyUsuarioRepository
@@ -62,10 +62,14 @@ def app(db_session_factory):
 
 @pytest_asyncio.fixture
 async def crear_usuario(db_session_factory):
-    async def _crear(nombre: str, email: str, password: str, rol: Rol) -> Usuario:
+    async def _crear(nombre: str, email: str, password: str, rol: Rol, con_consentimiento: bool = True) -> Usuario:
         async with db_session_factory() as session:
             repo = SQLAlchemyUsuarioRepository(session)
-            usuario = Usuario(nombre=nombre, email=email, password_hash=hash_password(password), rol=rol, privacy_accepted=True)
+            usuario = Usuario(
+                nombre=nombre, email=email, password_hash=hash_password(password), rol=rol,
+                privacy_accepted=con_consentimiento,
+                privacy_version_accepted=PRIVACY_POLICY_VERSION if con_consentimiento else None,
+            )
             creado = await repo.agregar(usuario)
             await session.commit()
             return creado

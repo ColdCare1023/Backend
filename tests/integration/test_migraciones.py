@@ -134,7 +134,7 @@ def test_indices_de_consulta_existen(base_temporal):
         assert indice in nombres, f"falta el índice {indice} en {tabla}"
 
 
-def _esquema_completo(engine) -> dict[str, set[tuple[str, bool]]]:
+def _esquema_completo(engine) -> dict[str, set[tuple[str, bool, str]]]:
     """Todas las tablas y sus columnas (nombre, nullable), para comparar el
     esquema entero sin atarse a los nombres de columna de la migración que
     sea la última hoy. Incluye `nullable` porque no toda migración agrega o
@@ -142,15 +142,17 @@ def _esquema_completo(engine) -> dict[str, set[tuple[str, bool]]]:
     0012_hu04_mc38_ausente), y esa diferencia también debe sobrevivir un
     downgrade+upgrade."""
     inspector = inspect(engine)
+    # El valor por defecto del servidor también es esquema: una migración que
+    # solo lo cambia (0020, BE-014) debe poder deshacerse.
     esquema = {
-        tabla: {(c["name"], c["nullable"]) for c in inspector.get_columns(tabla)}
+        tabla: {(c["name"], c["nullable"], str(c.get("default"))) for c in inspector.get_columns(tabla)}
         for tabla in inspector.get_table_names()
     }
     # Migraciones que solo agregan triggers (0018, BE-007) también deben
     # sobrevivir un downgrade+upgrade.
     with engine.connect() as conexion:
         triggers = conexion.exec_driver_sql("SELECT name FROM sqlite_master WHERE type = 'trigger'").all()
-    esquema["__triggers__"] = {(nombre, False) for (nombre,) in triggers}
+    esquema["__triggers__"] = {(nombre, False, "") for (nombre,) in triggers}
     return esquema
 
 

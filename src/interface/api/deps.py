@@ -80,8 +80,9 @@ async def get_current_user(
     jwt_handler: JWTHandlerDep,
 ) -> Usuario:
     usuario = await _usuario_de_token_vigente(token, session, jwt_handler)
-    # HU-44: el usuario debe haber aceptado la política de privacidad.
-    if not getattr(usuario, 'privacy_accepted', True):
+    # HU-44 / BE-014: el usuario debe haber aceptado la versión VIGENTE de la
+    # política de privacidad; no basta un indicador que nunca se pidió.
+    if usuario.requiere_aceptar_privacidad:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Debe aceptar la política de privacidad y consentimiento para acceder a este recurso",

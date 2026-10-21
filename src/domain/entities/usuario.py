@@ -19,8 +19,9 @@ class Usuario:
     password_hash: str
     rol: Rol
     id: UUID | None = None
-    # HU-44: consentimiento Ley N.° 29733.
-    privacy_accepted: bool = True
+    # HU-44: consentimiento Ley N.° 29733. BE-014: nunca presunto; lo
+    # registra solo POST /api/auth/privacidad/aceptar.
+    privacy_accepted: bool = False
     privacy_accepted_at: datetime | None = None
     privacy_version_accepted: str | None = None
     # HU-45: ciclo de vida / derecho al olvido.
