@@ -15,6 +15,8 @@ def _release_to_dict(model: FirmwareReleaseModel) -> dict:
         "hash_sha256": model.hash_sha256,
         "descripcion": model.descripcion,
         "fecha_compilacion": model.fecha_compilacion,
+        "url_descarga": model.url_descarga,
+        "tamano_bytes": model.tamano_bytes,
         "created_at": model.created_at,
     }
 
@@ -37,7 +39,13 @@ class SQLAlchemyFirmwareRepository(IFirmwareRepository):
         self._session = session
 
     async def crear_release(
-        self, version: str, hash_sha256: str, descripcion: str, fecha_compilacion: datetime
+        self,
+        version: str,
+        hash_sha256: str,
+        descripcion: str,
+        fecha_compilacion: datetime,
+        url_descarga: str | None = None,
+        tamano_bytes: int | None = None,
     ) -> dict:
         model = FirmwareReleaseModel(
             id=uuid.uuid4(),
@@ -45,6 +53,8 @@ class SQLAlchemyFirmwareRepository(IFirmwareRepository):
             hash_sha256=hash_sha256,
             descripcion=descripcion,
             fecha_compilacion=fecha_compilacion,
+            url_descarga=url_descarga,
+            tamano_bytes=tamano_bytes,
         )
         self._session.add(model)
         await self._session.flush()
@@ -89,3 +99,13 @@ class SQLAlchemyFirmwareRepository(IFirmwareRepository):
         model.completado_en = completado_en
         await self._session.flush()
         return _despliegue_to_dict(model)
+
+    async def obtener_despliegue_enviado(self, device_id: str, version: str | None) -> dict | None:
+        stmt = select(FirmwareDeploymentModel).where(
+            FirmwareDeploymentModel.device_id == device_id, FirmwareDeploymentModel.estado == "enviado"
+        )
+        if version is not None:
+            stmt = stmt.where(FirmwareDeploymentModel.version_objetivo == version)
+        stmt = stmt.order_by(FirmwareDeploymentModel.created_at.desc()).limit(1)
+        model = (await self._session.execute(stmt)).scalar_one_or_none()
+        return _despliegue_to_dict(model) if model else None

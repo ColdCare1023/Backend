@@ -103,6 +103,8 @@ class EventoV1(BaseModel):
         "estado_nodo",
         # IOT-002: auditoría de la consola de aprovisionamiento del nodo.
         "config_modificada", "reinicio_manual", "consola_desbloqueada", "consola_desbloqueo_fallido",
+        # IOT-004: ciclo de la actualización OTA.
+        "ota_iniciada", "ota_instalada", "ota_confirmada", "ota_rechazada", "ota_fallida", "ota_revertida",
     ]
     # El LWT lo publica el broker: no lleva boot_id, hora ni detalle.
     boot_id: int | None = Field(default=None, ge=0, le=UINT32)

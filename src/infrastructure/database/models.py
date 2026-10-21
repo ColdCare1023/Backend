@@ -406,6 +406,9 @@ class FirmwareReleaseModel(Base):
     hash_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     descripcion: Mapped[str] = mapped_column(Text, nullable=False)
     fecha_compilacion: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # IOT-004: con URL y tamaño la release es instalable por OTA real.
+    url_descarga: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    tamano_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = _created_at_column()
 
 

@@ -1,9 +1,12 @@
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.application.use_cases.gestionar_firmware import (
     EjecutarDespliegueUseCase,
+    EnviarOrdenOtaUseCase,
+    OrdenOtaNoEnviadaError,
     PrepararFirmwareUseCase,
     ProgramarDespliegueUseCase,
 )
@@ -15,6 +18,7 @@ from src.infrastructure.database.repositories.firmware_repository import SQLAlch
 from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
+from src.infrastructure.mqtt.ordenes_ota import PublicadorOrdenesOTA, obtener_publicador_ota
 from src.interface.api.deps import DbSessionDep, SettingsDep, require_roles
 from src.interface.api.schemas import (
     FirmwareDespliegueCreateRequest,
@@ -24,6 +28,13 @@ from src.interface.api.schemas import (
 )
 
 router = APIRouter(prefix="/api/firmware", tags=["firmware-ota"])
+
+
+def get_publicador_ota(settings: SettingsDep) -> PublicadorOrdenesOTA:
+    return obtener_publicador_ota(settings)
+
+
+PublicadorOtaDep = Annotated[PublicadorOrdenesOTA, Depends(get_publicador_ota)]
 
 
 def _traducir(exc: Exception) -> HTTPException:
@@ -42,7 +53,9 @@ async def preparar_release(
         SQLAlchemyFirmwareRepository(session), RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session))
     )
     try:
-        release = await use_case.execute(body.version, body.hash_sha256, body.descripcion)
+        release = await use_case.execute(
+            body.version, body.hash_sha256, body.descripcion, body.url_descarga, body.tamano_bytes
+        )
     except DomainError as exc:
         raise _traducir(exc) from exc
     await session.commit()
@@ -78,17 +91,45 @@ async def ejecutar_despliegue(
     despliegue_id: UUID,
     session: DbSessionDep,
     settings: SettingsDep,
+    publicador: PublicadorOtaDep,
     _admin=Depends(require_roles(Rol.ADMINISTRADOR)),
 ) -> FirmwareDespliegueResponse:
-    """HU-46 Escenarios 3-5 (simulado, sin ESP32 real): aplica o rechaza el despliegue programado.
+    """HU-46: ejecuta el despliegue programado.
 
-    BE-016: en producción no se sirve. El firmware no tiene OTA y registrar
-    como instalada una versión que nadie instaló falsearía el inventario y la
-    cadena de evidencia."""
+    IOT-004: si la release tiene URL de descarga y tamaño, se publica una
+    orden OTA real para el nodo y el despliegue queda `enviado` hasta que el
+    propio nodo confirme (o no) la instalación. Sin ellos solo existe el flujo
+    simulado de desarrollo, que no se sirve en producción (BE-016)."""
+    firmware_repository = SQLAlchemyFirmwareRepository(session)
+    despliegue = await firmware_repository.obtener_despliegue(despliegue_id)
+    release = (
+        await firmware_repository.obtener_release(despliegue["version_objetivo"]) if despliegue else None
+    )
+    if release is not None and release.get("url_descarga"):
+        if not publicador.configurado:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="MQTT no está configurado: no se puede enviar la orden OTA.",
+            )
+        caso_real = EnviarOrdenOtaUseCase(
+            SQLAlchemyDeviceRepository(session),
+            firmware_repository,
+            RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session)),
+            publicador.publicar,
+        )
+        try:
+            enviado = await caso_real.execute(despliegue_id)
+        except OrdenOtaNoEnviadaError as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+        except (DomainError, RecursoNoEncontradoError) as exc:
+            raise _traducir(exc) from exc
+        await session.commit()
+        return FirmwareDespliegueResponse(**enviado)
+
     if settings.environment == "production":
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="El firmware no implementa OTA: la ejecución simulada no está disponible en producción.",
+            detail="La release no tiene URL de descarga: la ejecución simulada no está disponible en producción.",
         )
     use_case = EjecutarDespliegueUseCase(
         SQLAlchemyDeviceRepository(session),

@@ -14,7 +14,8 @@ from pydantic import ValidationError
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.clasificar_riesgo_termico import ClasificarRiesgoTermicoUseCase
 from src.application.use_cases.detectar_anomalia_reloj import anomalias_de_reloj
-from src.application.use_cases.gestionar_firmware import normalizar_version
+from src.application.use_cases.gestionar_firmware import RegistrarResultadoOtaUseCase, normalizar_version
+from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.application.use_cases.registrar_lectura_termica import RegistrarLecturaTermicaUseCase
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.exceptions import DispositivoNoAutorizadoError, LecturaInvalidaError
@@ -25,6 +26,7 @@ from src.infrastructure.database.repositories.audit_log_repository import (
     SQLAlchemyAuditLogRepository,
 )
 from src.infrastructure.database.repositories.device_repository import SQLAlchemyDeviceRepository
+from src.infrastructure.database.repositories.firmware_repository import SQLAlchemyFirmwareRepository
 from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
 from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
@@ -241,6 +243,12 @@ async def _procesar_evento_v1(
             ip_origen=None,
             device_id=evento.device_id,
         )
+        # IOT-004: el resultado de un despliegue OTA lo informa el propio nodo.
+        await RegistrarResultadoOtaUseCase(
+            device_repository,
+            SQLAlchemyFirmwareRepository(session),
+            RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session)),
+        ).execute(evento.device_id, evento.event_type, evento.detail)
         await session.commit()
 
     await broadcaster.publicar(sse, evento.event_type)

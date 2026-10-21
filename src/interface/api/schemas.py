@@ -548,10 +548,17 @@ class InferenciaLecturaResponse(BaseModel):
     version_era_activa_y_aprobada_en_ese_momento: bool | None
 
 
+# IOT-004: tamaño de la partición de aplicación del nodo (1216 KB).
+OTA_TAMANO_MAXIMO_BYTES = 0x130000
+
+
 class FirmwareReleaseCreateRequest(_PeticionEstricta):
     version: str = Field(min_length=1, max_length=20)
-    hash_sha256: str = Field(min_length=64, max_length=64)
+    hash_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     descripcion: str = Field(min_length=1, max_length=2000)
+    # IOT-004: con ambos, la release se instala por OTA real (orden MQTT al nodo).
+    url_descarga: str | None = Field(default=None, pattern=r"^https://[^\s\"\\]{1,248}$")
+    tamano_bytes: int | None = Field(default=None, ge=1, le=OTA_TAMANO_MAXIMO_BYTES)
 
 
 class FirmwareReleaseResponse(BaseModel):
@@ -560,6 +567,8 @@ class FirmwareReleaseResponse(BaseModel):
     hash_sha256: str
     descripcion: str
     fecha_compilacion: datetime
+    url_descarga: str | None = None
+    tamano_bytes: int | None = None
 
 
 class FirmwareDespliegueCreateRequest(_PeticionEstricta):

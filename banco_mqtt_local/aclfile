@@ -1,10 +1,13 @@
-# Backend simulado: lee lecturas y eventos de todos, publica acuses.
+# Backend simulado: lee lecturas y eventos de todos, publica acuses y órdenes OTA.
 user backend_qa
 topic read farmacias/+/lecturas
 topic read farmacias/+/eventos
 topic write farmacias/+/ack
+topic write farmacias/+/ota
 
-# Cada nodo (usuario = device_id) solo publica en SUS tópicos y solo lee SU acuse (HU-10 esc. 3).
+# Cada nodo (usuario = device_id) solo publica en SUS tópicos y solo lee SU acuse y SUS órdenes OTA
+# (HU-10 esc. 3, IOT-004).
 pattern write farmacias/%u/lecturas
 pattern write farmacias/%u/eventos
 pattern read farmacias/%u/ack
+pattern read farmacias/%u/ota

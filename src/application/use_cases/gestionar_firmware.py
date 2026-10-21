@@ -1,4 +1,5 @@
 import re
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
@@ -36,12 +37,23 @@ class PrepararFirmwareUseCase:
         self._firmware_repository = firmware_repository
         self._registrar_hash = registrar_hash
 
-    async def execute(self, version: str, hash_sha256: str, descripcion: str) -> dict:
+    async def execute(
+        self,
+        version: str,
+        hash_sha256: str,
+        descripcion: str,
+        url_descarga: str | None = None,
+        tamano_bytes: int | None = None,
+    ) -> dict:
         version = normalizar_version(version)
         if await self._firmware_repository.obtener_release(version) is not None:
             raise DomainError(f"Ya existe una release con versión {version}")
+        if (url_descarga is None) != (tamano_bytes is None):
+            raise DomainError("La URL de descarga y el tamaño de la imagen van juntos")
         fecha_compilacion = datetime.now(tz=timezone.utc)
-        release = await self._firmware_repository.crear_release(version, hash_sha256, descripcion, fecha_compilacion)
+        release = await self._firmware_repository.crear_release(
+            version, hash_sha256, descripcion, fecha_compilacion, url_descarga, tamano_bytes
+        )
         await self._registrar_hash.execute(
             tipo_evento="FIRMWARE_PREPARACION",
             payload={
@@ -49,6 +61,8 @@ class PrepararFirmwareUseCase:
                 "hash_sha256": hash_sha256,
                 "fecha_compilacion": fecha_compilacion.isoformat(),
                 "descripcion_parche": descripcion,
+                "url_descarga": url_descarga,
+                "tamano_bytes": tamano_bytes,
             },
         )
         return release
@@ -145,5 +159,123 @@ class EjecutarDespliegueUseCase:
                 "simulado": True,
             },
             device_id=despliegue["device_id"],
+        )
+        return actualizado
+
+
+PublicarOrdenOTA = Callable[[str, dict], Awaitable[bool]]
+
+
+class EnviarOrdenOtaUseCase:
+    """IOT-004: despliegue REAL. Publica la orden OTA para el nodo con todo lo
+    que necesita para verificar la imagen (URL HTTPS, SHA-256, tamaño). El
+    despliegue queda `enviado`: solo el propio nodo lo da por instalado
+    (evento `ota_confirmada`) o fallido (`ota_fallida`, `ota_rechazada`,
+    `ota_revertida`). Nada se registra como instalado sin su confirmación."""
+
+    def __init__(
+        self,
+        device_repository: IDeviceRepository,
+        firmware_repository: IFirmwareRepository,
+        registrar_hash: RegistrarHashEncadenadoUseCase,
+        publicar: PublicarOrdenOTA,
+    ) -> None:
+        self._device_repository = device_repository
+        self._firmware_repository = firmware_repository
+        self._registrar_hash = registrar_hash
+        self._publicar = publicar
+
+    async def execute(self, despliegue_id) -> dict:
+        despliegue = await self._firmware_repository.obtener_despliegue(despliegue_id)
+        if despliegue is None:
+            raise RecursoNoEncontradoError(f"Despliegue {despliegue_id} no encontrado")
+        if despliegue["estado"] != "programado":
+            raise DomainError(f"El despliegue ya fue procesado (estado={despliegue['estado']})")
+        dispositivo = await self._device_repository.obtener(despliegue["device_id"])
+        if dispositivo is None:
+            raise RecursoNoEncontradoError(f"Dispositivo {despliegue['device_id']} no encontrado")
+        version = despliegue["version_objetivo"]
+        if _version_tupla(version) <= _version_tupla(dispositivo["firmware_version"]):
+            raise DomainError(f"Downgrade rechazado: {despliegue['device_id']} ya tiene {dispositivo['firmware_version']}")
+        release = await self._firmware_repository.obtener_release(version)
+        if release is None or not release.get("url_descarga") or not release.get("tamano_bytes"):
+            raise DomainError(f"La release {version} no tiene URL de descarga y tamaño: no es instalable por OTA")
+
+        orden = {
+            "device_id": despliegue["device_id"],
+            "version": version,
+            "url": release["url_descarga"],
+            "sha256": release["hash_sha256"],
+            "tamano": release["tamano_bytes"],
+        }
+        if not await self._publicar(despliegue["device_id"], orden):
+            raise OrdenOtaNoEnviadaError("El broker no confirmó la orden OTA")
+        actualizado = await self._firmware_repository.actualizar_despliegue(
+            despliegue_id, "enviado", "orden_publicada", None
+        )
+        await self._registrar_hash.execute(
+            tipo_evento="FIRMWARE_OTA_ENVIADA",
+            payload={**orden, "despliegue_id": str(despliegue_id)},
+            device_id=despliegue["device_id"],
+        )
+        return actualizado
+
+
+class OrdenOtaNoEnviadaError(Exception):
+    """El broker no estaba disponible o no confirmó la publicación."""
+
+
+_ESTADO_POR_EVENTO_OTA = {
+    "ota_confirmada": "exitoso",
+    "ota_fallida": "fallido",
+    "ota_rechazada": "fallido",
+    "ota_revertida": "revertido",
+}
+
+
+class RegistrarResultadoOtaUseCase:
+    """IOT-004: el resultado de un despliegue lo informa el nodo. `ota_confirmada`
+    llega cuando la imagen nueva superó su arranque a prueba (capturó y
+    conectó); `ota_revertida` cuando el bootloader volvió a la anterior."""
+
+    def __init__(
+        self,
+        device_repository: IDeviceRepository,
+        firmware_repository: IFirmwareRepository,
+        registrar_hash: RegistrarHashEncadenadoUseCase,
+    ) -> None:
+        self._device_repository = device_repository
+        self._firmware_repository = firmware_repository
+        self._registrar_hash = registrar_hash
+
+    async def execute(self, device_id: str, tipo_evento: str, detalle: dict | None) -> dict | None:
+        estado = _ESTADO_POR_EVENTO_OTA.get(tipo_evento)
+        if estado is None:
+            return None
+        detalle = detalle or {}
+        # ota_confirmada informa la versión que corre; las de fallo, la pedida.
+        version = detalle.get("version") or (
+            detalle.get("firmware_version") if tipo_evento == "ota_confirmada" else None
+        )
+        version = normalizar_version(version) if isinstance(version, str) and version else None
+        despliegue = await self._firmware_repository.obtener_despliegue_enviado(device_id, version)
+        if despliegue is None:
+            return None
+        resultado = str(detalle.get("resultado") or detalle.get("motivo") or tipo_evento)[:200]
+        actualizado = await self._firmware_repository.actualizar_despliegue(
+            despliegue["id"], estado, resultado, datetime.now(tz=timezone.utc)
+        )
+        if estado == "exitoso":
+            await self._device_repository.actualizar_firmware_version(device_id, despliegue["version_objetivo"])
+        await self._registrar_hash.execute(
+            tipo_evento="FIRMWARE_ACTUALIZADO" if estado == "exitoso" else "FIRMWARE_OTA_NO_APLICADA",
+            payload={
+                "device_id": device_id,
+                "version_objetivo": despliegue["version_objetivo"],
+                "estado": estado,
+                "resultado": resultado,
+                "confirmado_por_dispositivo": True,
+            },
+            device_id=device_id,
         )
         return actualizado
