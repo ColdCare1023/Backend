@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.entities.lectura_termica import ORIGEN_DISPOSITIVO, LecturaTermica
@@ -151,10 +151,17 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
     async def obtener_por_device_y_timestamp(
         self, device_id: str, timestamp: datetime
     ) -> LecturaTermica | None:
+        # BE-024: desde la migración 0015, (device_id, timestamp) solo es único
+        # entre lecturas SIN boot_id/seq_no (índice parcial de 0017). Las del
+        # firmware nuevo pueden repetir marca de tiempo (sin NTP), y comparar
+        # contra ellas producía MultipleResultsFound (500 / mensaje MQTT
+        # descartado). La identidad heredada solo se compara con lecturas
+        # heredadas, que es justo el conjunto que el índice mantiene único.
         stmt = select(ThermalReadingModel).where(
             ThermalReadingModel.device_id == device_id,
             ThermalReadingModel.timestamp == timestamp,
             ThermalReadingModel.origen == ORIGEN_DISPOSITIVO,
+            or_(ThermalReadingModel.boot_id.is_(None), ThermalReadingModel.seq_no.is_(None)),
         )
         result = await self._session.execute(stmt)
         model = result.scalar_one_or_none()

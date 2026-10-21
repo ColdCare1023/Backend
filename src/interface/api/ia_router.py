@@ -65,9 +65,13 @@ class ClasificacionRequest(BaseModel):
 
 
 class ClasificacionResponse(BaseModel):
-    nivel_riesgo: str
-    confianza: float
+    # BE-024: sin modelo cargado (o si la inferencia falla) decide la regla de
+    # salvaguarda y no hay probabilidad de Random Forest: `confianza` es null,
+    # nunca un 500. `estado_inferencia` explica por qué.
+    nivel_riesgo: str | None
+    confianza: float | None
     origen: str
+    estado_inferencia: str
 
 
 @router.get("/modelo")
@@ -102,9 +106,10 @@ async def clasificar_prueba(
     servicio = get_random_forest_service()
     resultado = servicio.inferir(FeaturesRiesgoTermico(**body.model_dump()))
     return ClasificacionResponse(
-        nivel_riesgo=resultado.nivel.value,
-        confianza=round(resultado.confianza, 4),
+        nivel_riesgo=resultado.nivel.value if resultado.nivel is not None else None,
+        confianza=round(resultado.confianza, 4) if resultado.confianza is not None else None,
         origen=resultado.origen,
+        estado_inferencia=resultado.estado_inferencia,
     )
 
 
