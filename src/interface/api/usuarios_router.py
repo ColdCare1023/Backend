@@ -134,7 +134,7 @@ async def cambiar_rol(
         objetivo = await repositorio.obtener_por_id(usuario_id)
         if objetivo is not None:
             rol_anterior = objetivo.rol.value
-        usuario = await use_case.execute(usuario_id, body.rol)
+        usuario = await use_case.execute(usuario_id, body.rol, actor_id=admin.id)
     except RecursoNoEncontradoError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except DomainError as exc:

@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -109,3 +109,17 @@ class SQLAlchemyUsuarioRepository(IUsuarioRepository):
         await self._session.flush()
         await self._session.refresh(model, attribute_names=["rol"])
         return _to_entity(model)
+
+    async def contar_administradores_activos(self) -> int:
+        if self._session.bind is not None and self._session.bind.dialect.name == "postgresql":
+            # Serializa las operaciones que pueden retirar administradores: sin
+            # esto, dos administradores degradándose mutuamente a la vez verían
+            # ambos "quedan 2" y el sistema quedaría sin ninguno.
+            await self._session.execute(text("SELECT pg_advisory_xact_lock(hashtext('usuarios_administradores'))"))
+        stmt = (
+            select(func.count())
+            .select_from(UserModel)
+            .join(RoleModel, UserModel.rol_id == RoleModel.id)
+            .where(RoleModel.nombre == Rol.ADMINISTRADOR.value, UserModel.is_active.is_(True))
+        )
+        return int((await self._session.execute(stmt)).scalar_one())

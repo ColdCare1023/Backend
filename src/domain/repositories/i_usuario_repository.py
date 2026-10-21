@@ -19,3 +19,7 @@ class IUsuarioRepository(ABC):
 
     @abstractmethod
     async def actualizar(self, usuario: Usuario) -> Usuario: ...
+
+    @abstractmethod
+    async def contar_administradores_activos(self) -> int:
+        """BE-012: cuántos administradores activos quedan."""
