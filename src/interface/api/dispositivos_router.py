@@ -254,6 +254,7 @@ async def dar_de_baja(
     session: DbSessionDep,
     request: Request,
     admin=Depends(router_dep),
+    broker: BrokerAdmin = Depends(get_broker_admin),
 ) -> DispositivoResponse:
     repositorio = SQLAlchemyDeviceRepository(session)
     use_case = DarDeBajaDispositivoUseCase(
@@ -275,10 +276,13 @@ async def dar_de_baja(
         usuario_id=admin.id,
         accion="BAJA_DISPOSITIVO",
         recurso=f"dispositivos/{device_id}",
-        detalle={"motivo": body.motivo, "reemplazo": body.device_id_reemplazo},
+        detalle={"motivo": body.motivo, "reemplazo": body.device_id_reemplazo, "credencial_revocada": True},
         ip_origen=ip,
     )
     await session.commit()
+    # BE-003: la baja revoca la credencial; se cierra además la sesión abierta.
+    if await broker.desconectar_cliente(device_id) is not True:
+        logger.warning("Dispositivo %s dado de baja, pero su sesión MQTT no se pudo expulsar.", device_id)
     return DispositivoResponse(**dispositivo)
 
 

@@ -44,6 +44,11 @@ class SQLAlchemyDeviceRepository(IDeviceRepository):
     async def existe(self, device_id: str) -> bool:
         return await self._session.get(DeviceModel, device_id) is not None
 
+    async def esta_activo(self, device_id: str) -> bool:
+        """BE-003: provisionado y no dado de baja."""
+        model = await self._session.get(DeviceModel, device_id)
+        return model is not None and bool(model.activo)
+
     async def existio_alguna_vez(self, device_id: str) -> bool:
         return await self._session.get(DeviceModel, device_id) is not None
 
@@ -196,6 +201,7 @@ class SQLAlchemyDeviceRepository(IDeviceRepository):
         return {
             "mqtt_token_hash": model.mqtt_token_hash,
             "mqtt_token_activo": model.mqtt_token_activo,
+            "activo": model.activo,
         }
 
     # ── HU-51: ubicación y metadatos de instalación ────────────────────────

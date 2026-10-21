@@ -49,6 +49,10 @@ class DarDeBajaDispositivoUseCase:
         actualizado = await self._device_repository.dar_de_baja(
             device_id, motivo, descripcion, device_id_reemplazo, cuando
         )
+        # BE-003: un equipo retirado (o extraviado) no conserva una credencial
+        # válida. La sesión abierta la expulsa el router tras el COMMIT.
+        await self._device_repository.revocar_credencial(device_id, cuando)
+        actualizado["mqtt_token_activo"] = False
 
         if device_id_reemplazo:
             # Cadena de custodia virtual: el nuevo device_id queda vinculado al
@@ -234,6 +238,9 @@ class VerificarCredencialDispositivoUseCase:
         credencial = await self._device_repository.obtener_credencial(device_id)
         utilizable = (
             credencial is not None
+            # BE-003: un dispositivo dado de baja no se autentica aunque su
+            # credencial no se hubiera revocado explícitamente.
+            and credencial.get("activo", True)
             and credencial["mqtt_token_activo"]
             and credencial["mqtt_token_hash"] is not None
         )

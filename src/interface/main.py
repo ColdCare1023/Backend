@@ -198,10 +198,12 @@ async def _procesar_evento_v1(
         auditoria = AuditarAccionCriticaUseCase(
             SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
         )
-        if not await device_repository.existe(evento.device_id):
+        if not await device_repository.esta_activo(evento.device_id):
+            # BE-003: desconocido o dado de baja: se audita y no altera el estado.
+            dado_de_baja = await device_repository.existe(evento.device_id)
             await auditoria.execute(
                 usuario_id=None,
-                accion="EVENTO_DISPOSITIVO_DESCONOCIDO",
+                accion="EVENTO_DISPOSITIVO_DADO_DE_BAJA" if dado_de_baja else "EVENTO_DISPOSITIVO_DESCONOCIDO",
                 recurso="mqtt/eventos",
                 detalle={"device_id": evento.device_id, "tipo_evento": evento.event_type},
                 ip_origen=None,
@@ -269,16 +271,18 @@ async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadc
             )
         # Un evento sobre un dispositivo no provisionado no debe crearlo por la
         # puerta de atrás: se audita y se descarta.
-        if not await device_repository.existe(evento.device_id):
+        if not await device_repository.esta_activo(evento.device_id):
+            # BE-003: desconocido o dado de baja: se audita y no altera el estado.
+            dado_de_baja = await device_repository.existe(evento.device_id)
             await auditoria.execute(
                 usuario_id=None,
-                accion="EVENTO_DISPOSITIVO_DESCONOCIDO",
+                accion="EVENTO_DISPOSITIVO_DADO_DE_BAJA" if dado_de_baja else "EVENTO_DISPOSITIVO_DESCONOCIDO",
                 recurso="mqtt/eventos",
                 detalle={"device_id": evento.device_id, "tipo_evento": evento.tipo_evento.value},
                 ip_origen=None,
             )
             await session.commit()
-            logger.warning("Evento de dispositivo no registrado: %s", evento.device_id)
+            logger.warning("Evento de dispositivo no registrado o dado de baja: %s", evento.device_id)
             return
 
         detalle_auditoria: dict = {"tipo_evento": evento.tipo_evento.value}

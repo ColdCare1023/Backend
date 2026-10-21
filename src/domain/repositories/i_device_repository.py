@@ -8,6 +8,10 @@ class IDeviceRepository(ABC):
     async def existe(self, device_id: str) -> bool: ...
 
     @abstractmethod
+    async def esta_activo(self, device_id: str) -> bool:
+        """BE-003: True solo si el dispositivo existe y no fue dado de baja."""
+
+    @abstractmethod
     async def existio_alguna_vez(self, device_id: str) -> bool:
         """HU-43 criterio 1: incluye dispositivos dados de baja — un
         device_id nunca se reutiliza, ni siquiera tras retirarlo."""

@@ -67,6 +67,12 @@ class RegistrarLecturaTermicaUseCase:
                 )
         else:
             await self._device_repository.obtener_o_crear(device_id)
+        # BE-003: en ambos modos, un dispositivo dado de baja ya no aporta
+        # evidencia (puede tratarse de un equipo retirado o sustraído).
+        if not await self._device_repository.esta_activo(device_id):
+            raise DispositivoNoAutorizadoError(
+                f"El dispositivo '{device_id}' está dado de baja; la lectura se rechaza."
+            )
 
     async def execute(self, lectura: LecturaTermica) -> LecturaTermica:
         # HU-05: received_at es el instante en que EL BACKEND recibió el
