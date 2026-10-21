@@ -5,6 +5,7 @@ from uuid import UUID
 from src.domain.value_objects.hash_encadenado import (
     HASH_FORMULA_VERSION_ACTUAL,
     HashEncadenado,
+    hash_esperado,
     timestamp_canonico,
 )
 
@@ -39,9 +40,13 @@ class RegistroTrazabilidad:
     def hash_actual(self) -> str:
         return self.hash_encadenado.hash_actual
 
-    def verificar_integridad(self) -> bool:
-        if self.hash_version >= 2:
-            return self.hash_encadenado.verificar(self.chain_id, timestamp_canonico(self.timestamp), self.payload)
-        return self.hash_encadenado.hash_actual == HashEncadenado.calcular_hash_v1(
-            self.hash_encadenado.previous_hash, timestamp_canonico(self.timestamp), self.payload
+    def verificar_integridad(self, clave: bytes | None = None) -> bool:
+        esperado = hash_esperado(
+            self.hash_version,
+            self.chain_id,
+            self.hash_encadenado.previous_hash,
+            timestamp_canonico(self.timestamp),
+            self.payload,
+            clave,
         )
+        return esperado is not None and self.hash_encadenado.hash_actual == esperado

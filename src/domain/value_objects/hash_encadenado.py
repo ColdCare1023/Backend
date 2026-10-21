@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -17,7 +18,14 @@ GENESIS_HASH = "0" * 64
 # entre un registro v1 y el siguiente registro v2 de la misma cadena sigue
 # siendo válido porque previous_hash es simplemente el hash_actual almacenado
 # del registro anterior, sin importar con qué fórmula se produjo.
+#
+# v3 (BE-007): HMAC-SHA256(clave, canonical({chain_id, previous_hash,
+# timestamp, payload})). Con SHA-256 sin clave, quien pudiera escribir en la
+# base de datos podía alterar un registro y recalcular todos los hashes
+# posteriores sin que la verificación lo notara. Con HMAC, recalcular exige la
+# clave, que vive fuera de la base (TRAZABILIDAD_HMAC_KEY).
 HASH_FORMULA_VERSION_ACTUAL = 2
+HASH_FORMULA_VERSION_HMAC = 3
 
 
 def timestamp_canonico(valor: datetime) -> str:
@@ -58,10 +66,49 @@ class HashEncadenado:
         contenido = json.dumps(canonical, sort_keys=True, default=str)
         return hashlib.sha256(contenido.encode("utf-8")).hexdigest()
 
+    @staticmethod
+    def calcular_hmac(clave: bytes, chain_id: str, previous_hash: str, timestamp: str, payload: dict) -> str:
+        """BE-007 (v3): mismo contenido canónico que v2, autenticado con clave."""
+        canonical = {
+            "chain_id": chain_id,
+            "previous_hash": previous_hash,
+            "timestamp": timestamp,
+            "payload": payload,
+        }
+        contenido = json.dumps(canonical, sort_keys=True, default=str)
+        return hmac.new(clave, contenido.encode("utf-8"), hashlib.sha256).hexdigest()
+
     @classmethod
-    def encadenar(cls, chain_id: str, previous_hash: str, timestamp: str, payload: dict) -> "HashEncadenado":
-        hash_actual = cls.calcular_hash(chain_id, previous_hash, timestamp, payload)
+    def encadenar(
+        cls, chain_id: str, previous_hash: str, timestamp: str, payload: dict, clave: bytes | None = None
+    ) -> "HashEncadenado":
+        hash_actual = (
+            cls.calcular_hmac(clave, chain_id, previous_hash, timestamp, payload)
+            if clave
+            else cls.calcular_hash(chain_id, previous_hash, timestamp, payload)
+        )
         return cls(previous_hash=previous_hash, hash_actual=hash_actual)
 
     def verificar(self, chain_id: str, timestamp: str, payload: dict) -> bool:
         return self.hash_actual == self.calcular_hash(chain_id, self.previous_hash, timestamp, payload)
+
+
+def hash_esperado(
+    version: int,
+    chain_id: str,
+    previous_hash: str,
+    timestamp: str,
+    payload: dict,
+    clave: bytes | None,
+) -> str | None:
+    """Hash que debería tener un eslabón según la fórmula de SU versión.
+
+    None si es un eslabón v3 y no hay clave con la que verificarlo: la
+    verificación debe tratarlo como no verificable, nunca como íntegro."""
+    if version >= HASH_FORMULA_VERSION_HMAC:
+        if not clave:
+            return None
+        return HashEncadenado.calcular_hmac(clave, chain_id, previous_hash, timestamp, payload)
+    if version == 2:
+        return HashEncadenado.calcular_hash(chain_id, previous_hash, timestamp, payload)
+    return HashEncadenado.calcular_hash_v1(previous_hash, timestamp, payload)

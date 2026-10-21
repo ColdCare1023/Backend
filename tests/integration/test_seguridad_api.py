@@ -199,6 +199,7 @@ def test_settings_rechaza_cors_comodin_en_produccion():
 def test_docs_desactivados_en_produccion(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("JWT_SECRET_KEY", "s" * 40)
+    monkeypatch.setenv("TRAZABILIDAD_HMAC_KEY", "h" * 40)
     monkeypatch.setenv("ALLOWED_HOSTS", '["api.farmacia.example.org"]')
     monkeypatch.setenv("CORS_ORIGINS", '["https://app.farmacia.example.org"]')
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://app:seguro@db.example.org:5432/farmacia")

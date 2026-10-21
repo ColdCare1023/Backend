@@ -68,6 +68,12 @@ class Settings(BaseSettings):
     # El broker lo envía en la cabecera `X-Broker-Auth`. Vacío = el webhook
     # queda deshabilitado (fallo cerrado), nunca abierto a cualquiera.
     broker_webhook_secret: str = ""
+
+    # BE-007: clave HMAC de los eslabones de trazabilidad (v3). Fuera de la
+    # base de datos: quien solo pueda escribir en PostgreSQL no puede
+    # recalcular la cadena. Vacía = eslabones v2 (SHA-256 sin clave), solo
+    # admitido fuera de producción.
+    trazabilidad_hmac_key: str = ""
     # BE-002: API REST de administración del broker (EMQX), para expulsar la
     # sesión de un dispositivo al revocar o rotar su credencial. Sin estos
     # valores la revocación solo aplica en la siguiente reconexión.
@@ -201,6 +207,12 @@ class Settings(BaseSettings):
                     "GOOGLE_OAUTH_ENABLED requiere GOOGLE_CLIENT_ID (sin él no se "
                     "puede validar la audiencia del ID token)."
                 )
+            if len(self.trazabilidad_hmac_key.encode()) < 32:
+                raise ValueError(
+                    "TRAZABILIDAD_HMAC_KEY debe ser un secreto aleatorio de al menos 32 bytes en producción."
+                )
+            if self.trazabilidad_hmac_key == self.jwt_secret_key:
+                raise ValueError("TRAZABILIDAD_HMAC_KEY no puede reutilizar JWT_SECRET_KEY.")
             if self.broker_webhook_secret and len(self.broker_webhook_secret.encode()) < 32:
                 raise ValueError("BROKER_WEBHOOK_SECRET debe tener al menos 32 bytes en producción.")
             if self.mqtt_enabled:

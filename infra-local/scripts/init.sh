@@ -62,12 +62,14 @@ printf '[req]\ndistinguished_name = dn\n[dn]\n' > certs/openssl_min.cnf
 # --- Secretos y usuarios MQTT ----------------------------------------------
 PG_PASS=$(rand 16); JWT=$(rand 32); EMQX_DASH=$(rand 12)
 MQTT_BACKEND=$(rand 16); WEBHOOK=$(rand 32); API_KEY=$(rand 8); API_SECRET=$(rand 32)
+HMAC_TRAZA=$(rand 32)
 
 cat > .env <<ENV
 POSTGRES_USER=farmacia
 POSTGRES_PASSWORD=${PG_PASS}
 POSTGRES_DB=farmacia_db
 JWT_SECRET_KEY=${JWT}
+TRAZABILIDAD_HMAC_KEY=${HMAC_TRAZA}
 EMQX_DASHBOARD_USER=admin
 EMQX_DASHBOARD_PASSWORD=${EMQX_DASH}
 MQTT_BACKEND_PASSWORD=${MQTT_BACKEND}

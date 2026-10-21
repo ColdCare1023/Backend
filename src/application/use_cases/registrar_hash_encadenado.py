@@ -6,9 +6,18 @@ from src.domain.entities.registro_trazabilidad import RegistroTrazabilidad
 from src.domain.repositories.i_trazabilidad_repository import ITrazabilidadRepository
 from src.domain.value_objects.hash_encadenado import (
     HASH_FORMULA_VERSION_ACTUAL,
+    HASH_FORMULA_VERSION_HMAC,
     HashEncadenado,
     timestamp_canonico,
 )
+from src.infrastructure.config import get_settings
+
+
+def clave_hmac_trazabilidad() -> bytes | None:
+    """BE-007: clave de los eslabones v3. Vive fuera de la base de datos, en
+    la configuración; en producción es obligatoria (ver config.py)."""
+    clave = get_settings().trazabilidad_hmac_key
+    return clave.encode("utf-8") if clave else None
 
 # HU-25: cadena independiente por unidad monitoreada. Un evento ligado a un
 # dispositivo (lectura, alerta, acción correctiva, evento de conectividad)
@@ -101,8 +110,9 @@ class RegistrarHashEncadenadoUseCase:
                 chain_id_efectivo
             )
             previous_hash = previous_hash_forzado or ultimo_hash
+            clave = clave_hmac_trazabilidad()
             hash_encadenado = HashEncadenado.encadenar(
-                chain_id_efectivo, previous_hash, timestamp_canonico(timestamp), payload
+                chain_id_efectivo, previous_hash, timestamp_canonico(timestamp), payload, clave=clave
             )
             registro = RegistroTrazabilidad(
                 tipo_evento=tipo_evento,
@@ -111,7 +121,7 @@ class RegistrarHashEncadenadoUseCase:
                 hash_encadenado=hash_encadenado,
                 chain_id=chain_id_efectivo,
                 chain_seq=ultimo_seq + 1,
-                hash_version=HASH_FORMULA_VERSION_ACTUAL,
+                hash_version=HASH_FORMULA_VERSION_HMAC if clave else HASH_FORMULA_VERSION_ACTUAL,
                 device_id=device_id,
                 usuario_id=usuario_id,
             )

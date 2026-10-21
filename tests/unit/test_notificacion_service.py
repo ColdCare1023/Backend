@@ -134,6 +134,7 @@ def test_produccion_rechaza_smtp_habilitado_sin_credenciales():
         Settings(
             environment="production",
             jwt_secret_key="x" * 40,
+            trazabilidad_hmac_key="h" * 40,
             allowed_hosts=["thermotrace.example.org"],
             cors_origins=["https://thermotrace.example.org"],
             database_url="postgresql+asyncpg://u:p@db:5432/prod",
@@ -147,6 +148,7 @@ def test_produccion_rechaza_telegram_habilitado_sin_credenciales():
         Settings(
             environment="production",
             jwt_secret_key="x" * 40,
+            trazabilidad_hmac_key="h" * 40,
             allowed_hosts=["thermotrace.example.org"],
             cors_origins=["https://thermotrace.example.org"],
             database_url="postgresql+asyncpg://u:p@db:5432/prod",
@@ -160,6 +162,7 @@ def test_produccion_rechaza_sms_habilitado_sin_credenciales():
         Settings(
             environment="production",
             jwt_secret_key="x" * 40,
+            trazabilidad_hmac_key="h" * 40,
             allowed_hosts=["thermotrace.example.org"],
             cors_origins=["https://thermotrace.example.org"],
             database_url="postgresql+asyncpg://u:p@db:5432/prod",

@@ -142,10 +142,16 @@ def _esquema_completo(engine) -> dict[str, set[tuple[str, bool]]]:
     0012_hu04_mc38_ausente), y esa diferencia también debe sobrevivir un
     downgrade+upgrade."""
     inspector = inspect(engine)
-    return {
+    esquema = {
         tabla: {(c["name"], c["nullable"]) for c in inspector.get_columns(tabla)}
         for tabla in inspector.get_table_names()
     }
+    # Migraciones que solo agregan triggers (0018, BE-007) también deben
+    # sobrevivir un downgrade+upgrade.
+    with engine.connect() as conexion:
+        triggers = conexion.exec_driver_sql("SELECT name FROM sqlite_master WHERE type = 'trigger'").all()
+    esquema["__triggers__"] = {(nombre, False) for (nombre,) in triggers}
+    return esquema
 
 
 def test_downgrade_deshace_la_ultima_migracion(base_temporal):
@@ -170,3 +176,28 @@ def test_downgrade_deshace_la_ultima_migracion(base_temporal):
     assert esquema_tras_reupgrade == esquema_tras_upgrade_directo, (
         "downgrade(-1) + upgrade(head) no reproduce el esquema original"
     )
+
+
+def test_tablas_de_evidencia_son_de_solo_anexado(base_temporal):
+    """BE-007: tras migrar, la base rechaza borrar o reescribir evidencia y
+    sigue admitiendo las únicas modificaciones legítimas (marcas de
+    aislamiento y reanclaje de hora)."""
+    import sqlite3
+    import uuid
+
+    command.upgrade(_configuracion_alembic(base_temporal), "head")
+    conexion = sqlite3.connect(base_temporal.removeprefix("sqlite:///"))
+    fila = uuid.uuid4().hex
+    conexion.execute(
+        "INSERT INTO traceability_records (id, tipo_evento, payload, timestamp, previous_hash, hash_actual, "
+        "chain_id, chain_seq, hash_version, created_at) VALUES (?, 'E', '{}', '2026-01-01', ?, ?, 'C', 1, 3, '2026-01-01')",
+        (fila, "0" * 64, "a" * 64),
+    )
+    conexion.execute("UPDATE traceability_records SET is_corrupted = 1 WHERE id = ?", (fila,))
+    for sentencia in (
+        "UPDATE traceability_records SET payload = '{\"x\": 1}' WHERE id = ?",
+        "DELETE FROM traceability_records WHERE id = ?",
+    ):
+        with pytest.raises(sqlite3.IntegrityError):
+            conexion.execute(sentencia, (fila,))
+    conexion.close()

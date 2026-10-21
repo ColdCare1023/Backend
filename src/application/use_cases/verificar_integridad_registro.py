@@ -2,10 +2,15 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 
-from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
+from src.application.use_cases.registrar_hash_encadenado import (
+    RegistrarHashEncadenadoUseCase,
+    clave_hmac_trazabilidad,
+)
 from src.domain.repositories.i_corrupcion_repository import ICorrupcionRepository
 from src.domain.repositories.i_trazabilidad_repository import ITrazabilidadRepository
-from src.domain.value_objects.hash_encadenado import GENESIS_HASH, HashEncadenado, timestamp_canonico
+from src.domain.value_objects.hash_encadenado import GENESIS_HASH, hash_esperado, timestamp_canonico
+
+_MENSAJE_SIN_CLAVE = "Eslabón HMAC (v3) no verificable: TRAZABILIDAD_HMAC_KEY no está configurada"
 
 
 def _a_utc(valor: datetime) -> datetime:
@@ -70,19 +75,20 @@ class VerificarIntegridadRegistroUseCase:
         chain_id (hash_version=1) siguen siendo verificables sin recálculo."""
         registros = await self._trazabilidad_repository.listar_todos_ordenados(chain_id)
 
+        clave = clave_hmac_trazabilidad()
         previous_hash_por_cadena: dict[str, str] = {}
         ultimo_hash_integro_por_cadena: dict[str, str] = {}
         for indice, registro in enumerate(registros):
             previous_hash_esperado = previous_hash_por_cadena.get(registro.chain_id, GENESIS_HASH)
-            esperado = (
-                HashEncadenado.calcular_hash(
-                    registro.chain_id, previous_hash_esperado, timestamp_canonico(registro.timestamp), registro.payload
-                )
-                if registro.hash_version >= 2
-                else HashEncadenado.calcular_hash_v1(
-                    previous_hash_esperado, timestamp_canonico(registro.timestamp), registro.payload
-                )
+            calculado = hash_esperado(
+                registro.hash_version,
+                registro.chain_id,
+                previous_hash_esperado,
+                timestamp_canonico(registro.timestamp),
+                registro.payload,
+                clave,
             )
+            esperado = calculado or ""
             if registro.previous_hash != previous_hash_esperado or registro.hash_actual != esperado:
                 posteriores = [r for r in registros[indice + 1 :] if chain_id is None or r.chain_id == registro.chain_id]
                 detalle = DetalleInconsistencia(
@@ -91,6 +97,7 @@ class VerificarIntegridadRegistroUseCase:
                     timestamp=registro.timestamp,
                     hash_esperado=esperado,
                     hash_almacenado=registro.hash_actual,
+                    **({} if calculado is not None else {"mensaje": _MENSAJE_SIN_CLAVE}),
                 )
                 ultimo_hash_integro = ultimo_hash_integro_por_cadena.get(registro.chain_id, GENESIS_HASH)
                 await self._notificar_corrupcion(
@@ -209,21 +216,21 @@ class VerificarIntegridadPorDispositivoYPeriodoUseCase:
         # primer registro de la cadena del dispositivo).
         previous_hash = cadena[inicio - 1].hash_actual if inicio > 0 else GENESIS_HASH
 
+        clave = clave_hmac_trazabilidad()
         registros_dispositivo: list[EstadoRegistroSegmento] = []
         primer_inconsistente: UUID | None = None
         integra = True
         for indice in range(inicio, fin + 1):
             registro = cadena[indice]
-            esperado = (
-                HashEncadenado.calcular_hash(
-                    registro.chain_id, previous_hash, timestamp_canonico(registro.timestamp), registro.payload
-                )
-                if registro.hash_version >= 2
-                else HashEncadenado.calcular_hash_v1(
-                    previous_hash, timestamp_canonico(registro.timestamp), registro.payload
-                )
+            esperado = hash_esperado(
+                registro.hash_version,
+                registro.chain_id,
+                previous_hash,
+                timestamp_canonico(registro.timestamp),
+                registro.payload,
+                clave,
             )
-            corrupto = registro.previous_hash != previous_hash or registro.hash_actual != esperado
+            corrupto = registro.previous_hash != previous_hash or esperado is None or registro.hash_actual != esperado
             if corrupto:
                 integra = False
                 if primer_inconsistente is None:
