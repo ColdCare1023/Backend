@@ -237,7 +237,9 @@ async def emitir_ticket_sse(
     """
     payload = jwt_handler.decodificar_token(token)
     return SSETicketResponse(
-        ticket=jwt_handler.crear_ticket_sse(usuario.id, token_padre_jti=payload.jti)
+        ticket=jwt_handler.crear_ticket_sse(
+            usuario.id, token_padre_jti=payload.jti, token_padre_iat=payload.iat, token_padre_exp=payload.exp
+        )
     )
 
 

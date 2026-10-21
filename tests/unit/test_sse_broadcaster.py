@@ -148,6 +148,8 @@ async def test_cerrar_sesion_corta_el_stream_abierto():
     sesion["vigente"] = False
     await broadcaster.publicar({"n": 2}, "lectura")
 
+    # BE-010: el cliente recibe el motivo antes del cierre.
+    assert (await generador.__anext__()).startswith("event: sesion_expirada\n")
     with pytest.raises(StopAsyncIteration):
         await generador.__anext__()
 

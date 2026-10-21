@@ -28,6 +28,10 @@ class TicketSSE:
     # `jti` del access token que pidió este ticket. Ata el stream a la sesión:
     # cuando ese token se revoca (logout), el stream abierto debe cerrarse.
     token_padre_jti: str | None = None
+    # BE-010: emisión y caducidad del access token padre. El stream no puede
+    # sobrevivir a la sesión que lo abrió.
+    token_padre_iat: datetime | None = None
+    token_padre_exp: datetime | None = None
 
 
 class JWTHandler:
@@ -82,7 +86,13 @@ class JWTHandler:
         except (KeyError, ValueError) as exc:
             raise CredencialesInvalidasError("Token con estructura inválida") from exc
 
-    def crear_ticket_sse(self, usuario_id: UUID, token_padre_jti: str | None = None) -> str:
+    def crear_ticket_sse(
+        self,
+        usuario_id: UUID,
+        token_padre_jti: str | None = None,
+        token_padre_iat: datetime | None = None,
+        token_padre_exp: datetime | None = None,
+    ) -> str:
         """Ticket efímero de un solo propósito para abrir el stream SSE.
 
         EventSource no puede enviar el header Authorization; el ticket viaja
@@ -106,6 +116,10 @@ class JWTHandler:
         }
         if token_padre_jti is not None:
             payload["ptk"] = token_padre_jti
+        if token_padre_iat is not None:
+            payload["piat"] = int(token_padre_iat.timestamp())
+        if token_padre_exp is not None:
+            payload["pexp"] = int(token_padre_exp.timestamp())
         return jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
 
     def validar_ticket_sse(self, ticket: str) -> TicketSSE:
@@ -125,6 +139,8 @@ class JWTHandler:
                 jti=data["jti"],
                 exp=datetime.fromtimestamp(data["exp"], tz=timezone.utc),
                 token_padre_jti=data.get("ptk"),
+                token_padre_iat=datetime.fromtimestamp(data["piat"], tz=timezone.utc) if "piat" in data else None,
+                token_padre_exp=datetime.fromtimestamp(data["pexp"], tz=timezone.utc) if "pexp" in data else None,
             )
         except (jwt.InvalidTokenError, ValueError) as exc:
             raise CredencialesInvalidasError("Ticket SSE inválido o expirado") from exc
