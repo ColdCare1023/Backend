@@ -181,4 +181,6 @@ class EventoDispositivoPayload(BaseModel):
     tipo_evento: TipoEventoDispositivo
     timestamp: datetime
     detalle: str | None = Field(default=None, max_length=500)
-    firmware_version: str | None = Field(default=None, max_length=20)
+    # BE-016: solo versiones semánticas; el inventario de firmware no admite
+    # cadenas arbitrarias declaradas por el dispositivo.
+    firmware_version: str | None = Field(default=None, pattern=r"^v?\d{1,3}\.\d{1,3}\.\d{1,3}$")

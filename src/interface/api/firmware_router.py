@@ -15,7 +15,7 @@ from src.infrastructure.database.repositories.firmware_repository import SQLAlch
 from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
-from src.interface.api.deps import DbSessionDep, require_roles
+from src.interface.api.deps import DbSessionDep, SettingsDep, require_roles
 from src.interface.api.schemas import (
     FirmwareDespliegueCreateRequest,
     FirmwareDespliegueResponse,
@@ -77,9 +77,19 @@ async def programar_despliegue(
 async def ejecutar_despliegue(
     despliegue_id: UUID,
     session: DbSessionDep,
+    settings: SettingsDep,
     _admin=Depends(require_roles(Rol.ADMINISTRADOR)),
 ) -> FirmwareDespliegueResponse:
-    """HU-46 Escenarios 3-5 (simulado, sin ESP32 real): aplica o rechaza el despliegue programado."""
+    """HU-46 Escenarios 3-5 (simulado, sin ESP32 real): aplica o rechaza el despliegue programado.
+
+    BE-016: en producción no se sirve. El firmware no tiene OTA y registrar
+    como instalada una versión que nadie instaló falsearía el inventario y la
+    cadena de evidencia."""
+    if settings.environment == "production":
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="El firmware no implementa OTA: la ejecución simulada no está disponible en producción.",
+        )
     use_case = EjecutarDespliegueUseCase(
         SQLAlchemyDeviceRepository(session),
         SQLAlchemyFirmwareRepository(session),

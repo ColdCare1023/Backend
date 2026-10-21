@@ -289,3 +289,20 @@ async def test_las_lecturas_siguen_llegando_a_su_manejador(sesion_con_device):
     # de esta prueba (que el despacho por tópico siga entregando lecturas al
     # manejador) sigue cumplido: el evento llegó.
     assert [tipo for _, tipo in broadcaster.publicados] == ["inferencia_omitida"]
+
+
+@pytest.mark.asyncio
+async def test_firmware_update_normaliza_la_version_con_prefijo(sesion_con_device):
+    """BE-016: "v1.4.2" (formato del firmware ColdCare) se guarda como 1.4.2."""
+    mensaje = _MensajeFalso(f"farmacias/{DEVICE_ID}/eventos", _evento("firmware_update", firmware_version="v1.4.2"))
+    await _procesar_mensaje_mqtt(mensaje, _BroadcasterEspia())
+    assert (await _estado_device(sesion_con_device))["firmware_version"] == "1.4.2"
+
+
+@pytest.mark.asyncio
+async def test_firmware_update_con_version_arbitraria_se_descarta(sesion_con_device):
+    """BE-016: el inventario no acepta cadenas arbitrarias del dispositivo."""
+    antes = (await _estado_device(sesion_con_device))["firmware_version"]
+    mensaje = _MensajeFalso(f"farmacias/{DEVICE_ID}/eventos", _evento("firmware_update", firmware_version="99999-hack"))
+    await _procesar_mensaje_mqtt(mensaje, _BroadcasterEspia())
+    assert (await _estado_device(sesion_con_device))["firmware_version"] == antes

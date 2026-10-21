@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.clasificar_riesgo_termico import ClasificarRiesgoTermicoUseCase
+from src.application.use_cases.gestionar_firmware import normalizar_version
 from src.application.use_cases.registrar_lectura_termica import RegistrarLecturaTermicaUseCase
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.exceptions import DispositivoNoAutorizadoError, LecturaInvalidaError
@@ -318,10 +319,9 @@ async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadc
                 accion, tipo_sse = "RESPALDO_BAJO", "respaldo_bajo"
             case TipoEventoDispositivo.FIRMWARE_UPDATE:
                 if evento.firmware_version:
-                    await device_repository.actualizar_firmware_version(
-                        evento.device_id, evento.firmware_version
-                    )
-                    detalle_auditoria["firmware_version"] = evento.firmware_version
+                    version = normalizar_version(evento.firmware_version)
+                    await device_repository.actualizar_firmware_version(evento.device_id, version)
+                    detalle_auditoria["firmware_version"] = version
                 accion, tipo_sse = "FIRMWARE_ACTUALIZADO", "firmware_actualizado"
 
         await auditoria.execute(

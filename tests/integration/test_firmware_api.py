@@ -171,3 +171,39 @@ def test_firmware_eventos_quedan_en_trazabilidad_encadenada(client, token_admin,
     )
     assert trazabilidad.status_code == 200
     assert any(r["payload"]["device_id"] == "esp32-ota-06" for r in trazabilidad.json())
+
+
+def test_ejecucion_simulada_queda_declarada_como_simulada(client, token_admin, token_tecnico):
+    """BE-016: nada se instala de verdad; el eslabón lo dice."""
+    _ingestar_lectura(client, token_tecnico, "esp32-ota-07")
+    _crear_release(client, token_admin, "4.0.0")
+    despliegue_id = client.post(
+        "/api/firmware/despliegues", json={"device_id": "esp32-ota-07", "version_objetivo": "v4.0.0"},
+        headers=auth_header(token_admin),
+    ).json()["id"]
+    ejecutar = client.post(f"/api/firmware/despliegues/{despliegue_id}/ejecutar", headers=auth_header(token_admin))
+
+    assert ejecutar.json()["resultado"] == "simulado_sin_confirmacion_del_dispositivo"
+    eslabones = client.get(
+        "/api/trazabilidad", params={"tipo_evento": "FIRMWARE_ACTUALIZADO"}, headers=auth_header(token_tecnico)
+    ).json()
+    assert any(e["payload"].get("simulado") is True for e in eslabones)
+
+
+def test_ejecucion_simulada_no_se_sirve_en_produccion(client, token_admin, monkeypatch):
+    from src.infrastructure.config import Settings, get_settings
+
+    produccion = Settings(
+        environment="production", jwt_secret_key=get_settings().jwt_secret_key, trazabilidad_hmac_key="h" * 40,
+        allowed_hosts=["testserver"], cors_origins=["https://app.example.org"],
+        database_url="postgresql+asyncpg://u:p@db/prod", mqtt_enabled=False,
+    )
+    client.app.dependency_overrides[get_settings] = lambda: produccion
+    try:
+        respuesta = client.post(
+            "/api/firmware/despliegues/00000000-0000-0000-0000-000000000000/ejecutar",
+            headers=auth_header(token_admin),
+        )
+    finally:
+        client.app.dependency_overrides.pop(get_settings)
+    assert respuesta.status_code == 501
