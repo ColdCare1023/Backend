@@ -1,0 +1,18 @@
+[
+  {
+    "cuando": "2026-10-21T16:07:05.504025+00:00",
+    "estado": "EXPERIMENTAL",
+    "evento": "registrado",
+    "sha256_artefacto": "c03014997b0909fbf49b733aa50c721812bdfc4f0ba6ca510dcfa9333c294d68",
+    "sha256_manifiesto": "d828cd49b02c3c9ca34c9cfffd48476bfebb45196ce09323f6a013184cb68471",
+    "version": "rf-preventivo-h30-termico-1.0.0"
+  },
+  {
+    "cuando": "2026-10-21T16:07:05.550713+00:00",
+    "estado": "EXPERIMENTAL",
+    "evento": "registrado",
+    "sha256_artefacto": "6d5c81c0403f5c96b70accc1b079f6ff6760e45e7cf83abdc12f4c7d49f6aaa6",
+    "sha256_manifiesto": "db1f08b80449cf3ff5accd71984f37a1fe7dc1bb44e6eba18e25949432c240e5",
+    "version": "rf-preventivo-h30-termico-puerta-1.0.0"
+  }
+]

@@ -1,0 +1,230 @@
+{
+  "algoritmo": "sklearn.ensemble.RandomForestClassifier",
+  "artefacto": {
+    "archivo": "modelo.joblib",
+    "bytes": 144759,
+    "formato": "joblib",
+    "sha256": "6d5c81c0403f5c96b70accc1b079f6ff6760e45e7cf83abdc12f4c7d49f6aaa6"
+  },
+  "clases": {
+    "0": "normal",
+    "1": "riesgo_preventivo"
+  },
+  "configuracion": {
+    "agregacion_s": 90,
+    "cobertura_min_horizonte": 0.9,
+    "cobertura_min_ventana": 0.8,
+    "fusion_episodios_min": 10,
+    "horizonte_min": 30,
+    "hueco_max_s": 180,
+    "paso_rejilla_s": 60,
+    "rango_max_c": 8.0,
+    "rango_min_c": 2.0,
+    "ventanas_min": [
+      5,
+      10,
+      15
+    ]
+  },
+  "conjunto_features": "termico_puerta",
+  "criterios_aceptacion": {
+    "criterios": {
+      "max_falsas_alarmas_por_dia_sensor": 2.0,
+      "min_incidentes_independientes_prueba": 10,
+      "min_limite_inferior_ic95_sensibilidad_incidente": 0.5,
+      "min_mediana_anticipacion_min": 5.0,
+      "min_sensibilidad_incidente": 0.8,
+      "rf_supera_mejor_baseline_en_ap": true
+    },
+    "evaluacion": {
+      "falsas_alarmas_por_dia_sensor": {
+        "cumple": false,
+        "umbral": 2.0,
+        "valor": 3.2286995515695067
+      },
+      "limite_inferior_ic95": {
+        "cumple": false,
+        "umbral": 0.5,
+        "valor": 0.47817624989501856
+      },
+      "mediana_anticipacion_min": {
+        "cumple": true,
+        "umbral": 5.0,
+        "valor": 16.5
+      },
+      "rf_supera_mejor_baseline_ap": {
+        "cumple": true,
+        "mejor_baseline": "tendencia_reciente",
+        "valor_baseline": 0.22792703896223074,
+        "valor_rf": 0.5055956584079465
+      },
+      "sensibilidad_incidente": {
+        "cumple": true,
+        "umbral": 0.8,
+        "valor": 1.0
+      },
+      "suficiencia_incidentes": {
+        "cumple": false,
+        "umbral": 10,
+        "valor": 5
+      }
+    },
+    "motivo": "Incidentes independientes en prueba insuficientes para una evaluación concluyente."
+  },
+  "datasets": [
+    {
+      "archivo": "Raw.zip",
+      "bytes": 5056109,
+      "fuente": "hohenheim",
+      "sha256": "3590d19a2002cb473061af9ffbffacd7036e962b0f79b86d237590a74f0ec324"
+    },
+    {
+      "archivo": "Preprocessed.zip",
+      "bytes": 5819018,
+      "fuente": "hohenheim",
+      "sha256": "0b25c63ea246063991b6a1e7422b50ca1f8ae4abc77450190aa964135811d55d"
+    },
+    {
+      "archivo": "overview.csv",
+      "bytes": 73881,
+      "fuente": "hohenheim",
+      "sha256": "faeeaa33ffc5cd0771a9c5218c4c8ab478cec90895627f9ca2b28cfcf34ca173"
+    },
+    {
+      "archivo": "experiment_actions.csv",
+      "bytes": 5362,
+      "fuente": "hohenheim",
+      "sha256": "8ac92d6c4c628233aa083ef53cdf86e30275ec73d01670ca342922c5dc8b4f2e"
+    },
+    {
+      "archivo": "DataPreprocessing.ipynb",
+      "bytes": 11978,
+      "fuente": "hohenheim",
+      "sha256": "933057fb881862f3bb9cf9274986c4f1b4db154ffee77abc90bc8ec0133a5d93"
+    }
+  ],
+  "entrenado_en": "2026-10-21T16:07:05.509400+00:00",
+  "estado": "EXPERIMENTAL",
+  "features": [
+    "temp_actual",
+    "dist_limite_sup",
+    "dist_limite_inf",
+    "delta_1min",
+    "media_5m",
+    "min_5m",
+    "max_5m",
+    "std_5m",
+    "pendiente_5m",
+    "delta_5m",
+    "media_10m",
+    "min_10m",
+    "max_10m",
+    "std_10m",
+    "pendiente_10m",
+    "delta_10m",
+    "media_15m",
+    "min_15m",
+    "max_15m",
+    "std_15m",
+    "pendiente_15m",
+    "delta_15m",
+    "max_subida_15m",
+    "max_bajada_15m",
+    "frac_subidas_15m",
+    "aceleracion",
+    "frac_cerca_limite_15m",
+    "frac_fuera_rango_15m",
+    "puerta_actual",
+    "frac_puerta_15m"
+  ],
+  "fuente_entrenamiento": "hohenheim",
+  "hiperparametros": {
+    "bootstrap": true,
+    "ccp_alpha": 0.0,
+    "class_weight": null,
+    "criterion": "gini",
+    "max_depth": 4,
+    "max_features": 0.5,
+    "max_leaf_nodes": null,
+    "max_samples": 0.5,
+    "min_impurity_decrease": 0.0,
+    "min_samples_leaf": 10,
+    "min_samples_split": 2,
+    "min_weight_fraction_leaf": 0.0,
+    "monotonic_cst": null,
+    "n_estimators": 300,
+    "n_jobs": 1,
+    "oob_score": false,
+    "random_state": 42,
+    "verbose": 0,
+    "warm_start": false
+  },
+  "metricas_prueba": {
+    "anticipacion_min": {
+      "max": 30.0,
+      "mediana": 16.5,
+      "min": 1.0,
+      "n": 28,
+      "p25": 11.0,
+      "p75": 22.0,
+      "valores": [
+        20.0,
+        13.0,
+        11.0,
+        13.0,
+        15.0,
+        25.0,
+        22.0,
+        14.0,
+        21.0,
+        1.0,
+        14.0,
+        30.0,
+        25.0,
+        22.0,
+        14.0,
+        8.0,
+        1.0,
+        18.0,
+        2.0,
+        9.0,
+        25.0,
+        11.0,
+        24.0,
+        27.0,
+        7.0,
+        18.0,
+        22.0,
+        21.0
+      ]
+    },
+    "average_precision": 0.5055956584079465,
+    "falsas_alarmas_por_dia_sensor": 3.2286995515695067,
+    "precision_riesgo": 0.5511811023622047,
+    "recall_riesgo": 0.4430379746835443,
+    "sensibilidad_por_incidente": {
+      "ic95_exacto": [
+        0.47817624989501856,
+        1.0
+      ],
+      "nota": "Clopper–Pearson sobre incidentes independientes",
+      "valor": 1.0
+    }
+  },
+  "motivo_estado": "Incidentes independientes en prueba insuficientes para una evaluación concluyente.",
+  "origen_umbral": "F1 máximo en predicciones de validación hacia adelante (fuera de pliegue)",
+  "puntuacion_calibrada": false,
+  "semilla": 42,
+  "tarea": "clasificación preventiva binaria normal(0) / riesgo_preventivo(1)",
+  "umbral_decision": 0.2758306781939539,
+  "version": "rf-preventivo-h30-termico-puerta-1.0.0",
+  "versiones": {
+    "joblib": "1.6.0",
+    "numpy": "2.5.4",
+    "pandas": "3.0.6",
+    "plataforma": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "python": "3.12.15",
+    "scikit_learn": "1.9.1",
+    "scipy": "1.18.1"
+  }
+}
