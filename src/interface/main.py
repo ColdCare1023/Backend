@@ -692,6 +692,11 @@ def create_app() -> FastAPI:
         ventana_segundos=settings.login_ventana_segundos,
         max_claves=settings.security_state_max_entries,
     )
+    app.state.login_cuenta_rate_limiter = SlidingWindowRateLimiter(
+        max_intentos=settings.login_cuenta_max_intentos,
+        ventana_segundos=settings.login_cuenta_ventana_segundos,
+        max_claves=settings.security_state_max_entries,
+    )
     # Revocación de access tokens (logout) y consumo único de tickets SSE.
     app.state.token_revocation = JtiStore(settings.security_state_max_entries)
     app.state.sse_ticket_store = JtiStore(settings.security_state_max_entries)

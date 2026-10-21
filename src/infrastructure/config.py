@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # Límite de intentos de login por IP dentro de la ventana deslizante.
     login_max_intentos: int = 5
     login_ventana_segundos: int = 300
+    # BE-008: límite por CUENTA, independiente de la IP. Frena la adivinación
+    # distribuida (muchas IPs contra un mismo correo) que el límite por IP no
+    # ve, y no depende de que el proxy reporte bien la IP del cliente.
+    login_cuenta_max_intentos: int = 10
+    login_cuenta_ventana_segundos: int = 900
 
     # Límite global de solicitudes por IP (protección DoS de capa aplicación,
     # OWASP API4). /health queda exento para los probes de la plataforma.

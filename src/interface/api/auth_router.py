@@ -73,11 +73,16 @@ async def login(
     request: Request,
 ) -> TokenResponse:
     limiter = request.app.state.login_rate_limiter
+    limiter_cuenta = request.app.state.login_cuenta_rate_limiter
     ip = _ip_cliente(request)
+    cuenta = form_data.username.strip().lower()
     auditoria = AuditarAccionCriticaUseCase(
         SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
     )
-    if limiter.bloqueado(ip):
+    # BE-008: la cuenta también tiene cuota propia. Mismo 429 y mismo mensaje
+    # que el bloqueo por IP: la respuesta no revela si la cuenta existe.
+    bloqueo_cuenta = limiter_cuenta.bloqueado(cuenta)
+    if bloqueo_cuenta or limiter.bloqueado(ip):
         # HU-50 criterio 2: un evento administrativo DISTINTO de cada intento
         # fallido individual, visible en el panel de seguridad, sin afirmar
         # que se trata de un ataque confirmado — solo que se superó el umbral.
@@ -85,14 +90,18 @@ async def login(
             usuario_id=None,
             accion="UMBRAL_INTENTOS_FALLIDOS_EXCEDIDO",
             recurso="auth/login",
-            detalle={"email": enmascarar_email(form_data.username)},
+            detalle={
+                "email": enmascarar_email(form_data.username),
+                "alcance": "cuenta" if bloqueo_cuenta else "ip",
+            },
             ip_origen=ip,
         )
         await session.commit()
+        espera = max(limiter.segundos_para_reintentar(ip), limiter_cuenta.segundos_para_reintentar(cuenta))
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Demasiados intentos fallidos. Intenta nuevamente en unos minutos.",
-            headers={"Retry-After": str(limiter.segundos_para_reintentar(ip))},
+            headers={"Retry-After": str(espera)},
         )
 
     usuario_repository = SQLAlchemyUsuarioRepository(session)
@@ -101,6 +110,7 @@ async def login(
         resultado = await use_case.execute(form_data.username, form_data.password)
     except CredencialesInvalidasError as exc:
         limiter.registrar_fallo(ip)
+        limiter_cuenta.registrar_fallo(cuenta)
         await auditoria.execute(
             usuario_id=None,
             accion="LOGIN_FALLIDO",
@@ -116,6 +126,7 @@ async def login(
         ) from exc
 
     limiter.reiniciar(ip)
+    limiter_cuenta.reiniciar(cuenta)
     await auditoria.execute(
         usuario_id=resultado.usuario_id,
         accion="LOGIN_EXITOSO",
