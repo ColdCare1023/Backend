@@ -63,6 +63,8 @@ def lectura_to_response(lectura: LecturaTermica) -> LecturaResponse:
         riesgo_efectivo=lectura.riesgo_efectivo,
         time_quality=lectura.time_quality,
         timestamp_estimado=lectura.timestamp_estimado,
+        origen=lectura.origen,
+        registrado_por=lectura.registrado_por,
         estado_sensores={
             "temperatura_interna": _estado_sensor(lectura.temperatura_interna, -55.0, 125.0),
             "temperatura_ambiental": _estado_sensor(lectura.temperatura_ambiental, -40.0, 125.0),

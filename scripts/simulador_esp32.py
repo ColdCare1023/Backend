@@ -1,9 +1,10 @@
-"""Simulador de dispositivo ESP32 — envía lecturas reales al backend sin hardware físico.
+"""Generador de lecturas MANUALES contra el backend real, sin hardware físico.
 
-No es un mock ni una fake API: actúa como cliente HTTP externo que hace login real
-y llama al endpoint real `POST /api/lecturas` con el mismo contrato que usaría un
-ESP32 físico (ver LecturaIngestRequest en src/interface/api/schemas.py). El backend,
-la IA, la trazabilidad y las alertas corren 100% real; solo se reemplaza el emisor.
+Hace login real y llama a `POST /api/lecturas`. Desde BE-001 esa vía registra
+lecturas con `origen="manual"` atribuidas al usuario autenticado: sirve para
+probar IA, alertas y trazabilidad, pero NO simula telemetría de un dispositivo.
+Para simular un nodo ESP32 de verdad (MQTT/TLS, contrato v1.0, acuses) use
+`simulacion_excursiones/simular_excursion.py`.
 
 Requisito: el device_id debe existir en la tabla `devices` (modo estricto, default)
 o el backend debe correr con DEVICE_REGISTRY_ESTRICTO=false para auto-registrarlo
@@ -36,8 +37,6 @@ BASE_URL_DEFAULT = os.getenv("SIMULADOR_BASE_URL", "http://localhost:8000")
 EMAIL_DEFAULT = os.getenv("SIMULADOR_EMAIL", "tecnico@farmacia.demo.pe")
 PASSWORD_DEFAULT = os.getenv("SIMULADOR_PASSWORD", "tecni12345")
 DEVICE_ID_DEFAULT = os.getenv("SIMULADOR_DEVICE_ID", "ESP32-001")
-# Debe coincidir con FIRMWARE_VERSION de iot-firmware/src/config.h.
-FIRMWARE_VERSION_SIMULADA = os.getenv("SIMULADOR_FIRMWARE_VERSION", "1.0.0")
 
 # Rango normal de cadena de frío farmacéutica: 2°C a 8°C.
 TEMP_NORMAL_MIN = 2.0
@@ -79,7 +78,6 @@ def _generar_lectura(device_id: str, forzar_alerta: bool) -> dict:
         .replace(microsecond=0)
         .strftime("%Y-%m-%dT%H:%M:%SZ"),
         "estado_conectividad": "online",
-        "firmware_version": FIRMWARE_VERSION_SIMULADA,
         "temperatura_interna": temp_interna,
         "temperatura_ambiental": temp_ambiental,
         "humedad_ambiental": humedad,

@@ -22,6 +22,18 @@ DERIVA_FUTURO_MAXIMA = timedelta(minutes=10)
 # para acotar el reenvío normal.
 ANTIGUEDAD_MAXIMA = timedelta(hours=48)
 
+# BE-001: procedencia de la lectura. La telemetría del nodo y una lectura que
+# registra una persona (por ejemplo, la de un termómetro de respaldo durante
+# una caída del sensor) son evidencias distintas y nunca se confunden.
+ORIGEN_DISPOSITIVO = "dispositivo"
+ORIGEN_MANUAL = "manual"
+
+# Una lectura manual no viene de un buffer offline: no hay reenvío que
+# justificar, así que la ventana admisible es mucho más corta que la del nodo
+# y no admite futuro (no hay deriva de reloj de un ESP32 que absorber).
+ANTIGUEDAD_MAXIMA_MANUAL = timedelta(hours=24)
+DERIVA_FUTURO_MAXIMA_MANUAL = timedelta(minutes=1)
+
 
 @dataclass(slots=True)
 class LecturaTermica:
@@ -82,6 +94,14 @@ class LecturaTermica:
     # no hubo inferencia real de Random Forest.
     probabilidades_ia: dict[str, float] | None = None
     vector_features_ia: dict[str, float] | None = None
+    # BE-001: ver ORIGEN_DISPOSITIVO / ORIGEN_MANUAL. `registrado_por` solo
+    # tiene valor en lecturas manuales: identifica a la persona que la cargó.
+    origen: str = ORIGEN_DISPOSITIVO
+    registrado_por: UUID | None = None
+
+    @property
+    def es_manual(self) -> bool:
+        return self.origen == ORIGEN_MANUAL
 
     def es_excursion_confirmada(self) -> bool:
         """HU-21: regla directa de rango térmico, inmediata e independiente de
@@ -124,19 +144,22 @@ class LecturaTermica:
 
     @staticmethod
     def es_timestamp_valido(
-        timestamp: datetime, ahora: datetime | None = None
+        timestamp: datetime, ahora: datetime | None = None, origen: str = ORIGEN_DISPOSITIVO
     ) -> tuple[bool, str]:
-        """B-10: verifica que el instante declarado por el dispositivo sea
-        plausible. Devuelve (válido, motivo) para que quien llame pueda
-        auditar el motivo exacto del rechazo."""
+        """B-10: verifica que el instante declarado sea plausible. Devuelve
+        (válido, motivo) para que quien llame pueda auditar el motivo exacto
+        del rechazo. Las lecturas manuales usan una ventana más estricta."""
         ahora = ahora or datetime.now(tz=timezone.utc)
         # SQLite devuelve datetimes naive aunque la columna sea aware; se
         # asume UTC, igual criterio que `timestamp_canonico` en la cadena hash.
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=timezone.utc)
 
-        if timestamp > ahora + DERIVA_FUTURO_MAXIMA:
+        manual = origen == ORIGEN_MANUAL
+        deriva = DERIVA_FUTURO_MAXIMA_MANUAL if manual else DERIVA_FUTURO_MAXIMA
+        antiguedad = ANTIGUEDAD_MAXIMA_MANUAL if manual else ANTIGUEDAD_MAXIMA
+        if timestamp > ahora + deriva:
             return False, "timestamp_futuro"
-        if timestamp < ahora - ANTIGUEDAD_MAXIMA:
+        if timestamp < ahora - antiguedad:
             return False, "timestamp_demasiado_antiguo"
         return True, "ok"

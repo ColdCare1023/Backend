@@ -107,7 +107,13 @@ class CambiarRolUsuarioRequest(_PeticionEstricta):
 
 
 class LecturaIngestRequest(_PeticionEstricta):
-    """Espejo de src.infrastructure.mqtt.payload_schema.LecturaPayload para ingesta vía REST."""
+    """BE-001: lectura registrada manualmente por una persona.
+
+    La telemetría de los dispositivos entra solo por MQTT, autenticada ante el
+    broker. Por esta vía no se aceptan identificadores lógicos del nodo
+    (`boot_id`, `seq_no`, `reading_id`), ni versión de firmware o de contrato:
+    los asigna el servidor y la lectura queda marcada como `origen="manual"`
+    con su autor, separada de la evidencia del dispositivo."""
 
     device_id: str = Field(min_length=1, max_length=50)
     timestamp: datetime
@@ -115,16 +121,8 @@ class LecturaIngestRequest(_PeticionEstricta):
     humedad_ambiental: float | None = Field(default=None, ge=0.0, le=100.0)
     temperatura_interna: float | None = Field(default=None, ge=-55.0, le=125.0)
     apertura_refrigerador: bool = False
-    # Mismos dominios que en LecturaPayload: la vía REST y la vía MQTT deben
-    # aceptar exactamente lo mismo, o el contrato se bifurca según el transporte.
     estado_conectividad: Literal["online", "offline"] = "online"
-    firmware_version: str | None = Field(default=None, max_length=20)
     duracion_apertura_segundos: int = Field(default=0, ge=0)
-    reading_id: str | None = Field(default=None, max_length=100)
-    schema_version: int | None = None
-    boot_id: int | None = Field(default=None, ge=0)
-    seq_no: int | None = Field(default=None, ge=0)
-    time_quality: Literal["synced", "unsynced"] | None = None
 
 
 class LecturaResponse(BaseModel):
@@ -172,6 +170,10 @@ class LecturaResponse(BaseModel):
     # Para graficar, usar `timestamp_estimado` cuando exista.
     time_quality: str | None = None
     timestamp_estimado: datetime | None = None
+    # BE-001: "dispositivo" (telemetría del nodo) o "manual" (registrada por
+    # `registrado_por`). Un reporte o una pantalla no deben mezclarlas.
+    origen: str = "dispositivo"
+    registrado_por: UUID | None = None
 
 
 class AlertaResponse(BaseModel):

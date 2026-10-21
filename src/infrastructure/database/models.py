@@ -150,12 +150,15 @@ class ThermalReadingModel(Base):
         # Solo para firmware anterior sin boot_id/seq_no (migración 0015): con
         # el reloj sin NTP, dos arranques repiten timestamps y la identidad
         # real pasa a ser la tripleta de abajo.
+        # Migración 0017: solo telemetría de dispositivo. Una lectura manual
+        # (registrada por una persona) nunca ocupa la identidad temporal de una
+        # lectura del nodo.
         Index(
             "uq_thermal_readings_device_timestamp_legado",
             "device_id", "timestamp",
             unique=True,
-            sqlite_where=sa_text("boot_id IS NULL OR seq_no IS NULL"),
-            postgresql_where=sa_text("boot_id IS NULL OR seq_no IS NULL"),
+            sqlite_where=sa_text("(boot_id IS NULL OR seq_no IS NULL) AND origen = 'dispositivo'"),
+            postgresql_where=sa_text("(boot_id IS NULL OR seq_no IS NULL) AND origen = 'dispositivo'"),
         ),
         # HU-11/HU-05: idempotencia real por identidad lógica de la lectura.
         # Parcial (WHERE boot_id/seq_no no nulos) para no romper filas de
@@ -216,6 +219,13 @@ class ThermalReadingModel(Base):
     # — ver docstring de LecturaTermica.calcular_riesgo_efectivo().
     excursion_confirmada: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     riesgo_efectivo: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # BE-001: procedencia de la lectura. "dispositivo" = telemetría del nodo;
+    # "manual" = registrada por una persona vía API, con su autor. Separarlas
+    # impide que un usuario fabrique telemetría atribuida a un dispositivo.
+    origen: Mapped[str] = mapped_column(String(20), nullable=False, default="dispositivo")
+    registrado_por: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
     # HU-47: evidencia completa de la inferencia (probabilidad por clase y
     # vector de features exacto), para auditoría explicativa por lectura.
     probabilidades_ia: Mapped[dict | None] = mapped_column(JSONVariant, nullable=True)

@@ -25,7 +25,9 @@ class ILecturaRepository(ABC):
     ) -> list[LecturaTermica]: ...
 
     @abstractmethod
-    async def listar_recientes_por_device(self, device_id: str, limite: int) -> list[LecturaTermica]: ...
+    async def listar_recientes_por_device(
+        self, device_id: str, limite: int, solo_dispositivo: bool = True
+    ) -> list[LecturaTermica]: ...
 
     @abstractmethod
     async def obtener_por_device_y_timestamp(

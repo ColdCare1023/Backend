@@ -81,7 +81,9 @@ class RegistrarLecturaTermicaUseCase:
         # B-10: un instante implausible se rechaza ANTES de persistir. Aceptar
         # timestamps futuros permitiría insertar registros que alteran el orden
         # temporal de la evidencia térmica.
-        timestamp_valido, motivo = LecturaTermica.es_timestamp_valido(lectura.timestamp)
+        timestamp_valido, motivo = LecturaTermica.es_timestamp_valido(
+            lectura.timestamp, origen=lectura.origen
+        )
         if not timestamp_valido:
             if self._audit_log_repository is not None:
                 await self._audit_log_repository.registrar(
@@ -108,19 +110,26 @@ class RegistrarLecturaTermicaUseCase:
         # generar una lectura, alerta ni eslabón de hash duplicados. Con
         # boot_id+seq_no (firmware nuevo) esa es la clave real de idempotencia;
         # sin ellos (firmware anterior) se conserva device_id+timestamp.
-        if lectura.boot_id is not None and lectura.seq_no is not None:
-            existente = await self._lectura_repository.obtener_por_device_boot_seq(
-                lectura.device_id, lectura.boot_id, lectura.seq_no
-            )
-        else:
-            existente = await self._lectura_repository.obtener_por_device_y_timestamp(
-                lectura.device_id, lectura.timestamp
-            )
+        #
+        # BE-001: una lectura manual nunca participa de esta idempotencia. Su
+        # identidad la genera el servidor, y los repositorios solo comparan
+        # contra telemetría de dispositivo: una persona no puede ocupar por
+        # adelantado la identidad de una lectura real del nodo.
+        existente = None
+        if not lectura.es_manual:
+            if lectura.boot_id is not None and lectura.seq_no is not None:
+                existente = await self._lectura_repository.obtener_por_device_boot_seq(
+                    lectura.device_id, lectura.boot_id, lectura.seq_no
+                )
+            else:
+                existente = await self._lectura_repository.obtener_por_device_y_timestamp(
+                    lectura.device_id, lectura.timestamp
+                )
         if existente is not None:
             return existente
 
         historial = await self._lectura_repository.listar_recientes_por_device(
-            lectura.device_id, limite=20
+            lectura.device_id, limite=20, solo_dispositivo=not lectura.es_manual
         )
         clasificacion = self._clasificar_riesgo.execute(lectura, historial)
         lectura.nivel_riesgo = clasificacion.nivel
@@ -183,8 +192,15 @@ class RegistrarLecturaTermicaUseCase:
                 "modelo_version": lectura_guardada.modelo_version,
                 "estado_inferencia": clasificacion.estado_inferencia,
                 "motivo_no_inferencia": clasificacion.motivo_no_inferencia,
+                # BE-001: la evidencia declara si la lectura es telemetría del
+                # nodo o una carga manual, y quién la hizo.
+                "origen": lectura_guardada.origen,
+                "registrado_por": str(lectura_guardada.registrado_por)
+                if lectura_guardada.registrado_por is not None
+                else None,
             },
             device_id=lectura_guardada.device_id,
+            usuario_id=lectura_guardada.registrado_por,
             timestamp=lectura_guardada.timestamp,
         )
 

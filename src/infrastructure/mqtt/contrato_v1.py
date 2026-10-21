@@ -119,13 +119,15 @@ class EventoV1(BaseModel):
 TIME_QUALITY_INTERNO = {"sntp_synced": "synced", "sntp_backfilled": "backfilled", "unsynced": "unsynced"}
 
 # Estado interno del acuse → `status` que entiende el firmware v1.0.
-# `rejected` hace que el nodo mueva el registro a cuarentena (no lo borra);
-# un conflicto de payload se libera como `duplicate` porque el original ya
-# está persistido y la versión distinta quedó auditada.
+# `rejected` hace que el nodo mueva el registro a cuarentena (no lo borra).
+# BE-001: un conflicto de payload (misma identidad, contenido distinto) NO se
+# acusa como `duplicate`: eso autorizaba al nodo a borrar su única copia de una
+# lectura que el backend no tiene. Va a cuarentena, donde se conserva como
+# evidencia, y el conflicto queda auditado en el backend.
 STATUS_ACK = {
     "commit_confirmado": "committed",
     "duplicado": "duplicate",
-    "conflicto_payload": "duplicate",
+    "conflicto_payload": "rejected",
     "payload_rechazado": "rejected",
     "lectura_invalida": "rejected",
     "dispositivo_no_autorizado": "rejected",

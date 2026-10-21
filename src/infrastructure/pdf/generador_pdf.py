@@ -422,9 +422,14 @@ class GeneradorReporteBPAPDF:
         filas = [["Fecha y hora", "Interna", "Ambiental", "Humedad", "Puerta", "Clasificación", "Confianza IA"]]
         for lectura in mostradas:
             nivel = lectura.get("nivel_riesgo")
+            # BE-001: una lectura registrada por una persona no es telemetría del
+            # nodo; el inspector debe poder distinguirla en el propio documento.
+            instante = _fmt_dt(lectura.get("timestamp"))
+            if lectura.get("origen") == "manual":
+                instante = f"{instante} (manual)"
             filas.append(
                 [
-                    _fmt_dt(lectura.get("timestamp")),
+                    instante,
                     _fmt_num(lectura.get("temperatura_interna"), " °C"),
                     _fmt_num(lectura.get("temperatura_ambiental"), " °C"),
                     _fmt_num(lectura.get("humedad_ambiental"), " %"),

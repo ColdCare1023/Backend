@@ -139,6 +139,7 @@ class ExportarReporteBPAPDFUseCase:
                     "apertura_refrigerador": lectura.apertura_refrigerador,
                     "nivel_riesgo": lectura.nivel_riesgo.value if lectura.nivel_riesgo is not None else None,
                     "confianza_ia": lectura.confianza_ia,
+                    "origen": lectura.origen,
                 }
                 for lectura in lecturas
             ],

@@ -136,14 +136,15 @@ async def test_sin_mc38_la_puerta_queda_null(entorno):
 
 
 @pytest.mark.asyncio
-async def test_reenvio_es_duplicate_y_contenido_distinto_es_conflicto(entorno):
+async def test_reenvio_es_duplicate_y_contenido_distinto_va_a_cuarentena(entorno):
     espia = _Espia()
     datos = _ejemplo("telemetria_normal")
     assert (await _enviar(datos, espia))["status"] == "committed"
     assert (await _enviar(datos, espia))["status"] == "duplicate"
 
+    # BE-001: un conflicto no autoriza a borrar la copia del nodo: cuarentena.
     alterada = dict(datos, temp_ds18b20=datos["temp_ds18b20"] + 3)
-    assert (await _enviar(alterada, espia))["status"] == "duplicate"
+    assert (await _enviar(alterada, espia))["status"] == "rejected"
     async with entorno() as session:
         conflictos = (
             await session.execute(select(AuditLogModel).where(AuditLogModel.accion == "LECTURA_CONFLICTO"))

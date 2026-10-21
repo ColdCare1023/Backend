@@ -1,12 +1,13 @@
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
+from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.clasificar_riesgo_termico import ClasificarRiesgoTermicoUseCase
 from src.application.use_cases.consultar_historial_termico import ConsultarHistorialTermicoUseCase
 from src.application.use_cases.registrar_lectura_termica import RegistrarLecturaTermicaUseCase
-from src.domain.entities.lectura_termica import LecturaTermica
+from src.domain.entities.lectura_termica import ORIGEN_MANUAL, LecturaTermica
 from src.domain.exceptions import DispositivoNoAutorizadoError, LecturaInvalidaError
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.ai.random_forest_service import get_random_forest_service
@@ -20,7 +21,7 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
 from src.infrastructure.notifications.notificacion_service import NotificacionService
 from src.interface.api.api_protection import limitar_ingesta_lecturas
 from src.interface.api.deps import DbSessionDep, SettingsDep, require_roles
-from src.interface.api.mappers import evidencia_edge, lectura_to_response
+from src.interface.api.mappers import lectura_to_response
 from src.interface.api.schemas import LecturaIngestRequest, LecturaResponse
 
 router = APIRouter(prefix="/api/lecturas", tags=["lecturas"])
@@ -40,8 +41,15 @@ async def ingestar_lectura(
     session: DbSessionDep,
     settings: SettingsDep,
     request: Request,
-    _usuario=Depends(require_roles(Rol.TECNICO, Rol.FARMACEUTICO)),
+    usuario=Depends(require_roles(Rol.TECNICO, Rol.FARMACEUTICO)),
 ) -> LecturaResponse:
+    """BE-001: registro MANUAL de una lectura (por ejemplo, la de un
+    termómetro de respaldo mientras el sensor del nodo está caído).
+
+    No es una vía de telemetría: la lectura queda con `origen="manual"`, con
+    su autor en la tabla, en el eslabón de la cadena y en la bitácora, con
+    identificador generado por el servidor y una ventana temporal corta. Nunca
+    ocupa la identidad de una lectura del dispositivo."""
     lectura_repository = SQLAlchemyLecturaRepository(session)
     alerta_repository = SQLAlchemyAlertaRepository(session)
     trazabilidad_repository = SQLAlchemyTrazabilidadRepository(session)
@@ -66,15 +74,10 @@ async def ingestar_lectura(
         temperatura_interna=body.temperatura_interna,
         apertura_refrigerador=body.apertura_refrigerador,
         estado_conectividad=body.estado_conectividad,
-        reading_id=body.reading_id,
-        schema_version=body.schema_version,
-        boot_id=body.boot_id,
-        seq_no=body.seq_no,
-        time_quality=body.time_quality,
-        payload=evidencia_edge(
-            firmware_version=body.firmware_version,
-            duracion_apertura_segundos=body.duracion_apertura_segundos,
-        ),
+        reading_id=f"manual-{uuid4().hex}",
+        origen=ORIGEN_MANUAL,
+        registrado_por=usuario.id,
+        payload={"duracion_apertura_segundos": body.duracion_apertura_segundos},
     )
     episodio_previo = await alerta_repository.obtener_episodio_abierto(body.device_id)
     try:
@@ -87,6 +90,22 @@ async def ingestar_lectura(
         await session.commit()
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     episodio_actual = await alerta_repository.obtener_episodio_abierto(body.device_id)
+    # La bitácora se encadena en la cadena de SISTEMA: el eslabón de la propia
+    # lectura (cadena del dispositivo) ya declara origen y autor, y duplicarlo
+    # allí alteraría la secuencia de eventos de la unidad monitoreada.
+    await AuditarAccionCriticaUseCase(
+        SQLAlchemyAuditLogRepository(session), trazabilidad_repository
+    ).execute(
+        usuario_id=usuario.id,
+        accion="LECTURA_MANUAL_REGISTRADA",
+        recurso=f"lecturas/{lectura_guardada.id}",
+        detalle={
+            "device_id": body.device_id,
+            "timestamp": body.timestamp.isoformat(),
+            "reading_id": lectura_guardada.reading_id,
+        },
+        ip_origen=request.client.host if request.client else None,
+    )
     await session.commit()
 
     respuesta = lectura_to_response(lectura_guardada)

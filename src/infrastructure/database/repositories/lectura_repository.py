@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.domain.entities.lectura_termica import LecturaTermica
+from src.domain.entities.lectura_termica import ORIGEN_DISPOSITIVO, LecturaTermica
 from src.domain.repositories.i_lectura_repository import ILecturaRepository
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 from src.infrastructure.database.models import DeviceModel, ThermalReadingModel
@@ -39,6 +39,8 @@ def _to_entity(model: ThermalReadingModel) -> LecturaTermica:
         received_at=model.received_at,
         uptime_ms=model.uptime_ms,
         timestamp_estimado=model.timestamp_estimado,
+        origen=model.origen or ORIGEN_DISPOSITIVO,
+        registrado_por=model.registrado_por,
     )
 
 
@@ -80,6 +82,8 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
             time_quality=lectura.time_quality,
             received_at=lectura.received_at,
             uptime_ms=lectura.uptime_ms,
+            origen=lectura.origen,
+            registrado_por=lectura.registrado_por,
         )
         self._session.add(model)
         await self._session.flush()
@@ -120,20 +124,27 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
         declarada): es la que dice si el nodo sigue reportando."""
         stmt = (
             select(ThermalReadingModel)
-            .where(ThermalReadingModel.device_id == device_id)
+            .where(
+                ThermalReadingModel.device_id == device_id,
+                # Una lectura manual no demuestra que el nodo siga reportando.
+                ThermalReadingModel.origen == ORIGEN_DISPOSITIVO,
+            )
             .order_by(ThermalReadingModel.received_at.desc().nulls_last(), ThermalReadingModel.timestamp.desc())
             .limit(1)
         )
         model = (await self._session.execute(stmt)).scalar_one_or_none()
         return _to_entity(model) if model else None
 
-    async def listar_recientes_por_device(self, device_id: str, limite: int) -> list[LecturaTermica]:
-        stmt = (
-            select(ThermalReadingModel)
-            .where(ThermalReadingModel.device_id == device_id)
-            .order_by(ThermalReadingModel.timestamp.desc())
-            .limit(limite)
-        )
+    async def listar_recientes_por_device(
+        self, device_id: str, limite: int, solo_dispositivo: bool = True
+    ) -> list[LecturaTermica]:
+        stmt = select(ThermalReadingModel).where(ThermalReadingModel.device_id == device_id)
+        if solo_dispositivo:
+            # Las features de la IA para la telemetría del nodo salen solo de
+            # la telemetría del nodo: una carga manual no debe poder sesgar la
+            # clasificación de las lecturas reales.
+            stmt = stmt.where(ThermalReadingModel.origen == ORIGEN_DISPOSITIVO)
+        stmt = stmt.order_by(ThermalReadingModel.timestamp.desc()).limit(limite)
         result = await self._session.execute(stmt)
         return [_to_entity(m) for m in result.scalars().all()]
 
@@ -143,6 +154,7 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
         stmt = select(ThermalReadingModel).where(
             ThermalReadingModel.device_id == device_id,
             ThermalReadingModel.timestamp == timestamp,
+            ThermalReadingModel.origen == ORIGEN_DISPOSITIVO,
         )
         result = await self._session.execute(stmt)
         model = result.scalar_one_or_none()
@@ -196,6 +208,7 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
             ThermalReadingModel.device_id == device_id,
             ThermalReadingModel.boot_id == boot_id,
             ThermalReadingModel.seq_no == seq_no,
+            ThermalReadingModel.origen == ORIGEN_DISPOSITIVO,
         )
         result = await self._session.execute(stmt)
         model = result.scalar_one_or_none()
