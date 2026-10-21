@@ -263,3 +263,47 @@ async def test_el_acuse_lleva_la_huella_de_los_bytes_recibidos(entorno):
     esperado = hashlib.sha256(cuerpo.encode("utf-8")).hexdigest()
     assert [a["status"] for a in espia.acks] == ["committed", "duplicate"]
     assert all(a["content_sha256"] == esperado for a in espia.acks)
+
+
+async def _acciones_auditadas(entorno) -> list[str]:
+    async with entorno() as session:
+        return [a.accion for a in (await session.execute(select(AuditLogModel))).scalars().all()]
+
+
+@pytest.mark.asyncio
+async def test_reloj_del_nodo_adelantado_se_audita(entorno):
+    """IOT-007: una lectura no puede capturarse después de recibirse."""
+    espia = _Espia()
+    adelantada = (datetime.now(timezone.utc) + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ack = await _enviar(_ejemplo("telemetria_normal", boot_id=60, seq_no=1, captured_at=adelantada), espia)
+
+    assert ack["status"] == "committed"  # la temperatura se conserva; su hora queda señalada
+    assert "RELOJ_NODO_ADELANTADO" in await _acciones_auditadas(entorno)
+
+
+@pytest.mark.asyncio
+async def test_salto_de_reloj_dentro_del_arranque_se_audita(entorno):
+    """IOT-007: dentro de un arranque, la base época-uptime solo varía por deriva."""
+    espia = _Espia()
+    base = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(hours=3)
+    iso = lambda t: t.strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: E731
+    await _enviar(_ejemplo("telemetria_normal", boot_id=61, seq_no=1, uptime_s=100, captured_at=iso(base)), espia)
+    # 60 s de uptime después, pero la hora avanzó una hora más: salto.
+    await _enviar(_ejemplo("telemetria_normal", boot_id=61, seq_no=2, uptime_s=160,
+                           captured_at=iso(base + timedelta(seconds=60, hours=1))), espia)
+
+    assert "SALTO_RELOJ_NODO" in await _acciones_auditadas(entorno)
+
+
+@pytest.mark.asyncio
+async def test_reloj_coherente_no_genera_anomalias(entorno):
+    espia = _Espia()
+    base = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(hours=1)
+    iso = lambda t: t.strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: E731
+    await _enviar(_ejemplo("telemetria_normal", boot_id=62, seq_no=1, uptime_s=100, captured_at=iso(base)), espia)
+    await _enviar(_ejemplo("telemetria_normal", boot_id=62, seq_no=2, uptime_s=160,
+                           captured_at=iso(base + timedelta(seconds=60))), espia)
+
+    acciones = await _acciones_auditadas(entorno)
+    assert "SALTO_RELOJ_NODO" not in acciones
+    assert "RELOJ_NODO_ADELANTADO" not in acciones

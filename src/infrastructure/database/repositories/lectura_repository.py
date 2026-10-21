@@ -208,6 +208,26 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
         await self._session.flush()
         return len(pendientes)
 
+    async def obtener_sincronizada_anterior(
+        self, device_id: str, boot_id: int, seq_no: int
+    ) -> LecturaTermica | None:
+        """IOT-007: lectura sincronizada más reciente del mismo arranque, antes
+        de `seq_no` (para contrastar la base época↔uptime)."""
+        stmt = (
+            select(ThermalReadingModel)
+            .where(
+                ThermalReadingModel.device_id == device_id,
+                ThermalReadingModel.boot_id == boot_id,
+                ThermalReadingModel.seq_no < seq_no,
+                ThermalReadingModel.time_quality == "synced",
+                ThermalReadingModel.origen == ORIGEN_DISPOSITIVO,
+            )
+            .order_by(ThermalReadingModel.seq_no.desc())
+            .limit(1)
+        )
+        model = (await self._session.execute(stmt)).scalar_one_or_none()
+        return _to_entity(model) if model else None
+
     async def obtener_por_device_boot_seq(
         self, device_id: str, boot_id: int, seq_no: int
     ) -> LecturaTermica | None:

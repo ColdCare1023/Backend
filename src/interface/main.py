@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.clasificar_riesgo_termico import ClasificarRiesgoTermicoUseCase
+from src.application.use_cases.detectar_anomalia_reloj import anomalias_de_reloj
 from src.application.use_cases.gestionar_firmware import normalizar_version
 from src.application.use_cases.registrar_lectura_termica import RegistrarLecturaTermicaUseCase
 from src.domain.entities.lectura_termica import LecturaTermica
@@ -630,6 +631,26 @@ async def _procesar_lectura_mqtt(
                 contenido=message.payload,
             )
             return
+        # IOT-007: reloj del nodo adelantado o con saltos dentro del arranque
+        # (SNTP no autenticado). Se audita; la lectura se conserva.
+        if lectura_guardada.boot_id is not None and lectura_guardada.seq_no is not None:
+            previa = await lectura_repository.obtener_sincronizada_anterior(
+                lectura_guardada.device_id, lectura_guardada.boot_id, lectura_guardada.seq_no
+            )
+            anomalias = anomalias_de_reloj(lectura_guardada, previa)
+            if anomalias:
+                auditoria_reloj = AuditarAccionCriticaUseCase(
+                    SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+                )
+                for anomalia in anomalias:
+                    await auditoria_reloj.execute(
+                        usuario_id=None,
+                        accion=anomalia.accion,
+                        recurso=f"dispositivos/{lectura_guardada.device_id}",
+                        detalle=anomalia.detalle,
+                        ip_origen=None,
+                    )
+                    logger.warning("Anomalía de reloj %s: %s", anomalia.accion, anomalia.detalle)
         episodio_actual = await alerta_repository.obtener_episodio_abierto(payload.device_id)
         # HU-06: si este arranque ya tiene una lectura sincronizada, reconstruye la
         # hora de las capturadas sin NTP (incluida esta, si llegó sin sincronizar).
