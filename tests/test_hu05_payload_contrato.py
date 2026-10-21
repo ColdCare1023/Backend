@@ -11,14 +11,15 @@ Checklist items covered:
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / "contrato"))
-from telemetria_v1 import TelemetriaV1, parsear_telemetria, PAYLOAD_MAX_BYTES
+from telemetria_v1 import PAYLOAD_MAX_BYTES, TelemetriaV1, parsear_telemetria
 
 EJEMPLOS = Path(__file__).parent.parent / "contrato" / "ejemplos"
 

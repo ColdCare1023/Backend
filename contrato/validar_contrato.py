@@ -11,7 +11,6 @@ Uso:
 
 from __future__ import annotations
 
-import copy
 import json
 import sys
 from pathlib import Path
@@ -19,7 +18,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).parent))
-from telemetria_v1 import EventoV1, TelemetriaV1, parsear_telemetria  # noqa: E402
+from telemetria_v1 import EventoV1, TelemetriaV1, parsear_telemetria
 
 EJEMPLOS = Path(__file__).parent / "ejemplos"
 
@@ -165,7 +164,7 @@ def _ejecutar() -> int:
         try:
             prueba()
             print(f"PASS  {nombre}")
-        except Exception as e:  # noqa: BLE001 — informe de QA, no se oculta nada
+        except Exception as e:
             fallos += 1
             print(f"FAIL  {nombre}: {e}")
     print(f"\n{len(pruebas) - fallos}/{len(pruebas)} pruebas de contrato OK")

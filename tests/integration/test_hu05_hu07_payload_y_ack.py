@@ -3,7 +3,7 @@
 el PUBACK de transporte) del backlog de 51 HU finales."""
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 import pytest_asyncio
@@ -14,6 +14,10 @@ from src.interface import main
 
 DEVICE_ID = "FARM-HU07-01"
 TOPIC = f"farmacias/{DEVICE_ID}/lecturas"
+
+# Marcas relativas al momento de la prueba: el backend rechaza lecturas con más
+# de 48 h de antigüedad (B-10), así que una fecha fija caduca con el calendario.
+_AHORA = datetime.now(tz=timezone.utc).replace(microsecond=0)
 
 
 class _MensajeFalso:
@@ -232,7 +236,7 @@ async def test_mismo_timestamp_con_otra_identidad_se_guardan_ambas(entorno):
     """Reloj sin NTP: tras reiniciar, el nodo repite timestamps con otro boot_id.
     Son lecturas distintas (la identidad es boot_id+seq_no): se guardan las dos."""
     cliente = _ClienteEspia()
-    ts = datetime(2026, 10, 2, 19, 30, 9, tzinfo=timezone.utc).isoformat()
+    ts = (_AHORA - timedelta(hours=2)).isoformat()
     primera = _payload(reading_id="a", timestamp=ts, boot_id=22, seq_no=0, temperatura_interna=5.0)
     segunda = _payload(reading_id="b", timestamp=ts, boot_id=2, seq_no=0, temperatura_interna=6.5)
 
@@ -246,7 +250,7 @@ async def test_mismo_timestamp_con_otra_identidad_se_guardan_ambas(entorno):
 @pytest.mark.asyncio
 async def test_misma_identidad_con_valores_distintos_es_conflicto(entorno):
     cliente = _ClienteEspia()
-    ts = datetime(2026, 10, 2, 19, 31, 9, tzinfo=timezone.utc).isoformat()
+    ts = (_AHORA - timedelta(hours=2, minutes=-1)).isoformat()
     original = _payload(reading_id="c", timestamp=ts, boot_id=5, seq_no=1, temperatura_interna=5.0)
     alterada = _payload(reading_id="c", timestamp=ts, boot_id=5, seq_no=1, temperatura_interna=9.0)
 
@@ -301,7 +305,7 @@ async def test_nodo_sin_mc38_persiste_puerta_como_null(entorno):
     from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
 
     cliente = _ClienteEspia()
-    ts = datetime(2026, 10, 3, 1, 53, 6, tzinfo=timezone.utc)
+    ts = _AHORA - timedelta(hours=1)
     cuerpo = _payload(reading_id="sin-mc38", timestamp=ts.isoformat(), apertura_refrigerador=None,
                       mc38_status="not_installed")
 
@@ -320,8 +324,8 @@ async def test_lecturas_sin_ntp_se_reanclan_al_llegar_una_sincronizada(entorno):
     from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
 
     cliente = _ClienteEspia()
-    hora_compilacion = datetime(2026, 10, 2, 21, 1, 1, tzinfo=timezone.utc)
-    hora_real_sync = datetime(2026, 10, 3, 2, 30, 35, tzinfo=timezone.utc)
+    hora_real_sync = _AHORA - timedelta(hours=1)
+    hora_compilacion = hora_real_sync - timedelta(hours=5, minutes=29, seconds=34)
     sin_ntp = _payload(reading_id="u", timestamp=hora_compilacion.isoformat(), boot_id=17, seq_no=0,
                        time_quality="unsynced", uptime_ms=5_000)
     con_ntp = _payload(reading_id="s", timestamp=hora_real_sync.isoformat(), boot_id=17, seq_no=9,
@@ -334,6 +338,4 @@ async def test_lecturas_sin_ntp_se_reanclan_al_llegar_una_sincronizada(entorno):
         lectura = await SQLAlchemyLecturaRepository(session).obtener_por_device_boot_seq(DEVICE_ID, 17, 0)
     # La hora declarada se conserva; la estimada sale de restar 270 s de uptime.
     assert lectura.timestamp.replace(tzinfo=timezone.utc) == hora_compilacion
-    assert lectura.timestamp_estimado.replace(tzinfo=timezone.utc) == datetime(
-        2026, 10, 3, 2, 26, 5, tzinfo=timezone.utc
-    )
+    assert lectura.timestamp_estimado.replace(tzinfo=timezone.utc) == hora_real_sync - timedelta(seconds=270)

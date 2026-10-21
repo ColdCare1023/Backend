@@ -62,7 +62,7 @@ class TelemetriaV1(BaseModel):
     simulated: Literal[True] | None = None
 
     @model_validator(mode="after")
-    def _coherencia(self) -> "TelemetriaV1":
+    def _coherencia(self) -> TelemetriaV1:
         # DS18B20: valor presente ⇔ OK ⇔ sin motivo de falla.
         ds_ok = self.ds18b20_status == "OK"
         if ds_ok != (self.temp_ds18b20 is not None) or ds_ok != (self.ds18b20_fault is None):
@@ -89,7 +89,7 @@ class TelemetriaV1(BaseModel):
 
     # ── Reglas de dominio que el backend debe aplicar ────────────────────
     def temperatura_valida_para_reglas(self) -> float | None:
-        """Temperatura utilizable por la regla 2–8 °C y por la IA.
+        """Temperatura utilizable por la regla 2-8 °C y por la IA.
 
         None si el DS18B20 está en falla o si la lectura es simulada: nunca se
         calcula una excursión a partir de un código de error (HU-21 esc. 4).
@@ -131,7 +131,7 @@ class EventoV1(BaseModel):
     detail: dict | None = None
 
     @model_validator(mode="after")
-    def _lwt_minimo(self) -> "EventoV1":
+    def _lwt_minimo(self) -> EventoV1:
         if self.event_type != "lwt_offline" and (self.boot_id is None or self.time_quality is None):
             raise ValueError("los eventos del nodo llevan boot_id y time_quality")
         return self

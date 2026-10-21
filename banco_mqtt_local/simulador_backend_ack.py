@@ -35,8 +35,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "contrato"))
-from pydantic import ValidationError  # noqa: E402
-from telemetria_v1 import parsear_telemetria  # noqa: E402
+from pydantic import ValidationError
+from telemetria_v1 import parsear_telemetria
 
 
 class Almacen:

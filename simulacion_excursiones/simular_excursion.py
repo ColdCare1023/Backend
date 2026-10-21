@@ -36,12 +36,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "contrato"))
-from telemetria_v1 import TelemetriaV1  # noqa: E402
+from telemetria_v1 import TelemetriaV1
 
 PERFILES: dict[str, list[dict]] = {
     # Cruza 8 °C → excursión crítica por la regla determinista (HU-21) y vuelve.
     "excursion": [{"t": t} for t in (4.8, 5.2, 6.1, 7.4, 8.6, 10.3, 12.5, 12.5, 11.0, 8.9, 7.2, 5.5, 4.9)],
-    # Subida lenta DENTRO de 2–8 °C: material para la clase riesgo_preventivo (HU-18/HU-20).
+    # Subida lenta DENTRO de 2-8 °C: material para la clase riesgo_preventivo (HU-18/HU-20).
     "preventivo": [{"t": round(4.6 + 0.28 * i, 2)} for i in range(12)],
     # Falla de sonda en medio de lecturas normales: NO debe generar excursión (HU-21 esc. 4).
     "falla_sensor": [{"t": 4.7}, {"t": 4.8}, {"t": None, "falla": "crc_error"},
@@ -168,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
             info = cliente.publish(f"farmacias/{a.device_id}/lecturas", json.dumps(m), qos=1)
             info.wait_for_publish(timeout=10)
             with llego:
-                llego.wait_for(lambda: m["seq_no"] in acks, timeout=a.esperar_ack)
+                llego.wait_for(lambda seq=m["seq_no"]: seq in acks, timeout=a.esperar_ack)
             temp = "—" if m["temp_ds18b20"] is None else f"{m['temp_ds18b20']:.2f}"
             estado = m["ds18b20_fault"] or ("FUERA 2–8" if m["temp_ds18b20"] is not None and not 2 <= m["temp_ds18b20"] <= 8 else "ok")
             print(f"{m['seq_no']:>4}  {temp:>8}  {estado:<13}  {'sí' if info.is_published() else 'NO':<6}  "
