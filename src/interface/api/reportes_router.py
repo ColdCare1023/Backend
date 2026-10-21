@@ -1,7 +1,7 @@
 import io
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
@@ -34,6 +34,10 @@ router = APIRouter(prefix="/api/reportes", tags=["reportes"])
 # 512 MB compartidos con el resto de la aplicación.
 MAX_DIAS_RANGO_REPORTE = 366
 
+# BE-004: el device_id del reporte acaba en el PDF y en la bitácora; se acota
+# al mismo alfabeto que el contrato del firmware.
+_DEVICE_ID_REPORTE = Query(default=None, pattern=r"^[A-Za-z0-9_-]{1,50}$")
+
 
 def _validar_rango(fecha_desde: datetime, fecha_hasta: datetime) -> None:
     if fecha_desde > fecha_hasta:
@@ -62,7 +66,7 @@ async def exportar_reporte_bpa(
     session: DbSessionDep,
     request: Request,
     usuario=Depends(require_roles(Rol.FARMACEUTICO, Rol.AUDITOR)),
-    device_id: str | None = None,
+    device_id: str | None = _DEVICE_ID_REPORTE,
 ) -> ReporteBPAResponse:
     _validar_rango(fecha_desde, fecha_hasta)
 
@@ -118,7 +122,7 @@ async def exportar_reporte_bpa_pdf(
     session: DbSessionDep,
     request: Request,
     usuario=Depends(require_roles(Rol.FARMACEUTICO, Rol.ADMINISTRADOR, Rol.AUDITOR)),
-    device_id: str | None = None,
+    device_id: str | None = _DEVICE_ID_REPORTE,
 ) -> StreamingResponse:
     """RF-13 / HU-38: descarga el reporte BPA del período en PDF, incluyendo el
     veredicto de integridad de la cadena SHA-256 dentro del propio documento."""

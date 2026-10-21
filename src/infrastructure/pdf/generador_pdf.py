@@ -10,6 +10,7 @@ el reporte debe poder generarse en cualquier equipo donde corra el backend.
 from datetime import datetime, timezone
 from io import BytesIO
 from typing import Any
+from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
@@ -134,6 +135,18 @@ def _estilos() -> dict[str, ParagraphStyle]:
     }
 
 
+def _texto(valor: Any, vacio: str = "—") -> str:
+    """BE-004: texto plano seguro para `Paragraph`.
+
+    `Paragraph` interpreta un mini-lenguaje XML (`<a href>`, `<img src>`,
+    `<font>`): un dato del usuario sin escapar podía insertar enlaces o
+    imágenes remotas/locales en un documento presentado como evidencia, o
+    romper la generación del PDF. Todo valor dinámico pasa por aquí."""
+    if valor is None or valor == "":
+        return vacio
+    return escape(str(valor))
+
+
 def _hex(color: colors.Color) -> str:
     """`Color.hexval()` devuelve '0xrrggbb'; el markup de ReportLab espera
     '#rrggbb'."""
@@ -225,9 +238,9 @@ class GeneradorReporteBPAPDF:
         bloques = [
             Paragraph("Reporte BPA — Monitoreo de Cadena de Frío", e["titulo"]),
             Paragraph(
-                f"Período: <b>{contexto['fecha_desde']}</b> a <b>{contexto['fecha_hasta']}</b>"
-                f"{'  ·  Dispositivo: <b>' + contexto['device_id'] + '</b>' if contexto.get('device_id') else '  ·  Todos los dispositivos'}"
-                f"<br/>Emitido por: {contexto['usuario']}",
+                f"Período: <b>{_texto(contexto['fecha_desde'])}</b> a <b>{_texto(contexto['fecha_hasta'])}</b>"
+                f"{'  ·  Dispositivo: <b>' + _texto(contexto['device_id']) + '</b>' if contexto.get('device_id') else '  ·  Todos los dispositivos'}"
+                f"<br/>Emitido por: {_texto(contexto['usuario'])}",
                 e["subtitulo"],
             ),
         ]
@@ -486,7 +499,7 @@ class GeneradorReporteBPAPDF:
                     _fmt_dt(alerta.get("created_at")),
                     str(alerta.get("device_id") or "—"),
                     _ETIQUETA_RIESGO.get(alerta.get("nivel_riesgo"), str(alerta.get("nivel_riesgo"))),
-                    Paragraph(str(alerta.get("mensaje") or "—"), e["celda"]),
+                    Paragraph(_texto(alerta.get("mensaje")), e["celda"]),
                     "Abierta" if alerta.get("episodio_abierto") else "Cerrada",
                     "Sí" if alerta.get("revisada") else "No",
                 ]
@@ -528,8 +541,8 @@ class GeneradorReporteBPAPDF:
                 [
                     _fmt_dt(registro.get("timestamp")),
                     str(registro.get("tipo_evento") or "—"),
-                    Paragraph(str(registro.get("previous_hash", ""))[:32] + "…", e["hash"]),
-                    Paragraph(str(registro.get("hash_actual", ""))[:32] + "…", e["hash"]),
+                    Paragraph(_texto(str(registro.get("previous_hash", ""))[:32]) + "…", e["hash"]),
+                    Paragraph(_texto(str(registro.get("hash_actual", ""))[:32]) + "…", e["hash"]),
                 ]
             )
         tabla = Table(filas, colWidths=[30 * mm, 42 * mm, 50 * mm, 50 * mm], repeatRows=1)
@@ -571,7 +584,7 @@ class GeneradorReporteBPAPDF:
                     str(checklist.get("fecha") or "—"),
                     f"{checklist.get('total_conformes', 0)} / 10",
                     "Conforme" if conforme else "Con observaciones",
-                    Paragraph(str(checklist.get("observaciones") or "—"), e["celda"]),
+                    Paragraph(_texto(checklist.get("observaciones")), e["celda"]),
                 ]
             )
         tabla = Table(filas, colWidths=[26 * mm, 30 * mm, 36 * mm, 80 * mm], repeatRows=1)
