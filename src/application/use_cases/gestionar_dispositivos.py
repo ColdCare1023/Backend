@@ -44,6 +44,15 @@ class DarDeBajaDispositivoUseCase:
             raise RecursoNoEncontradoError(f"Dispositivo {device_id} no encontrado")
         if not dispositivo["activo"]:
             raise DomainError("El dispositivo ya está dado de baja")
+        if device_id_reemplazo is not None:
+            # BE-017: el reemplazo es un dispositivo ya dado de alta (HU-43), no
+            # uno que la baja cree por la puerta de atrás sin pasar por el alta.
+            if device_id_reemplazo == device_id:
+                raise DomainError("Un dispositivo no puede reemplazarse a sí mismo")
+            if not await self._device_repository.esta_activo(device_id_reemplazo):
+                raise DomainError(
+                    f"El dispositivo de reemplazo {device_id_reemplazo} debe estar dado de alta y activo"
+                )
 
         cuando = datetime.now(tz=timezone.utc)
         actualizado = await self._device_repository.dar_de_baja(

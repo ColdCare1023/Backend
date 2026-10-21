@@ -13,6 +13,7 @@ from src.application.use_cases.registrar_accion_correctiva import (
     RegistrarAccionCorrectivaUseCase,
 )
 from src.domain.exceptions import DomainError, RecursoNoEncontradoError
+from src.domain.value_objects.device_id import PATRON_DEVICE_ID
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.database.repositories.accion_correctiva_repository import (
     SQLAlchemyAccionCorrectivaRepository,
@@ -38,7 +39,7 @@ router = APIRouter(prefix="/api/alertas", tags=["alertas"])
 async def listar_alertas(
     session: DbSessionDep,
     _usuario=Depends(require_roles(Rol.TECNICO, Rol.FARMACEUTICO, Rol.AUDITOR)),
-    device_id: str | None = None,
+    device_id: str | None = Query(default=None, pattern=PATRON_DEVICE_ID),
     revisada: bool | None = None,
     estado: str | None = None,
     limite: int = Query(default=100, ge=1, le=1000),

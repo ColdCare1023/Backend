@@ -10,6 +10,7 @@ from src.application.use_cases.exportar_reporte_bpa_pdf import ExportarReporteBP
 from src.application.use_cases.verificar_integridad_registro import (
     VerificarIntegridadRegistroUseCase,
 )
+from src.domain.value_objects.device_id import PATRON_DEVICE_ID
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.database.repositories.alerta_repository import SQLAlchemyAlertaRepository
 from src.infrastructure.database.repositories.audit_log_repository import SQLAlchemyAuditLogRepository
@@ -36,7 +37,7 @@ MAX_DIAS_RANGO_REPORTE = 366
 
 # BE-004: el device_id del reporte acaba en el PDF y en la bitácora; se acota
 # al mismo alfabeto que el contrato del firmware.
-_DEVICE_ID_REPORTE = Query(default=None, pattern=r"^[A-Za-z0-9_-]{1,50}$")
+_DEVICE_ID_REPORTE = Query(default=None, pattern=PATRON_DEVICE_ID)
 
 
 def _validar_rango(fecha_desde: datetime, fecha_hasta: datetime) -> None:

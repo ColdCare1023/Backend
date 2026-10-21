@@ -1,13 +1,17 @@
 from datetime import date, datetime, timezone
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator
 
+from src.domain.value_objects.device_id import PATRON_DEVICE_ID
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 from src.domain.value_objects.rol import Rol
 
 PASSWORD_MIN_LENGTH = 10
+
+# BE-017: todo device_id que entra por la API cumple el patrón del contrato.
+DeviceId = Annotated[str, StringConstraints(pattern=PATRON_DEVICE_ID)]
 
 # bcrypt solo considera los primeros 72 BYTES de la contraseña y descarta el
 # resto en silencio. Con el antiguo tope de 128 caracteres, dos contraseñas que
@@ -115,7 +119,7 @@ class LecturaIngestRequest(_PeticionEstricta):
     los asigna el servidor y la lectura queda marcada como `origen="manual"`
     con su autor, separada de la evidencia del dispositivo."""
 
-    device_id: str = Field(min_length=1, max_length=50)
+    device_id: DeviceId
     timestamp: datetime
     temperatura_ambiental: float | None = Field(default=None, ge=-40.0, le=125.0)
     humedad_ambiental: float | None = Field(default=None, ge=0.0, le=100.0)
@@ -379,13 +383,13 @@ class EstadoOperativoResponse(DispositivoResumenResponse):
 class DispositivoBajaRequest(_PeticionEstricta):
     motivo: str = Field(min_length=1, max_length=50)
     descripcion: str | None = Field(default=None, max_length=2000)
-    device_id_reemplazo: str | None = Field(default=None, max_length=50)
+    device_id_reemplazo: DeviceId | None = None
 
 
 class DispositivoAltaRequest(_PeticionEstricta):
     """HU-43: alta explícita de un dispositivo nuevo."""
 
-    device_id: str = Field(min_length=1, max_length=50)
+    device_id: DeviceId
     nombre: str | None = Field(default=None, max_length=120)
     ubicacion: str | None = Field(default=None, max_length=200)
     sensores_habilitados: list[str] = Field(default_factory=list)
@@ -444,7 +448,7 @@ class AutenticarDispositivoRequest(BaseModel):
     """Sin _PeticionEstricta: la llama EMQX Cloud (webhook de autenticación
     HTTP), no un cliente de este backend con sesión."""
 
-    device_id: str = Field(min_length=1, max_length=50)
+    device_id: DeviceId
     token: str = Field(min_length=1, max_length=200)
 
 
@@ -518,7 +522,7 @@ class FirmwareReleaseResponse(BaseModel):
 
 
 class FirmwareDespliegueCreateRequest(_PeticionEstricta):
-    device_id: str = Field(min_length=1, max_length=50)
+    device_id: DeviceId
     version_objetivo: str = Field(min_length=1, max_length=20)
     programado_para: datetime | None = None
 

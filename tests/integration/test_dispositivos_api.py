@@ -51,6 +51,8 @@ def test_admin_da_de_baja_dispositivo(client, token_admin, token_tecnico):
 
 def test_baja_con_reemplazo_vincula_device_nuevo(client, token_admin, token_tecnico):
     _ingestar_lectura(client, token_tecnico, "esp32-viejo")
+    # BE-017: el reemplazo se da de alta explícitamente antes de vincularlo.
+    client.post("/api/dispositivos", json={"device_id": "esp32-nuevo"}, headers=auth_header(token_admin))
 
     response = client.post(
         "/api/dispositivos/esp32-viejo/baja",
@@ -124,3 +126,30 @@ def test_baja_dispositivo_no_borra_lecturas_historicas(client, token_admin, toke
     assert trazabilidad.status_code == 200
     tipos = [r["tipo_evento"] for r in trazabilidad.json()]
     assert "BAJA_HARDWARE" in tipos
+
+
+def test_baja_con_reemplazo_inexistente_no_lo_crea(client, token_admin, token_tecnico):
+    """BE-017: la baja no crea dispositivos por la puerta de atrás."""
+    _ingestar_lectura(client, token_tecnico, "esp32-sin-reemplazo")
+
+    response = client.post(
+        "/api/dispositivos/esp32-sin-reemplazo/baja",
+        json={"motivo": "reemplazo", "device_id_reemplazo": "esp32-fantasma"},
+        headers=auth_header(token_admin),
+    )
+    assert response.status_code == 409
+    ids = {d["id"] for d in client.get("/api/dispositivos", headers=auth_header(token_admin)).json()}
+    assert "esp32-fantasma" not in ids
+
+
+def test_device_id_fuera_del_patron_se_rechaza(client, token_admin, token_tecnico):
+    """BE-017: alta, ingesta, rutas y filtros comparten el patrón del contrato."""
+    assert client.post("/api/dispositivos", json={"device_id": "a/../b"}, headers=auth_header(token_admin)).status_code == 422
+    assert client.post(
+        "/api/lecturas", json={"device_id": "x y", "timestamp": datetime.now(tz=timezone.utc).isoformat()},
+        headers=auth_header(token_tecnico),
+    ).status_code == 422
+    assert client.get("/api/lecturas", params={"device_id": "<b>"}, headers=auth_header(token_tecnico)).status_code == 422
+    assert client.post(
+        "/api/dispositivos/x%20y/baja", json={"motivo": "reemplazo"}, headers=auth_header(token_admin)
+    ).status_code == 422

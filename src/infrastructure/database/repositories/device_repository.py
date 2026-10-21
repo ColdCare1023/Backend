@@ -124,10 +124,9 @@ class SQLAlchemyDeviceRepository(IDeviceRepository):
     async def vincular_reemplazo(self, device_id_nuevo: str, device_id_anterior: str) -> None:
         model = await self._session.get(DeviceModel, device_id_nuevo)
         if model is None:
-            model = DeviceModel(id=device_id_nuevo, reemplaza_a_device_id=device_id_anterior)
-            self._session.add(model)
-        else:
-            model.reemplaza_a_device_id = device_id_anterior
+            # BE-017: nunca se crea un dispositivo desde aquí; el alta es explícita.
+            raise ValueError(f"Dispositivo de reemplazo {device_id_nuevo} no encontrado")
+        model.reemplaza_a_device_id = device_id_anterior
         await self._session.flush()
 
     async def actualizar_firmware_version(self, device_id: str, version: str) -> None:

@@ -11,6 +11,7 @@ from src.application.use_cases.verificar_integridad_registro import (
     VerificarIntegridadRegistroUseCase,
 )
 from src.domain.exceptions import DomainError, RecursoNoEncontradoError
+from src.domain.value_objects.device_id import PATRON_DEVICE_ID
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.database.repositories.audit_log_repository import (
     SQLAlchemyAuditLogRepository,
@@ -39,7 +40,7 @@ async def listar_trazabilidad(
     session: DbSessionDep,
     usuario=Depends(require_roles(Rol.TECNICO, Rol.FARMACEUTICO, Rol.AUDITOR)),
     tipo_evento: str | None = None,
-    device_id: str | None = None,
+    device_id: str | None = Query(default=None, pattern=PATRON_DEVICE_ID),
     chain_id: str | None = None,
     limite: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
@@ -104,10 +105,10 @@ async def verificar_integridad(
 async def verificar_integridad_por_dispositivo(
     session: DbSessionDep,
     request: Request,
-    device_id: str,
     desde: datetime,
     hasta: datetime,
     usuario=Depends(require_roles(Rol.TECNICO, Rol.FARMACEUTICO, Rol.AUDITOR)),
+    device_id: str = Query(pattern=PATRON_DEVICE_ID),
 ) -> VerificacionSegmentoResponse:
     """HU-37: verificación de integridad acotada a un dispositivo y periodo
     (a diferencia de /verificar, que recorre la cadena global completa)."""

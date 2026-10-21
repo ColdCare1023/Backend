@@ -9,6 +9,7 @@ from src.application.use_cases.consultar_historial_termico import ConsultarHisto
 from src.application.use_cases.registrar_lectura_termica import RegistrarLecturaTermicaUseCase
 from src.domain.entities.lectura_termica import ORIGEN_MANUAL, LecturaTermica
 from src.domain.exceptions import DispositivoNoAutorizadoError, LecturaInvalidaError
+from src.domain.value_objects.device_id import PATRON_DEVICE_ID
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.ai.random_forest_service import get_random_forest_service
 from src.infrastructure.database.repositories.alerta_repository import SQLAlchemyAlertaRepository
@@ -157,7 +158,7 @@ async def _emitir_eventos_sse(
 async def listar_historial(
     session: DbSessionDep,
     _usuario=Depends(require_roles(Rol.TECNICO, Rol.FARMACEUTICO, Rol.AUDITOR)),
-    device_id: str | None = None,
+    device_id: str | None = Query(default=None, pattern=PATRON_DEVICE_ID),
     nivel_riesgo: str | None = None,
     estado_conectividad: str | None = None,
     desde: datetime | None = None,

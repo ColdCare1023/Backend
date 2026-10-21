@@ -1,8 +1,9 @@
 import hmac
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, status
 
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.gestionar_dispositivos import (
@@ -19,6 +20,7 @@ from src.application.use_cases.gestionar_dispositivos import (
 )
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.domain.exceptions import DomainError, RecursoNoEncontradoError
+from src.domain.value_objects.device_id import PATRON_DEVICE_ID
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.database.repositories.audit_log_repository import SQLAlchemyAuditLogRepository
 from src.infrastructure.database.repositories.device_repository import SQLAlchemyDeviceRepository
@@ -49,6 +51,9 @@ from src.interface.api.schemas import (
 )
 
 router = APIRouter(prefix="/api/dispositivos", tags=["dispositivos"])
+
+# BE-017: el segmento de ruta cumple el mismo patrón que el contrato del nodo.
+DeviceIdRuta = Annotated[str, Path(pattern=PATRON_DEVICE_ID)]
 logger = logging.getLogger("interface.api.dispositivos")
 
 
@@ -208,7 +213,7 @@ async def consultar_estado_calibracion(
 
 @router.patch("/{device_id}/calibracion", response_model=DispositivoResponse)
 async def registrar_calibracion(
-    device_id: str,
+    device_id: DeviceIdRuta,
     body: CalibracionRequest,
     session: DbSessionDep,
     request: Request,
@@ -252,7 +257,7 @@ async def registrar_calibracion(
 
 @router.post("/{device_id}/baja", response_model=DispositivoResponse)
 async def dar_de_baja(
-    device_id: str,
+    device_id: DeviceIdRuta,
     body: DispositivoBajaRequest,
     session: DbSessionDep,
     request: Request,
@@ -291,7 +296,7 @@ async def dar_de_baja(
 
 @router.post("/{device_id}/credenciales/rotar", response_model=CredencialDispositivoResponse)
 async def rotar_credencial(
-    device_id: str,
+    device_id: DeviceIdRuta,
     body: RotarCredencialRequest,
     session: DbSessionDep,
     request: Request,
@@ -332,7 +337,7 @@ async def rotar_credencial(
 
 @router.post("/{device_id}/credenciales/revocar", status_code=status.HTTP_204_NO_CONTENT)
 async def revocar_credencial(
-    device_id: str,
+    device_id: DeviceIdRuta,
     body: RevocarCredencialRequest,
     session: DbSessionDep,
     request: Request,
@@ -414,7 +419,7 @@ async def autenticar_dispositivo(
 
 @router.patch("/{device_id}/instalacion", response_model=DispositivoResponse)
 async def actualizar_instalacion(
-    device_id: str,
+    device_id: DeviceIdRuta,
     body: InstalacionDispositivoRequest,
     session: DbSessionDep,
     request: Request,
@@ -450,7 +455,7 @@ async def actualizar_instalacion(
 
 @router.patch("/{device_id}/responsable", response_model=DispositivoResponse)
 async def actualizar_responsable(
-    device_id: str,
+    device_id: DeviceIdRuta,
     body: ResponsableDispositivoRequest,
     session: DbSessionDep,
     request: Request,
@@ -486,7 +491,7 @@ async def actualizar_responsable(
 
 @router.get("/{device_id}/historial-configuracion", response_model=list[HistorialConfiguracionResponse])
 async def historial_configuracion(
-    device_id: str,
+    device_id: DeviceIdRuta,
     session: DbSessionDep,
     _usuario=Depends(require_roles(Rol.ADMINISTRADOR, Rol.AUDITOR)),
 ) -> list[HistorialConfiguracionResponse]:

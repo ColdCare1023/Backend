@@ -17,9 +17,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.domain.value_objects.device_id import PATRON_DEVICE_ID
+
 SCHEMA_VERSION = "1.0"
 PAYLOAD_MAX_BYTES = 768
-DEVICE_ID_PATRON = r"^[A-Za-z0-9_-]{1,50}$"
+DEVICE_ID_PATRON = PATRON_DEVICE_ID
 
 Fallo = Literal["no_response", "crc_error", "timeout", "implausible", "power_on_reset"]
 Estado = Literal["OK", "SENSOR_FAULT"]

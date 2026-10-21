@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from src.domain.value_objects.device_id import PATRON_DEVICE_ID
+
 # HU-15/HU-05: estados de sensor válidos para acompañar un valor null. Un
 # sensor que reporta null SIN uno de estos estados es un payload malformado
 # (se rechaza), no una falla de sensor legítima (se acepta).
@@ -34,7 +36,7 @@ class LecturaPayload(BaseModel):
     # infinito nunca llega a persistencia, IA ni trazabilidad.
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
-    device_id: str = Field(min_length=1, max_length=50)
+    device_id: str = Field(pattern=PATRON_DEVICE_ID)
     timestamp: datetime
     # HU-05: versión del contrato de payload. Por defecto 1 (compatibilidad
     # con firmware ya desplegado que aún no lo declara explícitamente); un
@@ -177,7 +179,7 @@ class EventoDispositivoPayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    device_id: str = Field(min_length=1, max_length=50)
+    device_id: str = Field(pattern=PATRON_DEVICE_ID)
     tipo_evento: TipoEventoDispositivo
     timestamp: datetime
     detalle: str | None = Field(default=None, max_length=500)
