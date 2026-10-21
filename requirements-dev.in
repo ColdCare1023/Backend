@@ -1,0 +1,11 @@
+# Dependencias de desarrollo (fuente); se instala `requirements-dev.txt`.
+-r requirements.in
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+pytest-cov>=5.0.0
+httpx>=0.27.0
+aiosqlite>=0.20.0
+greenlet>=3.1.0
+ruff>=0.6.0
+# BE-007: PostgreSQL embebido para probar los triggers de solo anexado.
+pgserver>=0.1.4

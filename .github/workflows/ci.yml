@@ -6,7 +6,7 @@ name: CI
 # lo comprobaba.
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
 
 jobs:
@@ -20,8 +20,10 @@ jobs:
           python-version: '3.12'
           cache: pip
 
+      # BE-021: versiones exactas con hashes (requirements-dev.txt se genera
+      # desde requirements*.in); pip rechaza cualquier paquete alterado.
       - name: Instalar dependencias
-        run: pip install -r requirements-dev.txt
+        run: pip install --require-hashes -r requirements-dev.txt
 
       - name: Lint (ruff)
         run: ruff check .
@@ -29,7 +31,8 @@ jobs:
       - name: Pruebas con cobertura
         run: pytest --cov=src --cov-report=term
 
+      # Se audita el lockfile (lo que se despliega), no el entorno del runner.
       - name: Vulnerabilidades en dependencias
         run: |
           pip install pip-audit
-          pip-audit
+          pip-audit --require-hashes --disable-pip -r requirements-dev.txt

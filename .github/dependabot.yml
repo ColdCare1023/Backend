@@ -1,0 +1,15 @@
+# BE-021: avisos y PRs de actualización para las dependencias fijadas en los
+# lockfiles y para las acciones de GitHub usadas en CI.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"

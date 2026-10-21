@@ -4,7 +4,7 @@ Cada una se decidió por separado; el razonamiento completo está en
 MEJORAS_BACKEND.md. Aquí queda la comprobación ejecutable.
 """
 
-from passlib.context import CryptContext
+import bcrypt
 
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.security.password_hasher import hash_password, verify_password
@@ -12,10 +12,12 @@ from src.interface.api.auth_router import enmascarar_email
 from src.interface.api.schemas import PASSWORD_MAX_BYTES
 from tests.conftest import auth_header
 
-# Contexto aislado, solo-bcrypt, para reproducir el hash heredado sin
-# depender del esquema por defecto (que ya es Argon2id) ni deprecar nada
-# en el _pwd_context real que usa la aplicación.
-_bcrypt_solo = CryptContext(schemes=["bcrypt"])
+
+def _hash_bcrypt_heredado(password: str) -> str:
+    """Hash bcrypt como los que quedaron antes de HU-39: bcrypt solo usaba
+    los primeros 72 bytes de la contraseña."""
+    return bcrypt.hashpw(password.encode()[:72], bcrypt.gensalt(rounds=4)).decode()
+
 
 # ── O-01: truncado silencioso de bcrypt a 72 bytes ────────────────────────
 #
@@ -29,17 +31,18 @@ _bcrypt_solo = CryptContext(schemes=["bcrypt"])
 # haya migrado por completo.
 
 
-def test_bcrypt_efectivamente_ignora_lo_que_pasa_de_72_bytes():
-    """Demuestra el problema que motivó el límite originalmente: NO es
-    teórico. Dos contraseñas distintas que comparten los primeros 72 bytes
-    son intercambiables al verificar CONTRA UN HASH BCRYPT (el esquema
-    heredado, forzado aquí explícitamente para no depender del default)."""
+def test_un_hash_bcrypt_heredado_no_acepta_contrasenas_de_mas_de_72_bytes():
+    """El problema que motivó el límite: bcrypt solo usa los primeros 72
+    bytes, así que dos contraseñas que los comparten eran intercambiables
+    contra un hash bcrypt heredado. BE-021: la verificación ya no compara
+    contraseñas de más de 72 bytes contra hashes bcrypt."""
     original = "A1" + "x" * 78
     impostora = original[:72] + "COLA_COMPLETAMENTE_DISTINTA"
 
     assert original != impostora
-    hash_bcrypt = _bcrypt_solo.hash(original)
-    assert verify_password(impostora, hash_bcrypt) is True
+    hash_bcrypt = _hash_bcrypt_heredado(original)
+    assert verify_password(impostora, hash_bcrypt) is False
+    assert verify_password(original[:72], hash_bcrypt) is True
 
 
 def test_argon2id_no_trunca_a_72_bytes():

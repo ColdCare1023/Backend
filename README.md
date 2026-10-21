@@ -28,3 +28,22 @@ pytest
 ```
 
 Todo el stack (PostgreSQL, EMQX con TLS y el backend) en local: ver [`infra-local/`](infra-local/README.md).
+
+## Dependencias
+
+`requirements.in` y `requirements-dev.in` declaran las dependencias directas.
+`requirements.txt` y `requirements-dev.txt` son lockfiles generados: versiones
+exactas y hashes SHA-256, resueltos para todas las plataformas (`--universal`).
+Al contener hashes, `pip install -r requirements.txt` (Railway, Docker, CI)
+instala exactamente lo probado y rechaza cualquier paquete alterado.
+
+Tras editar un `.in`, regenerar ambos lockfiles y auditar:
+
+```bash
+uv pip compile requirements.in --universal --generate-hashes --python-version 3.12 -o requirements.txt
+uv pip compile requirements-dev.in --universal --generate-hashes --python-version 3.12 -c requirements.txt -o requirements-dev.txt
+pip-audit --require-hashes --disable-pip -r requirements-dev.txt
+```
+
+Para actualizar un paquete concreto: añadir `--upgrade-package <nombre>` a los
+dos comandos de compilación.
