@@ -358,6 +358,14 @@ class GeneradorReporteBPAPDF:
                 f"Verificado el: <b>{fecha_verificacion}</b><br/>"
                 f"Referencia de la cadena (último hash íntegro): <font face='Courier'>{digest}</font>"
             )
+        elif veredicto.get("estado") == "ruptura_aislada":
+            titulo = "◐ Cadena con ruptura aislada"
+            detalle = (
+                f"La cadena registra <b>{veredicto.get('total_rupturas', 0)}</b> alteración(es) histórica(s), "
+                "todas aisladas por un administrador (HU-47). Los registros alterados no son verificables; "
+                f"la cadena vuelve a ser íntegra desde <b>{veredicto.get('integra_desde') or '—'}</b>.<br/>"
+                f"Verificado el: <b>{fecha_verificacion}</b>"
+            )
         else:
             titulo = "✗ Cadena de trazabilidad comprometida"
             posicion = veredicto.get("primer_registro_inconsistente")
@@ -373,6 +381,9 @@ class GeneradorReporteBPAPDF:
             [Paragraph(f"<b>{titulo}</b>", e["cuerpo"])],
             [Paragraph(detalle, e["cuerpo"])],
         ]
+        # HU-26 escenario 4: el veredicto declara qué certifica y qué no.
+        if veredicto.get("alcance"):
+            contenido.append([Paragraph(f"<i>{veredicto['alcance']}</i>", e["nota"])])
         tabla = Table(contenido, colWidths=[172 * mm])
         tabla.setStyle(
             TableStyle(

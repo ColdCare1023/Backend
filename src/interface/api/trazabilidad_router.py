@@ -7,6 +7,8 @@ from src.application.use_cases.auditar_accion_critica import AuditarAccionCritic
 from src.application.use_cases.gestionar_corrupcion_cadena import AislarCorrupcionUseCase
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.application.use_cases.verificar_integridad_registro import (
+    ALCANCE_VERIFICACION,
+    DetalleInconsistencia,
     VerificarIntegridadPorDispositivoYPeriodoUseCase,
     VerificarIntegridadRegistroUseCase,
 )
@@ -81,19 +83,27 @@ async def verificar_integridad(
     )
     resultado = await use_case.execute(chain_id)
     await session.commit()
-    detalle = None
-    if resultado.detalle_inconsistencia is not None:
-        d = resultado.detalle_inconsistencia
-        detalle = DetalleInconsistenciaResponse(
-            id=d.id, tipo_evento=d.tipo_evento, timestamp=d.timestamp,
-            hash_esperado=d.hash_esperado, hash_almacenado=d.hash_almacenado, mensaje=d.mensaje,
-        )
+    detalle = resultado.detalle_inconsistencia
     return VerificacionIntegridadResponse(
         integra=resultado.integra,
         total_registros=resultado.total_registros,
         primer_registro_inconsistente=resultado.primer_registro_inconsistente,
-        detalle_inconsistencia=detalle,
+        detalle_inconsistencia=_detalle_response(detalle) if detalle else None,
         registros_posteriores_afectados=resultado.registros_posteriores_afectados,
+        estado=resultado.estado.value,
+        total_rupturas=resultado.total_rupturas,
+        rupturas=[_detalle_response(r) for r in resultado.rupturas],
+        registros_posteriores_consistentes=resultado.registros_posteriores_consistentes,
+        integra_desde=resultado.integra_desde,
+        alcance=resultado.alcance,
+    )
+
+
+def _detalle_response(d: DetalleInconsistencia) -> DetalleInconsistenciaResponse:
+    return DetalleInconsistenciaResponse(
+        id=d.id, tipo_evento=d.tipo_evento, timestamp=d.timestamp,
+        hash_esperado=d.hash_esperado, hash_almacenado=d.hash_almacenado, mensaje=d.mensaje,
+        chain_id=d.chain_id, indice=d.indice, tipo_discrepancia=d.tipo_discrepancia.value, aislada=d.aislada,
     )
 
 
@@ -153,6 +163,7 @@ async def verificar_integridad_por_dispositivo(
             for r in resultado.registros_del_dispositivo
         ],
         primer_registro_inconsistente=resultado.primer_registro_inconsistente,
+        alcance=ALCANCE_VERIFICACION,
     )
 
 
