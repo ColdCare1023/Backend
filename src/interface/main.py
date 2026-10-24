@@ -6,11 +6,16 @@ from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
 import aiomqtt
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import ValidationError
+from sqlalchemy import text
 
+from src.application.use_cases.actualizar_conectividad import (
+    ActualizarConectividadUseCase,
+    CambioConectividad,
+)
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.clasificar_riesgo_termico import ClasificarRiesgoTermicoUseCase
 from src.application.use_cases.detectar_anomalia_reloj import anomalias_de_reloj
@@ -20,6 +25,7 @@ from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEnc
 from src.application.use_cases.registrar_lectura_termica import RegistrarLecturaTermicaUseCase
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.exceptions import DispositivoNoAutorizadoError, LecturaInvalidaError
+from src.domain.value_objects.rol import Rol
 from src.infrastructure.ai.prediccion_preventiva.servicio import obtener_servicio_preventivo
 from src.infrastructure.ai.random_forest_service import get_random_forest_service
 from src.infrastructure.config import get_settings
@@ -38,20 +44,21 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
 )
 from src.infrastructure.database.session import _session_factory
 from src.infrastructure.mqtt import contrato_v1
-from src.infrastructure.mqtt.mqtt_client import mqtt_session
+from src.infrastructure.mqtt.mqtt_client import ESTADO_CONEXION, mqtt_session
 from src.infrastructure.mqtt.payload_schema import (
     MAX_BYTES_PAYLOAD_MQTT,
     EventoDispositivoPayload,
     LecturaPayload,
     TipoEventoDispositivo,
 )
-from src.infrastructure.notifications.notificacion_service import obtener_notificacion_service
+from src.infrastructure.notifications.despachador import DespachadorNotificaciones
 from src.infrastructure.security.rate_limiter import SlidingWindowRateLimiter
 from src.interface.api.alertas_router import router as alertas_router
 from src.interface.api.api_protection import instalar_proteccion_api
 from src.interface.api.auditoria_router import router as auditoria_router
 from src.interface.api.auth_router import router as auth_router
 from src.interface.api.checklist_router import router as checklist_router
+from src.interface.api.deps import DbSessionDep, require_roles
 from src.interface.api.dispositivos_router import router as dispositivos_router
 from src.interface.api.firmware_router import router as firmware_router
 from src.interface.api.ia_router import router as ia_router
@@ -154,7 +161,10 @@ def _payload_en_conflicto(existente, nueva) -> bool:
 
 
 async def _procesar_mensaje_mqtt(
-    message: aiomqtt.Message, broadcaster: SSEBroadcaster, client: aiomqtt.Client | None = None
+    message: aiomqtt.Message,
+    broadcaster: SSEBroadcaster,
+    client: aiomqtt.Client | None = None,
+    notificaciones: DespachadorNotificaciones | None = None,
 ) -> None:
     """Despacha según el tópico. B-09: los mensajes de `/eventos` tienen su
     propio esquema; antes se validaban contra LecturaPayload, fallaban y se
@@ -163,7 +173,7 @@ async def _procesar_mensaje_mqtt(
     topico = str(message.topic)
     if topico.endswith("/eventos"):
         return await _procesar_evento_mqtt(message, broadcaster)
-    return await _procesar_lectura_mqtt(message, broadcaster, client)
+    return await _procesar_lectura_mqtt(message, broadcaster, client, notificaciones)
 
 
 # Contrato v1.0: `event_type` → tipo interno. Los que no tienen equivalente se
@@ -227,27 +237,35 @@ async def _procesar_evento_v1(
             return
 
         tipo = _EVENTOS_V1.get(evento.event_type)
-        if tipo is TipoEventoDispositivo.LWT_OFFLINE:
-            await device_repository.actualizar_estado_conectividad(evento.device_id, "offline")
-        elif tipo is TipoEventoDispositivo.LWT_ONLINE:
-            await device_repository.actualizar_estado_conectividad(evento.device_id, "online")
-        accion = {
-            TipoEventoDispositivo.LWT_OFFLINE: "DISPOSITIVO_OFFLINE",
-            TipoEventoDispositivo.LWT_ONLINE: "DISPOSITIVO_ONLINE",
-        }.get(tipo, (tipo.value if tipo else evento.event_type).upper())
         detalle: dict = {"tipo_evento": evento.event_type, "boot_id": evento.boot_id}
         if evento.detail:
             detalle["detalle"] = evento.detail
         if evento.occurred_at:
             detalle["occurred_at"] = evento.occurred_at.isoformat()
-        await auditoria.execute(
-            usuario_id=None,
-            accion=accion,
-            recurso=f"dispositivos/{evento.device_id}",
-            detalle=detalle,
-            ip_origen=None,
-            device_id=evento.device_id,
-        )
+        cambio = None
+        if tipo in (TipoEventoDispositivo.LWT_OFFLINE, TipoEventoDispositivo.LWT_ONLINE):
+            # HU-13: reglas de transición (incluido el LWT obsoleto) y su
+            # auditoría viven en el caso de uso. `desde` es el instante en que
+            # el backend observa el cambio: la hora del nodo puede no estar
+            # sincronizada y el LWT no trae hora.
+            cambio = await ActualizarConectividadUseCase(device_repository, auditoria).execute(
+                evento.device_id,
+                "lwt" if tipo is TipoEventoDispositivo.LWT_OFFLINE else "online",
+                boot_id=evento.boot_id,
+                detalle=detalle,
+            )
+            if cambio is None:
+                await session.commit()
+                return
+        else:
+            await auditoria.execute(
+                usuario_id=None,
+                accion=(tipo.value if tipo else evento.event_type).upper(),
+                recurso=f"dispositivos/{evento.device_id}",
+                detalle=detalle,
+                ip_origen=None,
+                device_id=evento.device_id,
+            )
         # IOT-004: el resultado de un despliegue OTA lo informa el propio nodo.
         await RegistrarResultadoOtaUseCase(
             device_repository,
@@ -257,6 +275,8 @@ async def _procesar_evento_v1(
         await session.commit()
 
     await broadcaster.publicar(sse, evento.event_type)
+    if cambio is not None:
+        await broadcaster.publicar(cambio.como_evento_sse(), "conectividad")
 
 
 async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadcaster) -> None:
@@ -317,13 +337,16 @@ async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadc
         if evento.detalle:
             detalle_auditoria["detalle"] = evento.detalle
 
+        cambio = None
         match evento.tipo_evento:
-            case TipoEventoDispositivo.LWT_OFFLINE:
-                await device_repository.actualizar_estado_conectividad(evento.device_id, "offline")
-                accion, tipo_sse = "DISPOSITIVO_OFFLINE", "desconexion"
-            case TipoEventoDispositivo.LWT_ONLINE:
-                await device_repository.actualizar_estado_conectividad(evento.device_id, "online")
-                accion, tipo_sse = "DISPOSITIVO_ONLINE", "reconexion"
+            case TipoEventoDispositivo.LWT_OFFLINE | TipoEventoDispositivo.LWT_ONLINE:
+                # HU-13: firmware anterior al contrato v1.0 — sin boot_id, así
+                # que el LWT se aplica sin la comparación de arranques.
+                es_offline = evento.tipo_evento is TipoEventoDispositivo.LWT_OFFLINE
+                cambio = await ActualizarConectividadUseCase(device_repository, auditoria).execute(
+                    evento.device_id, "lwt" if es_offline else "online", detalle=detalle_auditoria
+                )
+                accion, tipo_sse = None, "desconexion" if es_offline else "reconexion"
             case TipoEventoDispositivo.ERROR_SENSOR:
                 accion, tipo_sse = "ERROR_SENSOR", "fallo_sensor"
             case TipoEventoDispositivo.BUFFER_SATURADO:
@@ -352,14 +375,15 @@ async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadc
                     detalle_auditoria["firmware_version"] = version
                 accion, tipo_sse = "FIRMWARE_ACTUALIZADO", "firmware_actualizado"
 
-        await auditoria.execute(
-            usuario_id=None,
-            accion=accion,
-            recurso=f"dispositivos/{evento.device_id}",
-            detalle=detalle_auditoria,
-            ip_origen=None,
-            device_id=evento.device_id,
-        )
+        if accion is not None:
+            await auditoria.execute(
+                usuario_id=None,
+                accion=accion,
+                recurso=f"dispositivos/{evento.device_id}",
+                detalle=detalle_auditoria,
+                ip_origen=None,
+                device_id=evento.device_id,
+            )
         await session.commit()
 
     await broadcaster.publicar(
@@ -372,6 +396,8 @@ async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadc
         },
         tipo_sse,
     )
+    if cambio is not None:
+        await broadcaster.publicar(cambio.como_evento_sse(), "conectividad")
 
 
 async def _rechazar_payload_invalido(
@@ -427,7 +453,10 @@ async def _rechazar_payload_invalido(
 
 
 async def _procesar_lectura_mqtt(
-    message: aiomqtt.Message, broadcaster: SSEBroadcaster, client: aiomqtt.Client | None = None
+    message: aiomqtt.Message,
+    broadcaster: SSEBroadcaster,
+    client: aiomqtt.Client | None = None,
+    notificaciones: DespachadorNotificaciones | None = None,
 ) -> None:
     # El tamaño se comprueba ANTES de deserializar: la ingesta MQTT no pasa por
     # el middleware que acota el cuerpo de las peticiones REST, así que este es
@@ -519,7 +548,6 @@ async def _procesar_lectura_mqtt(
             device_repository=SQLAlchemyDeviceRepository(session),
             registro_dispositivos_estricto=settings.device_registry_estricto,
             audit_log_repository=SQLAlchemyAuditLogRepository(session),
-            notificacion_service=obtener_notificacion_service(settings),
             ventana_normalizacion_alerta_minutos=settings.alerta_ventana_normalizacion_minutos,
             prediccion_preventiva=(
                 PredecirRiesgoPreventivoUseCase(
@@ -681,7 +709,26 @@ async def _procesar_lectura_mqtt(
             await lectura_repository.reanclar_no_sincronizadas(
                 lectura_guardada.device_id, lectura_guardada.boot_id
             )
+        # HU-13 criterio 4: un nodo que envía telemetría está conectado. Corrige
+        # un LWT tardío del mismo arranque (reconexión antes del keepalive).
+        cambio_conectividad: CambioConectividad | None = await ActualizarConectividadUseCase(
+            SQLAlchemyDeviceRepository(session),
+            AuditarAccionCriticaUseCase(
+                SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+            ),
+        ).execute(
+            lectura_guardada.device_id,
+            "telemetria",
+            boot_id=lectura_guardada.boot_id,
+            detalle={"seq_no": lectura_guardada.seq_no},
+        )
         await session.commit()
+
+    # HU-53 (D2): el aviso por correo se ENCOLA después del COMMIT; el envío lo
+    # hace el despachador fuera de este manejador, así que un proveedor lento o
+    # caído no retrasa el acuse ni la lectura siguiente.
+    if notificaciones is not None:
+        notificaciones.encolar_todos(use_case.avisos_pendientes)
 
     # HU-07 Escenario 1: el acuse lógico se publica DESPUÉS del COMMIT, nunca
     # antes ni en su lugar. Es lo único que autoriza al firmware a borrar el
@@ -717,6 +764,9 @@ async def _procesar_lectura_mqtt(
             tipo_episodio,
         )
 
+    if cambio_conectividad is not None:
+        await broadcaster.publicar(cambio_conectividad.como_evento_sse(), "conectividad")
+
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -730,10 +780,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "backend y la revocación de credenciales no se aplica en el broker."
         )
 
+    # HU-53: UNA instancia por proceso (D1) — la cola, el worker y los
+    # reintentos de los avisos por correo viven aquí, no en cada lectura.
+    app.state.notificaciones = DespachadorNotificaciones(settings, _session_factory)
+    if settings.environment != "test":
+        await app.state.notificaciones.iniciar()
+    try:
+        async with _ingesta_mqtt(app, settings):
+            yield
+    finally:
+        await app.state.notificaciones.detener()
+
+
+@contextlib.asynccontextmanager
+async def _ingesta_mqtt(app: FastAPI, settings) -> AsyncIterator[None]:
     if settings.mqtt_enabled and settings.environment != "test":
 
         async def manejador(client: aiomqtt.Client, message: aiomqtt.Message) -> None:
-            await _procesar_mensaje_mqtt(message, app.state.sse_broadcaster, client)
+            await _procesar_mensaje_mqtt(
+                message, app.state.sse_broadcaster, client, app.state.notificaciones
+            )
 
         # La conexión y sus reintentos viven dentro de la tarea consumidora, así
         # que el arranque nunca se bloquea ni se cae por un broker inaccesible.
@@ -826,7 +892,47 @@ def create_app() -> FastAPI:
 
     @app.get("/health", tags=["health"])
     async def health() -> dict:
+        # Liveness: NO consulta la base de datos a propósito. Si PostgreSQL cae,
+        # Railway reiniciaría el backend en bucle sin arreglar nada; el estado de
+        # las dependencias está en /health/detalle.
         return {"status": "ok", "timestamp": datetime.now(tz=timezone.utc).isoformat()}
+
+    @app.get("/health/detalle", tags=["health"])
+    async def health_detalle(
+        request: Request,
+        session: DbSessionDep,
+        _admin=Depends(require_roles(Rol.ADMINISTRADOR)),
+    ) -> dict:
+        """HU-56: estado de las dependencias para el operador (solo administrador)."""
+        try:
+            await session.execute(text("SELECT 1"))
+            db = "ok"
+        except Exception as exc:  # pragma: no cover - depende de una BD caída
+            db = f"error: {type(exc).__name__}"
+        try:
+            revision = (await session.execute(text("SELECT version_num FROM alembic_version"))).scalar()
+        except Exception:
+            # Sin tabla alembic_version (BD creada con create_all en pruebas).
+            await session.rollback()
+            revision = None
+        tarea_mqtt = getattr(request.app.state, "mqtt", None)
+        despachador = getattr(request.app.state, "notificaciones", None)
+        return {
+            "status": "ok" if db == "ok" else "degradado",
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            "db": db,
+            "alembic_revision": revision,
+            "mqtt": {
+                "habilitado": tarea_mqtt is not None,
+                "tarea_activa": tarea_mqtt is not None and not tarea_mqtt.done(),
+                "conectado": ESTADO_CONEXION.conectado,
+                "desde": ESTADO_CONEXION.desde.isoformat() if ESTADO_CONEXION.desde else None,
+            },
+            "notificaciones": {
+                "worker_activo": despachador is not None and despachador.activo,
+                "cola_pendiente": despachador.pendientes if despachador is not None else 0,
+            },
+        }
 
     return app
 

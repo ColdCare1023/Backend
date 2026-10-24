@@ -3,6 +3,8 @@ import contextlib
 import logging
 import ssl
 from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass
+from datetime import datetime, timezone
 
 import aiomqtt
 
@@ -27,6 +29,25 @@ RECONEXION_ESPERA_MAXIMA_SEGUNDOS = 60.0
 # paquete, no que la base de datos lo persistió. Sin acceso al cliente aquí,
 # el manejador no tendría forma de publicar ese acuse lógico de aplicación.
 MensajeHandler = Callable[[aiomqtt.Client, aiomqtt.Message], Awaitable[None]]
+
+
+@dataclass
+class EstadoConexionMQTT:
+    """HU-56: estado observable de la ingesta para `/health/detalle`. La tarea
+    consumidora puede estar viva y aun así desconectada (reintentando), que es
+    justo lo que un operador necesita distinguir."""
+
+    conectado: bool = False
+    desde: datetime | None = None
+
+    def marcar(self, conectado: bool) -> None:
+        if conectado != self.conectado or self.desde is None:
+            self.conectado = conectado
+            self.desde = datetime.now(tz=timezone.utc)
+
+
+# Un solo proceso por diseño (README, «Topología»): un estado de módulo basta.
+ESTADO_CONEXION = EstadoConexionMQTT()
 
 
 def build_ssl_context(tls_enabled: bool, ca_file: str = "") -> ssl.SSLContext | None:
@@ -58,6 +79,13 @@ def build_client(settings: Settings) -> aiomqtt.Client:
         identifier=settings.mqtt_client_id,
         tls_context=build_ssl_context(settings.mqtt_tls_enabled, settings.mqtt_ca_file),
         keepalive=60,
+        # HU-13 criterio 5 / HU-12: sesión PERSISTENTE. Con sesión limpia (el
+        # valor por defecto) el broker descarta la suscripción al caer el
+        # backend, y un LWT —o lecturas QoS 1— publicados mientras tanto se
+        # pierden: el nodo apagado seguía figurando «online» (probado con el
+        # nodo real el 8-oct-2026). Exige `client_id` fijo y una sola instancia
+        # (README, «Topología»).
+        clean_session=False,
     )
 
 
@@ -88,7 +116,11 @@ async def _sesion_una_vez(settings: Settings, manejador: MensajeHandler) -> None
         await client.subscribe(TOPIC_LECTURAS, qos=1)
         await client.subscribe(TOPIC_EVENTOS, qos=1)
         logger.info("Conectado al broker MQTT %s:%s", settings.mqtt_host, settings.mqtt_port)
-        await consumir_mensajes(client, manejador)
+        ESTADO_CONEXION.marcar(True)
+        try:
+            await consumir_mensajes(client, manejador)
+        finally:
+            ESTADO_CONEXION.marcar(False)
 
 
 async def consumir_con_reconexion(settings: Settings, manejador: MensajeHandler) -> None:

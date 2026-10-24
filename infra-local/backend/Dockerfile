@@ -18,5 +18,10 @@ EXPOSE 8000
 # definirla con la red del proxy inverso, nunca "*" si el proxy no reemplaza
 # la cabecera X-Forwarded-For que envía el cliente.
 # BE-022: las migraciones son un paso aparte (servicio `migraciones` en
-# docker-compose), no parte del arranque de cada réplica.
-CMD ["uvicorn", "src.interface.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+# docker-compose; `preDeployCommand` en railway.json), no parte del arranque
+# de cada réplica.
+# HU-56: Railway asigna el puerto en $PORT (8000 en local). `exec` deja a
+# uvicorn como PID 1 para que reciba el SIGTERM del redespliegue, y un solo
+# worker por diseño: SSE, cola de notificaciones y consumidor MQTT con
+# client_id fijo viven en el proceso (README, «Topología»).
+CMD ["sh", "-c", "exec uvicorn src.interface.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --proxy-headers"]

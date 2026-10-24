@@ -29,6 +29,8 @@ def _to_entity(model: ThermalAlertModel) -> AlertaTermica:
         estado=EstadoAlerta(model.estado),
         reconocida_en=model.reconocida_en,
         atendida_en=model.atendida_en,
+        notificada_en=model.notificada_en,
+        notificacion_intentos=model.notificacion_intentos or 0,
     )
 
 
@@ -126,6 +128,43 @@ class SQLAlchemyAlertaRepository(IAlertaRepository):
         result = await self._session.execute(stmt)
         model = result.scalar_one_or_none()
         return _to_entity(model) if model else None
+
+    async def marcar_notificada(self, alerta_id: UUID, momento: datetime) -> bool:
+        """HU-53: marca atómica; False si otro envío ya la había marcado."""
+        resultado = await self._session.execute(
+            update(ThermalAlertModel)
+            .where(ThermalAlertModel.id == alerta_id, ThermalAlertModel.notificada_en.is_(None))
+            .values(notificada_en=momento)
+        )
+        await self._session.flush()
+        return resultado.rowcount == 1
+
+    async def registrar_intento_fallido(self, alerta_id: UUID) -> int:
+        model = await self._session.get(ThermalAlertModel, alerta_id)
+        if model is None:
+            return 0
+        model.notificacion_intentos = (model.notificacion_intentos or 0) + 1
+        await self._session.flush()
+        return model.notificacion_intentos
+
+    async def listar_pendientes_de_notificar(
+        self, desde: datetime, max_intentos: int
+    ) -> list[AlertaTermica]:
+        """Episodios críticos abiertos, recientes y aún sin aviso: lo que pudo
+        quedar en la cola en memoria al reiniciarse el backend."""
+        stmt = (
+            select(ThermalAlertModel)
+            .where(
+                ThermalAlertModel.nivel_riesgo == NivelRiesgo.EXCURSION_CRITICA.value,
+                ThermalAlertModel.episodio_abierto == 1,
+                ThermalAlertModel.notificada_en.is_(None),
+                ThermalAlertModel.notificacion_intentos < max_intentos,
+                ThermalAlertModel.ultima_actualizacion >= desde,
+            )
+            .order_by(ThermalAlertModel.created_at.asc())
+        )
+        result = await self._session.execute(stmt)
+        return [_to_entity(m) for m in result.scalars().all()]
 
     async def obtener_ultimo_cerrado(
         self, device_id: str, nivel_riesgo: NivelRiesgo

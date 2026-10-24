@@ -49,6 +49,9 @@ class RegistrarAccionCorrectivaUseCase:
         await self._registrar_hash.execute(
             tipo_evento="ACCION_CORRECTIVA",
             payload={
+                # HU-28: identidad de la acción en la evidencia encadenada, para
+                # que una rectificación pueda citar el eslabón exacto que corrige.
+                "accion_id": str(accion_creada.id),
                 "alert_id": str(alert_id),
                 "usuario_id": str(usuario_id),
                 "descripcion": descripcion,
@@ -62,11 +65,19 @@ class RegistrarAccionCorrectivaUseCase:
 class CorregirAccionCorrectivaUseCase:
     """HU-28: corregir una justificación previamente registrada crea un
     NUEVO evento que referencia a la acción anterior, en vez de sobrescribir
-    su contenido — la original permanece intacta y auditable.
+    su contenido — la original permanece intacta y auditable (en PostgreSQL lo
+    garantiza además el trigger append-only de corrective_actions).
 
-    BE-020: la rectificación sustituye a la justificación vigente en la
-    cronología de la alerta, así que solo puede hacerla su autor o el
-    farmacéutico (responsable técnico de la cadena de frío)."""
+    Reglas:
+    - BE-020: la rectificación sustituye a la justificación vigente en la
+      cronología de la alerta, así que solo puede hacerla su autor o el
+      farmacéutico (responsable técnico de la cadena de frío) → 403.
+    - Solo se rectifica la acción VIGENTE (la última de su línea): rectificar
+      una que ya tiene rectificación bifurcaría la historia → DomainError (409).
+    - El eslabón ACCION_CORRECTIVA_RECTIFICADA cita el `hash_actual` del
+      eslabón de la acción corregida: el vínculo queda probado
+      criptográficamente, no solo por un id en una tabla.
+    """
 
     def __init__(
         self,
@@ -76,10 +87,16 @@ class CorregirAccionCorrectivaUseCase:
     ) -> None:
         self._accion_repository = accion_repository
         self._alerta_repository = alerta_repository
+        self._trazabilidad_repository = trazabilidad_repository
         self._registrar_hash = RegistrarHashEncadenadoUseCase(trazabilidad_repository)
 
     async def execute(
-        self, accion_anterior_id: UUID, usuario_id: UUID, nueva_descripcion: str, rol_actor: Rol
+        self,
+        accion_anterior_id: UUID,
+        usuario_id: UUID,
+        nueva_descripcion: str,
+        motivo_rectificacion: str,
+        rol_actor: Rol,
     ) -> AccionCorrectiva:
         anterior = await self._accion_repository.obtener_por_id(accion_anterior_id)
         if anterior is None:
@@ -89,13 +106,30 @@ class CorregirAccionCorrectivaUseCase:
                 "Solo el autor de la acción o el farmacéutico responsable puede rectificarla"
             )
 
+        linea = await self._accion_repository.listar_por_alerta(anterior.alert_id)
+        if any(a.corrige_accion_id == accion_anterior_id for a in linea):
+            raise DomainError(
+                "La acción ya fue rectificada: solo se puede rectificar la versión vigente."
+            )
+
         rectificacion = AccionCorrectiva(
             alert_id=anterior.alert_id,
             usuario_id=usuario_id,
             descripcion=nueva_descripcion,
             corrige_accion_id=accion_anterior_id,
+            motivo_rectificacion=motivo_rectificacion,
         )
         creada = await self._accion_repository.agregar(rectificacion)
+
+        # Eslabón de la acción corregida: una original se registró como
+        # ACCION_CORRECTIVA; una rectificación previa, como _RECTIFICADA. Las
+        # acciones anteriores a HU-28 no llevan `accion_id` en su payload: el
+        # vínculo queda en null y se deja constancia de por qué.
+        eslabon = await self._trazabilidad_repository.buscar_por_payload(
+            "ACCION_CORRECTIVA_RECTIFICADA" if anterior.corrige_accion_id else "ACCION_CORRECTIVA",
+            "accion_id",
+            str(accion_anterior_id),
+        )
 
         # HU-25/HU-28: se encadena en la cadena DEL DISPOSITIVO de la alerta
         # original — es lo que permite a un auditor reconstruir el ciclo
@@ -105,10 +139,14 @@ class CorregirAccionCorrectivaUseCase:
         await self._registrar_hash.execute(
             tipo_evento="ACCION_CORRECTIVA_RECTIFICADA",
             payload={
+                "accion_id": str(creada.id),
                 "alert_id": str(anterior.alert_id),
                 "usuario_id": str(usuario_id),
                 "descripcion": nueva_descripcion,
                 "corrige_accion_id": str(accion_anterior_id),
+                "motivo_rectificacion": motivo_rectificacion,
+                "hash_registro_corregido": eslabon.hash_actual if eslabon else None,
+                **({} if eslabon else {"vinculo_hash": "accion_anterior_a_hu28_sin_accion_id"}),
             },
             usuario_id=usuario_id,
             device_id=alerta.device_id if alerta is not None else None,

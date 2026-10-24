@@ -25,6 +25,7 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
 )
 from src.infrastructure.database.repositories.usuario_repository import SQLAlchemyUsuarioRepository
 from src.interface.api.deps import DbSessionDep, require_roles
+from src.interface.api.mappers import nombre_visible
 from src.interface.api.schemas import (
     CambiarRolUsuarioRequest,
     DesactivarUsuarioRequest,
@@ -33,14 +34,19 @@ from src.interface.api.schemas import (
     UsuarioResponse,
 )
 
+EMAIL_ANONIMIZADO = "—"
+
 router = APIRouter(prefix="/api/usuarios", tags=["usuarios"])
 
 
 def _to_response(usuario) -> UsuarioResponse:
+    # HU-45 (D7): un usuario desactivado y anonimizado no se identifica en la
+    # interfaz; su historial auditable sigue intacto en la base de datos.
+    anonimizado = bool(getattr(usuario, "anonymized_for_gdpr", False))
     return UsuarioResponse(
         id=usuario.id,
-        nombre=usuario.nombre,
-        email=usuario.email,
+        nombre=nombre_visible(usuario),
+        email=EMAIL_ANONIMIZADO if anonimizado else usuario.email,
         rol=usuario.rol,
         is_active=usuario.is_active,
         motivo_desactivacion=usuario.motivo_desactivacion,
@@ -70,6 +76,7 @@ async def crear_usuario(
         usuario_id=admin.id,
         accion="CREAR_USUARIO",
         recurso=f"usuarios/{usuario.id}",
+        # Ley 29733: audit_logs es inmutable; nunca el correo completo.
         detalle={"email": usuario.email, "rol": usuario.rol.value},
         ip_origen=request.client.host if request.client else None,
     )
