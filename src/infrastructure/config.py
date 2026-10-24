@@ -3,7 +3,7 @@ import warnings
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _SECRETO_POR_DEFECTO = "clave_secreta_larga_y_aleatoria_cambiar_en_produccion"
@@ -216,6 +216,11 @@ class Settings(BaseSettings):
     # cerrado y reabierto dentro de esta ventana se trata como continuación
     # del mismo episodio en vez de crear uno nuevo (evita flapping).
     alerta_ventana_normalizacion_minutos: int = 15
+
+    # HU-07: antigüedad máxima de una lectura del nodo (reenvío del buffer
+    # LittleFS tras un corte). Más vieja que esto va a cuarentena como
+    # `timestamp_demasiado_antiguo`. 168 h = 7 días.
+    lectura_antiguedad_max_horas: int = Field(default=168, ge=1, le=24 * 90)
 
     # Modelo preventivo temporal (docs/ml/06_BACKEND_INTEGRATION.md).
     # desactivado: el flujo de lecturas es exactamente el anterior.
