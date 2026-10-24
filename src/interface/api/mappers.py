@@ -4,6 +4,7 @@ from numbers import Real
 from src.domain.entities.alerta_termica import AlertaTermica
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.entities.registro_trazabilidad import RegistroTrazabilidad
+from src.domain.entities.usuario import Usuario
 from src.domain.value_objects.rol import Rol
 from src.interface.api.schemas import AlertaResponse, LecturaResponse, TrazabilidadResponse
 
@@ -74,8 +75,23 @@ def lectura_to_response(lectura: LecturaTermica) -> LecturaResponse:
     )
 
 
-def alerta_to_response(alerta: AlertaTermica) -> AlertaResponse:
+NOMBRE_USUARIO_ANONIMIZADO = "Usuario desactivado"
+
+
+def nombre_visible(usuario: Usuario | None) -> str | None:
+    """D7 (HU-28/HU-41): nombre que la interfaz puede mostrar de un usuario.
+    Uno desactivado y anonimizado (HU-45, Ley 29733) no se identifica, aunque su
+    historial auditable siga intacto."""
+    if usuario is None:
+        return None
+    if usuario.anonymized_for_gdpr:
+        return NOMBRE_USUARIO_ANONIMIZADO
+    return usuario.nombre
+
+
+def alerta_to_response(alerta: AlertaTermica, revisada_por_nombre: str | None = None) -> AlertaResponse:
     return AlertaResponse(
+        revisada_por_nombre=revisada_por_nombre,
         id=alerta.id,
         reading_id=alerta.reading_id,
         device_id=alerta.device_id,

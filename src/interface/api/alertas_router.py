@@ -12,6 +12,7 @@ from src.application.use_cases.registrar_accion_correctiva import (
     CorregirAccionCorrectivaUseCase,
     RegistrarAccionCorrectivaUseCase,
 )
+from src.domain.entities.accion_correctiva import AccionCorrectiva
 from src.domain.exceptions import DomainError, PermisoDenegadoError, RecursoNoEncontradoError
 from src.domain.value_objects.device_id import PATRON_DEVICE_ID
 from src.domain.value_objects.rol import Rol
@@ -23,8 +24,9 @@ from src.infrastructure.database.repositories.audit_log_repository import SQLAlc
 from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
+from src.infrastructure.database.repositories.usuario_repository import SQLAlchemyUsuarioRepository
 from src.interface.api.deps import DbSessionDep, require_roles
-from src.interface.api.mappers import alerta_to_response
+from src.interface.api.mappers import alerta_to_response, nombre_visible
 from src.interface.api.schemas import (
     AccionCorrectivaCreateRequest,
     AccionCorrectivaRectificarRequest,
@@ -33,6 +35,32 @@ from src.interface.api.schemas import (
 )
 
 router = APIRouter(prefix="/api/alertas", tags=["alertas"])
+
+
+async def _nombres(session, ids) -> dict[UUID, str | None]:
+    """D7: el frontend no resuelve UUID (/api/usuarios es solo del admin)."""
+    repositorio = SQLAlchemyUsuarioRepository(session)
+    return {i: nombre_visible(await repositorio.obtener_por_id(i)) for i in set(ids) if i is not None}
+
+
+def _accion_response(
+    accion: AccionCorrectiva,
+    nombres: dict[UUID, str | None],
+    rectificada_por: dict[UUID, UUID] | None = None,
+) -> AccionCorrectivaResponse:
+    rectificada_por_id = (rectificada_por or {}).get(accion.id)
+    return AccionCorrectivaResponse(
+        id=accion.id,
+        alert_id=accion.alert_id,
+        usuario_id=accion.usuario_id,
+        usuario_nombre=nombres.get(accion.usuario_id),
+        descripcion=accion.descripcion,
+        created_at=accion.created_at,
+        corrige_accion_id=accion.corrige_accion_id,
+        motivo_rectificacion=accion.motivo_rectificacion,
+        rectificada_por_id=rectificada_por_id,
+        vigente=rectificada_por_id is None,
+    )
 
 
 @router.get("", response_model=list[AlertaResponse])
@@ -50,7 +78,8 @@ async def listar_alertas(
     alertas = await use_case.execute(
         device_id=device_id, revisada=revisada, estado=estado, limite=limite, offset=offset
     )
-    return [alerta_to_response(a) for a in alertas]
+    nombres = await _nombres(session, (a.revisada_por for a in alertas))
+    return [alerta_to_response(a, nombres.get(a.revisada_por)) for a in alertas]
 
 
 @router.patch("/{alerta_id}/revisar", response_model=AlertaResponse)
@@ -84,7 +113,7 @@ async def revisar_alerta(
         device_id=alerta.device_id,
     )
     await session.commit()
-    return alerta_to_response(alerta)
+    return alerta_to_response(alerta, nombre_visible(usuario))
 
 
 @router.get(
@@ -106,17 +135,10 @@ async def listar_acciones_correctivas(
         acciones = await use_case.execute(alerta_id)
     except RecursoNoEncontradoError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return [
-        AccionCorrectivaResponse(
-            id=a.id,
-            alert_id=a.alert_id,
-            usuario_id=a.usuario_id,
-            descripcion=a.descripcion,
-            created_at=a.created_at,
-            corrige_accion_id=a.corrige_accion_id,
-        )
-        for a in acciones
-    ]
+    # HU-28: qué acción rectificó a cuál; la que no fue rectificada es la vigente.
+    rectificada_por = {a.corrige_accion_id: a.id for a in acciones if a.corrige_accion_id is not None}
+    nombres = await _nombres(session, (a.usuario_id for a in acciones))
+    return [_accion_response(a, nombres, rectificada_por) for a in acciones]
 
 
 @router.post(
@@ -154,20 +176,16 @@ async def registrar_accion_correctiva(
     ).execute(
         usuario_id=usuario.id,
         accion="REGISTRAR_ACCION_CORRECTIVA",
-        recurso=f"alertas/{alerta_id}/acciones-correctivas/{accion.id}",
+        # audit_logs.recurso es VARCHAR(100): ".../acciones-correctivas/<uuid>"
+        # medía 102 y en PostgreSQL toda acción correctiva fallaba con 500
+        # (SQLite, el de las pruebas, no valida longitudes).
+        recurso=f"alertas/{alerta_id}/acciones/{accion.id}",
         detalle={"descripcion": body.descripcion},
         ip_origen=request.client.host if request.client else None,
         device_id=alerta_para_auditoria.device_id if alerta_para_auditoria else None,
     )
     await session.commit()
-    return AccionCorrectivaResponse(
-        id=accion.id,
-        alert_id=accion.alert_id,
-        usuario_id=accion.usuario_id,
-        descripcion=accion.descripcion,
-        created_at=accion.created_at,
-        corrige_accion_id=accion.corrige_accion_id,
-    )
+    return _accion_response(accion, {usuario.id: nombre_visible(usuario)})
 
 
 @router.post(
@@ -183,17 +201,23 @@ async def rectificar_accion_correctiva(
     usuario=Depends(require_roles(Rol.TECNICO, Rol.FARMACEUTICO)),
 ) -> AccionCorrectivaResponse:
     """HU-28: corrige una justificación previamente registrada creando un
-    nuevo evento que referencia a la anterior, sin sobrescribirla."""
+    nuevo evento que referencia a la anterior, sin sobrescribirla. Solo la
+    versión vigente (409 si ya fue rectificada), por su autor o un
+    farmacéutico (403 en otro caso), y con motivo obligatorio (422)."""
     accion_repository = SQLAlchemyAccionCorrectivaRepository(session)
     alerta_repository = SQLAlchemyAlertaRepository(session)
     trazabilidad_repository = SQLAlchemyTrazabilidadRepository(session)
     use_case = CorregirAccionCorrectivaUseCase(accion_repository, alerta_repository, trazabilidad_repository)
     try:
-        accion = await use_case.execute(accion_id, usuario.id, body.descripcion, usuario.rol)
+        accion = await use_case.execute(
+            accion_id, usuario.id, body.descripcion, body.motivo_rectificacion, usuario.rol
+        )
     except RecursoNoEncontradoError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except PermisoDenegadoError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except DomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     alerta_para_auditoria = await alerta_repository.obtener_por_id(accion.alert_id)
     auditoria_repository = SQLAlchemyAuditLogRepository(session)
@@ -201,16 +225,13 @@ async def rectificar_accion_correctiva(
         usuario_id=usuario.id,
         accion="RECTIFICAR_ACCION_CORRECTIVA",
         recurso=f"alertas/acciones-correctivas/{accion_id}/rectificar",
-        detalle={"descripcion": body.descripcion, "corrige_accion_id": str(accion_id)},
+        detalle={
+            "descripcion": body.descripcion,
+            "corrige_accion_id": str(accion_id),
+            "motivo_rectificacion": body.motivo_rectificacion,
+        },
         ip_origen=request.client.host if request.client else None,
         device_id=alerta_para_auditoria.device_id if alerta_para_auditoria else None,
     )
     await session.commit()
-    return AccionCorrectivaResponse(
-        id=accion.id,
-        alert_id=accion.alert_id,
-        usuario_id=accion.usuario_id,
-        descripcion=accion.descripcion,
-        created_at=accion.created_at,
-        corrige_accion_id=accion.corrige_accion_id,
-    )
+    return _accion_response(accion, {usuario.id: nombre_visible(usuario)})

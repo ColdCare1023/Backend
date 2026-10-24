@@ -25,3 +25,4 @@ class PermisoDenegadoError(DomainError):
 
 class RecursoNoEncontradoError(DomainError):
     """Se lanza cuando un recurso solicitado no existe."""
+

@@ -14,3 +14,5 @@ class AccionCorrectiva:
     # a esa acción anterior en vez de sobrescribirla — la anterior nunca se
     # modifica ni se borra, así se reconstruye el orden real de decisiones.
     corrige_accion_id: UUID | None = None
+    # HU-28 (P6): motivo obligatorio de una rectificación; None en la original.
+    motivo_rectificacion: str | None = None

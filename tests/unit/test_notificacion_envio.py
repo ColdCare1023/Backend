@@ -12,7 +12,15 @@ import pytest
 
 from src.infrastructure.config import Settings
 from src.infrastructure.notifications import notificacion_service as modulo
+from src.infrastructure.notifications import transporte_email
 from src.infrastructure.notifications.notificacion_service import NotificacionService
+from src.infrastructure.notifications.transporte_email import (
+    ErrorEnvioCorreo,
+    HttpApiTransporte,
+    MensajeCorreo,
+    SmtpTransporte,
+    construir_transporte,
+)
 
 
 @pytest.fixture
@@ -38,56 +46,120 @@ def _settings(**extra) -> Settings:
     return Settings(**base)
 
 
-@pytest.mark.asyncio
-async def test_un_fallo_de_smtp_no_propaga_y_queda_en_el_log(monkeypatch, errores_registrados):
-    """El servidor de correo caído no puede impedir que la excursión se
-    registre: el aviso es secundario respecto al dato."""
-    servicio = NotificacionService(
-        _settings(
-            smtp_enabled=True,
-            smtp_host="smtp.invalido.test",
-            smtp_user="u",
-            smtp_password="p",
-            smtp_from="de@x.pe",
-            smtp_to="para@x.pe",
-        )
-    )
+_MENSAJE = MensajeCorreo(
+    remitente="de@x.pe", destinatario="para@x.pe", asunto="[ColdCare] EXCURSIÓN CRÍTICA — FARM-01", cuerpo="x"
+)
 
-    def explota(mensaje):
+
+# ── HU-53: transportes del correo ────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_un_fallo_de_smtp_se_informa_al_despachador(monkeypatch):
+    """El transporte no traga el error: el despachador necesita saberlo para
+    auditar el fallo y reintentar (un aviso que no salió no pasa por enviado)."""
+    transporte = SmtpTransporte(_settings(smtp_host="smtp.invalido.test", smtp_user="u", smtp_password="p"))
+
+    def explota(correo):
         raise OSError("no se pudo conectar con el servidor SMTP")
 
-    monkeypatch.setattr(servicio, "_smtp_enviar", explota)
-
-    # No debe propagar: la excursión tiene que registrarse aunque el aviso falle.
-    await servicio._enviar_email("FARM-01", "19.9 °C", "2026-07-29T10:34:56Z")
-
-    assert any("No se pudo enviar el aviso por email" in m for m in errores_registrados)
+    monkeypatch.setattr(transporte, "_enviar_bloqueante", explota)
+    with pytest.raises(ErrorEnvioCorreo, match="OSError"):
+        await transporte.enviar(_MENSAJE)
 
 
 @pytest.mark.asyncio
-async def test_el_email_se_envia_con_el_dispositivo_y_la_temperatura(monkeypatch):
-    """El cuerpo debe permitir actuar sin abrir el sistema: qué nevera y a
-    cuánto está."""
-    servicio = NotificacionService(
-        _settings(
-            smtp_enabled=True,
-            smtp_host="smtp.x.pe",
-            smtp_user="u",
-            smtp_password="p",
-            smtp_from="de@x.pe",
-            smtp_to="para@x.pe",
-        )
+@pytest.mark.parametrize(("seguridad", "clase_esperada"), [("ssl", "SMTP_SSL"), ("starttls", "SMTP")])
+async def test_smtp_usa_ssl_o_starttls_segun_configuracion(monkeypatch, seguridad, clase_esperada):
+    usados: list[tuple[str, bool]] = []
+
+    class _Servidor:
+        def __init__(self, nombre):
+            self.nombre = nombre
+            self.tls = False
+
+        def __call__(self, *a, **k):
+            return self
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def starttls(self):
+            self.tls = True
+
+        def login(self, *a):
+            pass
+
+        def send_message(self, correo):
+            usados.append((self.nombre, self.tls))
+
+    monkeypatch.setattr(transporte_email.smtplib, "SMTP_SSL", _Servidor("SMTP_SSL"))
+    monkeypatch.setattr(transporte_email.smtplib, "SMTP", _Servidor("SMTP"))
+    transporte = SmtpTransporte(
+        _settings(smtp_host="smtp.x.pe", smtp_user="u", smtp_password="p", smtp_seguridad=seguridad)
     )
-    enviados = []
-    monkeypatch.setattr(servicio, "_smtp_enviar", lambda mensaje: enviados.append(mensaje))
+    await transporte.enviar(_MENSAJE)
+    assert usados == [(clase_esperada, seguridad == "starttls")]
 
-    await servicio._enviar_email("FARM-01-CDL", "19.9 °C", "2026-07-29T10:34:56Z")
 
-    assert len(enviados) == 1
-    cuerpo = enviados[0].get_content()
-    assert "FARM-01-CDL" in cuerpo
-    assert "19.9 °C" in cuerpo
-    assert "2–8 °C" in cuerpo
+@pytest.mark.asyncio
+async def test_api_http_envia_en_formato_resend(monkeypatch):
+    capturado = {}
+
+    class ClienteOK:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, headers=None, json=None, **k):
+            capturado.update(url=url, headers=headers, json=json)
+            return httpx.Response(200, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "AsyncClient", ClienteOK)
+    transporte = HttpApiTransporte(_settings(email_api_key="re_123"))
+    await transporte.enviar(_MENSAJE)
+
+    assert capturado["url"] == "https://api.resend.com/emails"
+    assert capturado["headers"]["Authorization"] == "Bearer re_123"
+    assert capturado["json"]["to"] == ["para@x.pe"]
+    assert capturado["json"]["subject"] == _MENSAJE.asunto
+
+
+@pytest.mark.asyncio
+async def test_api_http_con_error_del_proveedor_no_filtra_su_respuesta(monkeypatch):
+    class Cliente422:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, **k):
+            return httpx.Response(422, text="api key re_123 invalid", request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "AsyncClient", Cliente422)
+    with pytest.raises(ErrorEnvioCorreo) as error:
+        await HttpApiTransporte(_settings(email_api_key="re_123")).enviar(_MENSAJE)
+    assert str(error.value) == "HTTP 422"
+
+
+def test_sin_correo_habilitado_no_hay_transporte():
+    assert construir_transporte(_settings()) is None
+    assert isinstance(construir_transporte(_settings(email_enabled=True)), SmtpTransporte)
+    assert isinstance(
+        construir_transporte(_settings(email_enabled=True, email_transporte="http_api")), HttpApiTransporte
+    )
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,7 @@
 htmlcov
 *.db
 *.sqlite
+*.sqlite3
 infra-local/.env
 infra-local/certs
 infra-local/secrets
@@ -23,3 +24,12 @@ infra-local/emqx/api_keys.txt
 # Datasets externos y derivados del entrenamiento offline: no van en la imagen
 # (los modelos registrados sí, en src/infrastructure/ai/models/preventivo/).
 data/
+# HU-56: lo que la API no usa en ejecución.
+tests
+docs
+contrato
+banco_mqtt_local
+simulacion_excursiones
+# Solo random_forest_termico.pkl se carga del modelo legado; las demás
+# versiones de la raíz son artefactos de entrenamiento (≈17 MB).
+src/infrastructure/ai/models/*.joblib

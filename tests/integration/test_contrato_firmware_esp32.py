@@ -121,7 +121,8 @@ async def test_lectura_del_firmware_se_persiste_end_to_end(sesion_con_device):
     assert lecturas[0].temperatura_interna == pytest.approx(4.5)
     # HU-17: primera lectura del dispositivo, sin historial para tendencia
     # térmica -> no_clasificable en vez de imputar una tendencia de 0.0.
-    assert [tipo for _, tipo in broadcaster.publicados] == ["inferencia_omitida"]
+    # HU-13: y el nodo, que figuraba offline, pasa a online por su telemetría.
+    assert [tipo for _, tipo in broadcaster.publicados] == ["inferencia_omitida", "conectividad"]
 
 
 @pytest.mark.asyncio

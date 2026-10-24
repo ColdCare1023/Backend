@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from src.application.use_cases.clasificar_riesgo_termico import ClasificarRiesgoTermicoUseCase
-from src.application.use_cases.generar_alerta import GenerarAlertaUseCase
+from src.application.use_cases.generar_alerta import AvisoExcursion, GenerarAlertaUseCase
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.exceptions import DispositivoNoAutorizadoError, LecturaInvalidaError
@@ -14,7 +14,6 @@ from src.domain.repositories.i_trazabilidad_repository import ITrazabilidadRepos
 
 if TYPE_CHECKING:
     from src.application.use_cases.predecir_riesgo_preventivo import PredecirRiesgoPreventivoUseCase
-    from src.infrastructure.notifications.notificacion_service import NotificacionService
 
 
 class RegistrarLecturaTermicaUseCase:
@@ -38,15 +37,12 @@ class RegistrarLecturaTermicaUseCase:
         device_repository: IDeviceRepository | None = None,
         registro_dispositivos_estricto: bool = False,
         audit_log_repository: IAuditLogRepository | None = None,
-        notificacion_service: "NotificacionService | None" = None,
         ventana_normalizacion_alerta_minutos: int | None = None,
         prediccion_preventiva: "PredecirRiesgoPreventivoUseCase | None" = None,
     ) -> None:
         self._lectura_repository = lectura_repository
         self._generar_alerta = GenerarAlertaUseCase(
             alerta_repository,
-            notificacion_service,
-            device_repository=device_repository,
             **(
                 {"ventana_normalizacion_minutos": ventana_normalizacion_alerta_minutos}
                 if ventana_normalizacion_alerta_minutos is not None
@@ -61,6 +57,12 @@ class RegistrarLecturaTermicaUseCase:
         # Modelo preventivo temporal (docs/ml/06_BACKEND_INTEGRATION.md).
         # None = desactivado: el flujo es exactamente el anterior.
         self._prediccion_preventiva = prediccion_preventiva
+
+    @property
+    def avisos_pendientes(self) -> list[AvisoExcursion]:
+        """HU-53: avisos de excursión crítica decididos en esta ejecución. Quien
+        hace COMMIT los entrega al despachador DESPUÉS del commit (D2)."""
+        return self._generar_alerta.avisos_pendientes
 
     async def _autorizar_dispositivo(self, device_id: str) -> None:
         if self._device_repository is None:
@@ -239,6 +241,8 @@ class RegistrarLecturaTermicaUseCase:
                 nivel_riesgo=lectura_guardada.riesgo_efectivo,
                 timestamp=lectura_guardada.timestamp,
                 temperatura_interna=lectura_guardada.temperatura_interna,
+                received_at=lectura_guardada.received_at,
+                time_quality=lectura_guardada.time_quality,
             )
             if alerta is not None:
                 await self._registrar_hash.execute(

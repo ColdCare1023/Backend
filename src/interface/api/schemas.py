@@ -229,6 +229,8 @@ class AlertaResponse(BaseModel):
     mensaje: str
     revisada: bool
     revisada_por: UUID | None = None
+    # D7: quién reconoció la alerta, ya resuelto y anonimizado si corresponde.
+    revisada_por_nombre: str | None = None
     created_at: datetime | None = None
     # AIV-02 (fase de corrección): evidencia de episodio, no de lectura aislada.
     episodio_abierto: bool = True
@@ -247,18 +249,26 @@ class AccionCorrectivaCreateRequest(_PeticionEstricta):
 
 
 class AccionCorrectivaRectificarRequest(_PeticionEstricta):
-    """HU-28: nueva justificación que corrige la anterior."""
+    """HU-28: nueva justificación que corrige la anterior, con su motivo (P6)."""
 
     descripcion: str = Field(min_length=1, max_length=2000)
+    motivo_rectificacion: str = Field(min_length=10, max_length=500)
 
 
 class AccionCorrectivaResponse(BaseModel):
     id: UUID | None = None
     alert_id: UUID
     usuario_id: UUID
+    # D7: nombre ya resuelto ("Usuario desactivado" si fue anonimizado, HU-45).
+    usuario_nombre: str | None = None
     descripcion: str
     created_at: datetime | None = None
     corrige_accion_id: UUID | None = None
+    # HU-28: motivo de la rectificación, qué acción la rectificó a ella y si es
+    # la versión vigente (la única que puede volver a rectificarse).
+    motivo_rectificacion: str | None = None
+    rectificada_por_id: UUID | None = None
+    vigente: bool = True
 
 
 class TrazabilidadResponse(BaseModel):
@@ -339,6 +349,8 @@ class DispositivoResponse(BaseModel):
     nombre: str | None
     ubicacion: str | None
     estado_conectividad: str
+    # HU-13: desde cuándo rige `estado_conectividad` («Desconectado desde…»).
+    conectividad_cambiada_en: datetime | None = None
     activo: bool
     # BE-015: dispositivo de demostración (admite lecturas `simulated`).
     es_demo: bool = False
@@ -378,6 +390,8 @@ class DispositivoResumenResponse(BaseModel):
     nombre: str | None
     ubicacion: str | None
     estado_conectividad: str
+    # HU-13: el badge de conectividad muestra «Desconectado desde…».
+    conectividad_cambiada_en: datetime | None = None
     activo: bool
     firmware_version: str
     fecha_ultima_calibracion: date | None = None

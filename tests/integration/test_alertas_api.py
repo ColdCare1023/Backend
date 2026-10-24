@@ -149,7 +149,10 @@ async def test_listar_acciones_correctivas_devuelve_ciclo_cronologico_con_rectif
 
     client.post(
         f"/api/alertas/acciones-correctivas/{original['id']}/rectificar",
-        json={"descripcion": "Justificación corregida con el detalle completo."},
+        json={
+            "descripcion": "Justificación corregida con el detalle completo.",
+            "motivo_rectificacion": "Faltaba el detalle del traslado del lote.",
+        },
         headers=auth_header(token_tecnico),
     )
 

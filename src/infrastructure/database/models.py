@@ -50,6 +50,10 @@ class DeviceModel(Base):
     nombre: Mapped[str | None] = mapped_column(String(120), nullable=True)
     ubicacion: Mapped[str | None] = mapped_column(String(200), nullable=True)
     estado_conectividad: Mapped[str] = mapped_column(String(20), default="offline")
+    # HU-13 (migración 0026): desde cuándo rige el estado actual y con qué
+    # arranque del nodo se aplicó el último `online` (descarta LWT obsoletos).
+    conectividad_cambiada_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    conectividad_boot_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = _created_at_column()
 
     # HU-43: ciclo de vida (baja/reemplazo) sin borrar el histórico.
@@ -318,6 +322,9 @@ class ThermalAlertModel(Base):
     estado: Mapped[str] = mapped_column(String(20), nullable=False, default="pendiente")
     reconocida_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     atendida_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # HU-53: deduplicación persistente del aviso por correo (migración 0027).
+    notificada_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notificacion_intentos: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = _created_at_column()
 
     lectura: Mapped[ThermalReadingModel] = relationship(back_populates="alertas", foreign_keys=[reading_id])
@@ -335,6 +342,8 @@ class CorrectiveActionModel(Base):
     corrige_accion_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("corrective_actions.id"), nullable=True
     )
+    # HU-28 (migración 0028): por qué se rectificó. Tabla append-only en PostgreSQL.
+    motivo_rectificacion: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = _created_at_column()
 
     alerta: Mapped[ThermalAlertModel] = relationship(back_populates="acciones_correctivas")

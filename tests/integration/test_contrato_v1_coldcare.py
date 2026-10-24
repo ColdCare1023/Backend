@@ -213,7 +213,8 @@ async def test_eventos_v1_se_auditan(entorno):
             a.accion for a in (await session.execute(select(AuditLogModel))).scalars().all()
         }
     assert {"BUFFER_SATURADO", "DISPOSITIVO_OFFLINE"} <= acciones
-    assert [t for _, t in mudo.eventos] == ["buffer_saturado", "lwt_offline"]
+    # HU-13: además del evento crudo, el cambio de estado normalizado (D3).
+    assert [t for _, t in mudo.eventos] == ["buffer_saturado", "lwt_offline", "conectividad"]
 
 
 @pytest.mark.asyncio
