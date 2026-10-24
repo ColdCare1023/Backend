@@ -217,6 +217,10 @@ class Settings(BaseSettings):
     # del mismo episodio en vez de crear uno nuevo (evita flapping).
     alerta_ventana_normalizacion_minutos: int = 15
 
+    # HU-35 / HU-04 esc. 3: segundos de apertura continua a partir de los
+    # cuales el dashboard destaca la puerta abierta como prolongada.
+    puerta_umbral_prolongada_segundos: int = 60
+
     # Modelo preventivo temporal (docs/ml/06_BACKEND_INTEGRATION.md).
     # desactivado: el flujo de lecturas es exactamente el anterior.
     # sombra: predice y guarda en `predicciones_preventivas` sin afectar

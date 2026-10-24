@@ -184,6 +184,14 @@ class LecturaResponse(BaseModel):
     # distinguir una apertura de 5 s de una de 10 min para avisar del umbral.
     # None si el dispositivo no reportó el campo (firmware desactualizado).
     duracion_apertura_segundos: int | None = None
+    # HU-35: `duracion_apertura_segundos` solo cuenta dentro de la ventana de
+    # muestreo (nunca supera el intervalo). Esto es cuánto lleva abierta la
+    # puerta SIN cerrarse al capturar; None si estaba cerrada o el firmware no
+    # lo reporta.
+    apertura_continua_segundos: int | None = None
+    # HU-35: umbral configurado (PUERTA_UMBRAL_PROLONGADA_SEGUNDOS) a partir
+    # del cual la apertura en curso se destaca como prolongada.
+    umbral_puerta_abierta_segundos: int | None = None
     estado_conectividad: str
     nivel_riesgo: NivelRiesgo | None
     # Evidencia de la inferencia de IA (RNF-04, corrige hallazgo AI-07 de la
