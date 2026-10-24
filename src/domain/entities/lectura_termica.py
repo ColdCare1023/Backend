@@ -20,7 +20,14 @@ DERIVA_FUTURO_MAXIMA = timedelta(minutes=10)
 # justo el escenario donde la evidencia térmica más importa. El límite existe
 # para rechazar valores absurdos (relojes sin sincronizar, epoch 1970), no
 # para acotar el reenvío normal.
-ANTIGUEDAD_MAXIMA = timedelta(hours=48)
+#
+# HU-07: con 48 h, un corte de red de un fin de semana largo mandaba a
+# cuarentena lecturas legítimas que el nodo aún conservaba en LittleFS (505 en
+# el ensayo local tras 15 días sin backend). Por defecto se aceptan 7 días;
+# cada instancia lo ajusta con LECTURA_ANTIGUEDAD_MAX_HORAS. Lo que llega
+# tarde no pisa el estado en vivo: el dashboard muestra la lectura más
+# reciente por captura, y una excursión diferida se avisa como tal (HU-53).
+ANTIGUEDAD_MAXIMA = timedelta(days=7)
 
 # BE-001: procedencia de la lectura. La telemetría del nodo y una lectura que
 # registra una persona (por ejemplo, la de un termómetro de respaldo durante
@@ -144,7 +151,10 @@ class LecturaTermica:
 
     @staticmethod
     def es_timestamp_valido(
-        timestamp: datetime, ahora: datetime | None = None, origen: str = ORIGEN_DISPOSITIVO
+        timestamp: datetime,
+        ahora: datetime | None = None,
+        origen: str = ORIGEN_DISPOSITIVO,
+        antiguedad_maxima: timedelta | None = None,
     ) -> tuple[bool, str]:
         """B-10: verifica que el instante declarado sea plausible. Devuelve
         (válido, motivo) para que quien llame pueda auditar el motivo exacto
@@ -157,7 +167,7 @@ class LecturaTermica:
 
         manual = origen == ORIGEN_MANUAL
         deriva = DERIVA_FUTURO_MAXIMA_MANUAL if manual else DERIVA_FUTURO_MAXIMA
-        antiguedad = ANTIGUEDAD_MAXIMA_MANUAL if manual else ANTIGUEDAD_MAXIMA
+        antiguedad = ANTIGUEDAD_MAXIMA_MANUAL if manual else (antiguedad_maxima or ANTIGUEDAD_MAXIMA)
         if timestamp > ahora + deriva:
             return False, "timestamp_futuro"
         if timestamp < ahora - antiguedad:

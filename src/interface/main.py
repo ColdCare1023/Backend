@@ -549,6 +549,7 @@ async def _procesar_lectura_mqtt(
             registro_dispositivos_estricto=settings.device_registry_estricto,
             audit_log_repository=SQLAlchemyAuditLogRepository(session),
             ventana_normalizacion_alerta_minutos=settings.alerta_ventana_normalizacion_minutos,
+            antiguedad_maxima_horas=settings.lectura_antiguedad_max_horas,
             prediccion_preventiva=(
                 PredecirRiesgoPreventivoUseCase(
                     servicio_preventivo, lectura_repository, SQLAlchemyPrediccionPreventivaRepository(session)
