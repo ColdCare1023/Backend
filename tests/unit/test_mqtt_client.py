@@ -178,3 +178,36 @@ async def test_mqtt_session_cancela_la_tarea_al_salir(monkeypatch):
         assert not tarea.done()
 
     assert tarea.cancelled() or tarea.done()
+
+
+class _ClienteSuscripcion:
+    def __init__(self, respuesta) -> None:
+        self._respuesta = respuesta
+
+    async def subscribe(self, topic, qos=0):
+        return self._respuesta
+
+
+@pytest.mark.asyncio
+async def test_una_suscripcion_rechazada_por_el_broker_fuerza_la_reconexion():
+    """SUBACK 0x80: sin esta comprobación el backend quedaba conectado y sordo."""
+    with pytest.raises(aiomqtt.MqttError, match="rechazó la suscripción"):
+        await mqtt_client.suscribir_o_fallar(_ClienteSuscripcion((128,)), mqtt_client.TOPIC_LECTURAS)
+
+
+@pytest.mark.asyncio
+async def test_una_suscripcion_concedida_en_qos_1_no_falla():
+    await mqtt_client.suscribir_o_fallar(_ClienteSuscripcion((1,)), mqtt_client.TOPIC_LECTURAS)
+
+
+@pytest.mark.asyncio
+async def test_interpreta_los_reasoncode_que_devuelve_aiomqtt():
+    """aiomqtt 2.x no devuelve enteros sino ReasonCode de paho."""
+    from paho.mqtt.packettypes import PacketTypes
+    from paho.mqtt.reasoncodes import ReasonCode
+
+    concedido = [ReasonCode(PacketTypes.SUBACK, identifier=1)]
+    await mqtt_client.suscribir_o_fallar(_ClienteSuscripcion(concedido), mqtt_client.TOPIC_LECTURAS)
+    rechazado = [ReasonCode(PacketTypes.SUBACK, identifier=0x80)]
+    with pytest.raises(aiomqtt.MqttError):
+        await mqtt_client.suscribir_o_fallar(_ClienteSuscripcion(rechazado), mqtt_client.TOPIC_LECTURAS)

@@ -107,14 +107,31 @@ async def consumir_mensajes(client: aiomqtt.Client, manejador: MensajeHandler) -
             continue
 
 
+async def suscribir_o_fallar(client: aiomqtt.Client, topic: str) -> None:
+    """Suscribe en QoS 1 y exige que el broker lo conceda.
+
+    Un SUBACK con código de rechazo (>= 0x80) no lanza excepción en aiomqtt:
+    el backend quedaba conectado pero sin suscripciones, sin recibir lecturas y
+    sin ningún error visible. Pasó al reiniciar EMQX: el backend se reconectó
+    antes de que el broker cargara sus reglas de autorización y la
+    suscripción se denegó. Al fallar aquí, la reconexión con backoff vuelve a
+    intentarlo cuando el broker ya está listo.
+    """
+    concedidos = await client.subscribe(topic, qos=1)
+    # aiomqtt 2.x entrega `ReasonCode` de paho (también en MQTT 3.1.1); el
+    # código numérico está en `.value`.
+    if any(getattr(codigo, "value", codigo) >= 0x80 for codigo in concedidos):
+        raise aiomqtt.MqttError(f"El broker rechazó la suscripción a {topic} (SUBACK {list(concedidos)})")
+
+
 async def _sesion_una_vez(settings: Settings, manejador: MensajeHandler) -> None:
     """Una conexión completa: conectar, suscribirse y consumir hasta que caiga."""
     async with build_client(settings) as client:
         # QoS 1 (HU-11): el broker entrega a cada suscriptor con el menor QoS
         # entre publicación y suscripción; suscrito en QoS 0, el tramo
         # broker→backend era "como mucho una vez" aunque el nodo publique en 1.
-        await client.subscribe(TOPIC_LECTURAS, qos=1)
-        await client.subscribe(TOPIC_EVENTOS, qos=1)
+        for topic in (TOPIC_LECTURAS, TOPIC_EVENTOS):
+            await suscribir_o_fallar(client, topic)
         logger.info("Conectado al broker MQTT %s:%s", settings.mqtt_host, settings.mqtt_port)
         ESTADO_CONEXION.marcar(True)
         try:
