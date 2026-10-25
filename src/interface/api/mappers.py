@@ -4,7 +4,9 @@ from numbers import Real
 from src.domain.entities.alerta_termica import AlertaTermica
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.entities.registro_trazabilidad import RegistroTrazabilidad
+from src.domain.entities.usuario import Usuario
 from src.domain.value_objects.rol import Rol
+from src.infrastructure.config import get_settings
 from src.interface.api.schemas import AlertaResponse, LecturaResponse, TrazabilidadResponse
 
 
@@ -40,6 +42,13 @@ def _duracion_apertura(payload: dict | None) -> int | None:
     return valor if isinstance(valor, int) and not isinstance(valor, bool) else None
 
 
+def _apertura_continua(payload: dict | None) -> int | None:
+    """HU-35: segundos que la puerta lleva abierta sin cerrarse, según el
+    nodo (`door_open_streak_s` del contrato v1). None si estaba cerrada."""
+    valor = (payload or {}).get("door_open_streak_s")
+    return valor if isinstance(valor, int) and not isinstance(valor, bool) and valor > 0 else None
+
+
 def lectura_to_response(lectura: LecturaTermica) -> LecturaResponse:
     return LecturaResponse(
         id=lectura.id,
@@ -50,6 +59,10 @@ def lectura_to_response(lectura: LecturaTermica) -> LecturaResponse:
         temperatura_interna=lectura.temperatura_interna,
         apertura_refrigerador=lectura.apertura_refrigerador,
         duracion_apertura_segundos=_duracion_apertura(lectura.payload),
+        apertura_continua_segundos=_apertura_continua(lectura.payload),
+        umbral_puerta_abierta_segundos=(
+            get_settings().puerta_umbral_prolongada_segundos if lectura.apertura_refrigerador is not None else None
+        ),
         estado_conectividad=lectura.estado_conectividad,
         nivel_riesgo=lectura.nivel_riesgo,
         confianza_ia=lectura.confianza_ia,
@@ -74,8 +87,23 @@ def lectura_to_response(lectura: LecturaTermica) -> LecturaResponse:
     )
 
 
-def alerta_to_response(alerta: AlertaTermica) -> AlertaResponse:
+NOMBRE_USUARIO_ANONIMIZADO = "Usuario desactivado"
+
+
+def nombre_visible(usuario: Usuario | None) -> str | None:
+    """D7 (HU-28/HU-41): nombre que la interfaz puede mostrar de un usuario.
+    Uno desactivado y anonimizado (HU-45, Ley 29733) no se identifica, aunque su
+    historial auditable siga intacto."""
+    if usuario is None:
+        return None
+    if usuario.anonymized_for_gdpr:
+        return NOMBRE_USUARIO_ANONIMIZADO
+    return usuario.nombre
+
+
+def alerta_to_response(alerta: AlertaTermica, revisada_por_nombre: str | None = None) -> AlertaResponse:
     return AlertaResponse(
+        revisada_por_nombre=revisada_por_nombre,
         id=alerta.id,
         reading_id=alerta.reading_id,
         device_id=alerta.device_id,

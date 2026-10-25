@@ -3,7 +3,7 @@ import warnings
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _SECRETO_POR_DEFECTO = "clave_secreta_larga_y_aleatoria_cambiar_en_produccion"
@@ -20,6 +20,18 @@ _HASHES_SECRETOS_PUBLICADOS = frozenset(
 def _secreto_publicado(valor: str) -> bool:
     return hashlib.sha256(valor.encode()).hexdigest() in _HASHES_SECRETOS_PUBLICADOS
 
+
+_PREFIJOS_POSTGRES_SIN_DRIVER = ("postgres://", "postgresql://")
+
+
+def normalizar_database_url(url: str) -> str:
+    for prefijo in _PREFIJOS_POSTGRES_SIN_DRIVER:
+        if url.startswith(prefijo):
+            url = "postgresql+asyncpg://" + url[len(prefijo):]
+            break
+    if url.startswith("postgresql+asyncpg://"):
+        url = url.replace("sslmode=", "ssl=")
+    return url
 
 # RFC 7518 §3.2: la clave HMAC de HS256 debe tener al menos el tamaño de la
 # salida de la función hash (32 bytes). Con una clave más corta la firma es
@@ -39,6 +51,15 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     database_url: str = "postgresql+asyncpg://user:pass@localhost:5432/farmacia_db"
+
+    @field_validator("database_url")
+    @classmethod
+    def _normalizar_database_url(cls, valor: str) -> str:
+        """HU-56: Railway (y Heroku, Render…) entregan `postgres://` o
+        `postgresql://`, que SQLAlchemy resolvería con psycopg2 —no instalado—
+        en vez de asyncpg. asyncpg tampoco entiende `sslmode`, sino `ssl`.
+        Normalizar aquí cubre a la vez la app y Alembic (env.py lee Settings)."""
+        return normalizar_database_url(valor)
 
     jwt_secret_key: str = _SECRETO_POR_DEFECTO
     # BE-022: solo HMAC. Un valor arbitrario (p. ej. "none" o uno asimétrico
@@ -141,14 +162,34 @@ class Settings(BaseSettings):
     # contraseña (el token viaja en el fragmento `#token=`). Se envía por el
     # mismo SMTP de las alertas.
     password_reset_url: str = "http://localhost:5173/restablecer-password"
+    #
+    # HU-53: el correo tiene dos transportes. `smtp` (SSL en 465 o STARTTLS en
+    # 587) y `http_api` (proveedor transaccional por HTTPS, compatible con la
+    # API de Resend), para plataformas que restringen el SMTP saliente.
+    # `SMTP_ENABLED` se conserva como sinónimo de `EMAIL_ENABLED` para no romper
+    # despliegues que ya lo usaban.
+    email_enabled: bool = False
+    email_transporte: Literal["smtp", "http_api"] = "smtp"
+    email_from: str = ""
+    # Destinatario cuando el dispositivo no tiene `responsable_email` propio.
+    email_destino_respaldo: str = ""
+    email_api_url: str = "https://api.resend.com/emails"
+    email_api_key: str = ""
 
     smtp_enabled: bool = False
     smtp_host: str = ""
     smtp_port: int = 465
+    smtp_seguridad: Literal["ssl", "starttls"] = "ssl"
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from: str = ""
     smtp_to: str = ""
+
+    # Base del enlace a la alerta que lleva el correo (FRONTEND_URL/alertas?id=…).
+    frontend_url: str = ""
+
+    # HU-53: reintentos del aviso ante fallo del proveedor (backoff 30 s, 2 min, 5 min).
+    notificacion_max_intentos: int = 3
 
     telegram_enabled: bool = False
     telegram_bot_token: str = ""
@@ -175,6 +216,15 @@ class Settings(BaseSettings):
     # cerrado y reabierto dentro de esta ventana se trata como continuación
     # del mismo episodio en vez de crear uno nuevo (evita flapping).
     alerta_ventana_normalizacion_minutos: int = 15
+
+    # HU-07: antigüedad máxima de una lectura del nodo (reenvío del buffer
+    # LittleFS tras un corte). Más vieja que esto va a cuarentena como
+    # `timestamp_demasiado_antiguo`. 168 h = 7 días.
+    lectura_antiguedad_max_horas: int = Field(default=168, ge=1, le=24 * 90)
+
+    # HU-35 / HU-04 esc. 3: segundos de apertura continua a partir de los
+    # cuales el dashboard destaca la puerta abierta como prolongada.
+    puerta_umbral_prolongada_segundos: int = 60
 
     # Modelo preventivo temporal (docs/ml/06_BACKEND_INTEGRATION.md).
     # desactivado: el flujo de lecturas es exactamente el anterior.
@@ -203,6 +253,18 @@ class Settings(BaseSettings):
     # Solo se aceptan entornos con semántica de seguridad conocida. Un valor
     # como "prod" no debe omitir silenciosamente los controles de production.
     environment: Literal["development", "test", "production"] = "development"
+
+    @property
+    def correo_habilitado(self) -> bool:
+        return self.email_enabled or self.smtp_enabled
+
+    @property
+    def correo_remitente(self) -> str:
+        return self.email_from or self.smtp_from
+
+    @property
+    def correo_destino_respaldo(self) -> str:
+        return self.email_destino_respaldo or self.smtp_to
 
     @model_validator(mode="after")
     def _validar_longitud_clave_jwt(self) -> "Settings":
@@ -297,6 +359,30 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "IA_PREVENTIVO_MODO=activo requiere IA_PREVENTIVO_VERSION e IA_PREVENTIVO_SHA256 en producción."
                 )
+            if self.correo_habilitado:
+                if not (self.correo_remitente and self.correo_destino_respaldo):
+                    raise ValueError(
+                        "El correo (EMAIL_ENABLED/SMTP_ENABLED) requiere remitente "
+                        "(EMAIL_FROM o SMTP_FROM) y destinatario de respaldo "
+                        "(EMAIL_DESTINO_RESPALDO o SMTP_TO)."
+                    )
+                if self.email_transporte == "smtp" and not all(
+                    (self.smtp_host, self.smtp_user, self.smtp_password)
+                ):
+                    raise ValueError(
+                        "EMAIL_TRANSPORTE=smtp requiere SMTP_HOST, SMTP_USER y SMTP_PASSWORD."
+                    )
+                if self.email_transporte == "http_api" and not (
+                    self.email_api_url.startswith("https://") and self.email_api_key
+                ):
+                    raise ValueError(
+                        "EMAIL_TRANSPORTE=http_api requiere EMAIL_API_URL (https) y EMAIL_API_KEY."
+                    )
+                if not self.frontend_url.startswith("https://"):
+                    raise ValueError(
+                        "FRONTEND_URL (https) es obligatoria con el correo habilitado: "
+                        "el aviso enlaza a la alerta."
+                    )
             # HU-23: habilitar un canal de aviso sin sus credenciales dejaría
             # al sistema creyendo que notifica cuando en realidad falla en cada
             # excursión crítica — el peor modo de fallo posible aquí.

@@ -58,6 +58,31 @@ def test_timestamp_absurdamente_antiguo_se_rechaza():
     assert motivo == "timestamp_demasiado_antiguo"
 
 
+def test_corte_de_varios_dias_se_reenvia_completo():
+    """HU-07: un corte de fin de semana largo no manda a cuarentena lo que el
+    nodo aún conserva en LittleFS (antes el límite era 48 h)."""
+    valido, _ = LecturaTermica.es_timestamp_valido(AHORA - timedelta(days=5), ahora=AHORA)
+    assert valido is True
+    valido, motivo = LecturaTermica.es_timestamp_valido(AHORA - timedelta(days=8), ahora=AHORA)
+    assert (valido, motivo) == (False, "timestamp_demasiado_antiguo")
+
+
+def test_la_antiguedad_maxima_es_configurable():
+    valido, motivo = LecturaTermica.es_timestamp_valido(
+        AHORA - timedelta(hours=50), ahora=AHORA, antiguedad_maxima=timedelta(hours=48)
+    )
+    assert (valido, motivo) == (False, "timestamp_demasiado_antiguo")
+
+
+def test_la_lectura_manual_conserva_su_ventana_corta():
+    from src.domain.entities.lectura_termica import ORIGEN_MANUAL
+
+    valido, _ = LecturaTermica.es_timestamp_valido(
+        AHORA - timedelta(hours=30), ahora=AHORA, origen=ORIGEN_MANUAL, antiguedad_maxima=timedelta(days=30)
+    )
+    assert valido is False
+
+
 def test_timestamp_naive_se_interpreta_como_utc():
     """SQLite devuelve datetimes sin zona; el criterio es el mismo que usa la
     canonicalización de la cadena hash."""

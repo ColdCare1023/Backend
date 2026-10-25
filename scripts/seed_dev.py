@@ -27,6 +27,8 @@ USUARIOS_DEV = [
     ("Admin Demo", "admin@farmacia.demo.pe", "SEED_ADMIN_PASSWORD", Rol.ADMINISTRADOR),
     ("Farmaceutico Demo", "farmaceutico@farmacia.demo.pe", "SEED_FARMACEUTICO_PASSWORD", Rol.FARMACEUTICO),
     ("Tecnico Demo", "tecnico@farmacia.demo.pe", "SEED_TECNICO_PASSWORD", Rol.TECNICO),
+    # HU-41: el cuarto rol, de solo lectura, para probar la matriz completa.
+    ("Auditor Demo", "auditor@farmacia.demo.pe", "SEED_AUDITOR_PASSWORD", Rol.AUDITOR),
 ]
 
 

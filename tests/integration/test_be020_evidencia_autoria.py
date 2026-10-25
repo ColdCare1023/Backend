@@ -51,7 +51,8 @@ def _accion_de(client, token) -> dict:
 def _rectificar(client, accion_id, token):
     return client.post(
         f"/api/alertas/acciones-correctivas/{accion_id}/rectificar",
-        json={"descripcion": "Versión corregida de la justificación."},
+        json={"descripcion": "Versión corregida de la justificación.",
+              "motivo_rectificacion": "La primera versión omitía el traslado de viales."},
         headers=auth_header(token),
     )
 

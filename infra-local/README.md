@@ -11,6 +11,8 @@ cd infra-local
 docker compose --profile backend up -d --build
 docker compose exec backend python -m scripts.seed_dev   # usuarios demo (contraseñas SEED_* en .env)
 python scripts/crear_dispositivo.py FARM-01-CDL          # alta + credencial MQTT (secrets/)
+# Instalación nueva: el admin semilla aún no aceptó la privacidad (BE-014). Inicie sesión
+# una vez en el frontend o añada --aceptar-privacidad a la primera ejecución.
 python scripts/crear_dispositivo.py FARM-02-TEST
 ```
 

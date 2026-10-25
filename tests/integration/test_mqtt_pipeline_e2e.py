@@ -75,6 +75,7 @@ class _BrokerFalso:
     async def subscribe(self, topic, qos=0):
         self.suscripciones.append(topic)
         self.qos_suscripciones.append(qos)
+        return (qos,)  # QoS concedido, como el SUBACK real de aiomqtt
 
     async def publish(self, topic, payload=None, qos=0, **_kwargs):
         self.acks_publicados.append((topic, payload))
@@ -208,7 +209,8 @@ async def test_duracion_apertura_llega_al_evento_sse(entorno):
         broadcaster,
     )
 
-    assert len(broadcaster.publicados) == 1
+    # HU-13: el segundo evento es el cambio de conectividad por telemetría.
+    assert [tipo for _, tipo in broadcaster.publicados][1:] == ["conectividad"]
     evento, _tipo = broadcaster.publicados[0]
     assert evento["apertura_refrigerador"] is True
     assert evento["duracion_apertura_segundos"] == 185
@@ -445,10 +447,23 @@ def test_los_parametros_de_build_client_existen_en_la_version_instalada():
         "identifier",
         "tls_context",
         "keepalive",
+        "clean_session",
     }
 
     faltantes = usados - set(firma.parameters)
     assert not faltantes, f"aiomqtt ya no acepta: {sorted(faltantes)}"
+
+
+def test_el_backend_usa_sesion_mqtt_persistente(monkeypatch):
+    """HU-13 criterio 5: con sesión limpia, un LWT publicado con el backend
+    caído se perdía y el nodo apagado seguía «online»."""
+    from src.infrastructure.config import get_settings
+
+    capturados = {}
+    monkeypatch.setattr(mqtt_client.aiomqtt, "Client", lambda **kw: capturados.update(kw))
+    mqtt_client.build_client(get_settings())
+    assert capturados["clean_session"] is False
+    assert capturados["identifier"]  # la sesión persistente exige client_id fijo
 
 
 # ── Rechazos que deben quedar auditados ───────────────────────────────────

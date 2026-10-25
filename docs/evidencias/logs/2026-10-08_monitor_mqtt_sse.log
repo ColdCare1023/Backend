@@ -1,0 +1,110 @@
+20:44:25 [MQTT] suscrito a farmacias/+/eventos
+20:44:25 [SSE] conectado (200)
+20:45:54 [SSE] reconectando (RemoteProtocolError)
+20:46:00 [SSE] reconectando (RemoteProtocolError)
+20:46:07 [SSE] conectado (200)
+20:46:55 [MQTT] farmacias/ESP32_FARMACIA_01/eventos {"schema_version":"1.0","device_id":"ESP32_FARMACIA_01","boot_id":24,"event_type":"estado_nodo","occurred_at":"2026-10-09T01:46:56Z","time_quality":"sntp_synced","uptime_s":300,"detail":{"pendientes":0,"ocupacion_pct":0,"capacidad":30000,"perdidas_total":0,"cuarentena":0,"ultimo_seq_no":11,"rssi_dbm
+20:50:54 [SSE] alerta {"id": "52135568-d326-4438-b5a4-d572a2a7e4cc", "device_id": "FARM-02-TEST", "timestamp": "2026-10-09T01:50:53Z", "temperatura_ambiental": 21.0, "humedad_ambiental": 55.0, "temperatura_interna": 9.5, "apertura_refrigerador": false, "duracion_apertura_segundos": 0, "estado_conectividad": "online", "ni
+20:50:54 [SSE] conectividad {"device_id": "FARM-02-TEST", "estado": "online", "desde": "2026-10-09T01:50:54.141433+00:00", "boot_id": 1, "origen": "telemetria"}
+20:51:28 [SSE] alerta {"id": "6ec8dc5e-02b6-4971-a556-1d825779b901", "device_id": "FARM-11-TEST", "timestamp": "2026-10-09T01:31:28Z", "temperatura_ambiental": 21.0, "humedad_ambiental": 55.0, "temperatura_interna": 12.0, "apertura_refrigerador": false, "duracion_apertura_segundos": 0, "estado_conectividad": "online", "n
+20:51:28 [SSE] conectividad {"device_id": "FARM-11-TEST", "estado": "online", "desde": "2026-10-09T01:51:28.491869+00:00", "boot_id": 1, "origen": "telemetria"}
+20:51:42 [SSE] alerta {"id": "5daa50a3-b7ba-4492-9820-9c0c027585d1", "device_id": "FARM-12-TEST", "timestamp": "2026-10-09T01:51:42Z", "temperatura_ambiental": 21.0, "humedad_ambiental": 55.0, "temperatura_interna": 11.0, "apertura_refrigerador": false, "duracion_apertura_segundos": 0, "estado_conectividad": "online", "n
+20:51:42 [SSE] conectividad {"device_id": "FARM-12-TEST", "estado": "online", "desde": "2026-10-09T01:51:42.872732+00:00", "boot_id": 1, "origen": "telemetria"}
+20:51:55 [MQTT] farmacias/ESP32_FARMACIA_01/eventos {"schema_version":"1.0","device_id":"ESP32_FARMACIA_01","boot_id":24,"event_type":"estado_nodo","occurred_at":"2026-10-09T01:51:56Z","time_quality":"sntp_synced","uptime_s":600,"detail":{"pendientes":0,"ocupacion_pct":0,"capacidad":30000,"perdidas_total":0,"cuarentena":0,"ultimo_seq_no":21,"rssi_dbm
+20:56:29 [QA] usuario confirma corte de alimentación (C2)
+20:57:29 [MQTT] farmacias/ESP32_FARMACIA_01/eventos {"schema_version":"1.0","device_id":"ESP32_FARMACIA_01","boot_id":24,"event_type":"lwt_offline"}
+20:57:29 [SSE] lwt_offline {"device_id": "ESP32_FARMACIA_01", "tipo_evento": "lwt_offline", "timestamp": "2026-10-09T01:57:29.707725+00:00", "detalle": null, "boot_id": 24}
+20:57:29 [SSE] conectividad {"device_id": "ESP32_FARMACIA_01", "estado": "offline", "desde": "2026-10-09T01:57:29.719615+00:00", "boot_id": 24, "origen": "lwt"}
+20:57:50 [MQTT] farmacias/ESP32_FARMACIA_01/eventos {"schema_version":"1.0","device_id":"ESP32_FARMACIA_01","boot_id":25,"event_type":"online","occurred_at":null,"time_quality":"unsynced","uptime_s":5,"detail":{"rssi_dbm":-41,"pendientes":1,"firmware_version":"v1.2.0"}}
+20:57:50 [MQTT] farmacias/ESP32_FARMACIA_01/eventos {"schema_version":"1.0","device_id":"ESP32_FARMACIA_01","boot_id":25,"event_type":"arranque","occurred_at":null,"time_quality":"unsynced","uptime_s":0,"detail":{"reset_reason":"POWERON","firmware_version":"v1.2.0","intervalo_s":30,"mc38_instalado":true,"sensado_energia":false,"fs_formateado":false,"
+20:57:50 [SSE] online {"device_id": "ESP32_FARMACIA_01", "tipo_evento": "online", "timestamp": "2026-10-09T01:57:50.483518+00:00", "detalle": {"rssi_dbm": -41, "pendientes": 1, "firmware_version": "v1.2.0"}, "boot_id": 25}
+20:57:50 [SSE] conectividad {"device_id": "ESP32_FARMACIA_01", "estado": "online", "desde": "2026-10-09T01:57:50.490825+00:00", "boot_id": 25, "origen": "online"}
+20:57:50 [SSE] arranque {"device_id": "ESP32_FARMACIA_01", "tipo_evento": "arranque", "timestamp": "2026-10-09T01:57:50.510567+00:00", "detalle": {"reset_reason": "POWERON", "firmware_version": "v1.2.0", "intervalo_s": 30, "mc38_instalado": true, "sensado_energia": false, "fs_formateado": false, "pendientes_recuperados": 0
+20:57:53 [QA] usuario confirma reconexión (C3)
+21:00:23 [QA] C3b: inyección LWT obsoleto boot 24
+21:00:24 [MQTT] farmacias/ESP32_FARMACIA_01/eventos {"schema_version": "1.0", "device_id": "ESP32_FARMACIA_01", "boot_id": 24, "event_type": "lwt_offline"}
+21:00:28 [QA] C4: inyección LWT tardío mismo boot 25
+21:00:28 [MQTT] farmacias/ESP32_FARMACIA_01/eventos {"schema_version": "1.0", "device_id": "ESP32_FARMACIA_01", "boot_id": 25, "event_type": "lwt_offline"}
+21:00:28 [SSE] lwt_offline {"device_id": "ESP32_FARMACIA_01", "tipo_evento": "lwt_offline", "timestamp": "2026-10-09T02:00:28.781572+00:00", "detalle": null, "boot_id": 25}
+21:00:28 [SSE] conectividad {"device_id": "ESP32_FARMACIA_01", "estado": "offline", "desde": "2026-10-09T02:00:28.783080+00:00", "boot_id": 25, "origen": "lwt"}
+21:00:45 [SSE] conectividad {"device_id": "ESP32_FARMACIA_01", "estado": "online", "desde": "2026-10-09T02:00:45.857919+00:00", "boot_id": 25, "origen": "telemetria"}
+21:02:10 [SSE] reconectando (RemoteProtocolError)
+21:02:11 [QA] C5: backend detenido
+21:02:17 [SSE] reconectando (ConnectError)
+21:02:25 [SSE] reconectando (ConnectError)
+21:02:32 [SSE] reconectando (ConnectError)
+21:02:40 [SSE] reconectando (ConnectError)
+21:02:48 [SSE] reconectando (ConnectError)
+21:02:48 [MQTT] farmacias/ESP32_FARMACIA_01/eventos {"schema_version":"1.0","device_id":"ESP32_FARMACIA_01","boot_id":25,"event_type":"estado_nodo","occurred_at":"2026-10-09T02:02:46Z","time_quality":"sntp_synced","uptime_s":300,"detail":{"pendientes":1,"ocupacion_pct":0,"capacidad":30000,"perdidas_total":0,"cuarentena":0,"ultimo_seq_no":11,"rssi_dbm
+21:02:55 [SSE] reconectando (ConnectError)
+21:03:03 [SSE] reconectando (ConnectError)
+21:03:10 [SSE] reconectando (ConnectError)
+21:03:18 [SSE] reconectando (ConnectError)
+21:03:25 [SSE] reconectando (ConnectError)
+21:03:33 [SSE] reconectando (ConnectError)
+21:03:33 [QA] C5: usuario confirma corte
+21:03:40 [SSE] reconectando (ConnectError)
+21:03:48 [SSE] reconectando (ConnectError)
+21:03:55 [SSE] reconectando (ConnectError)
+21:04:03 [SSE] reconectando (ConnectError)
+21:04:10 [SSE] reconectando (ConnectError)
+21:04:18 [SSE] reconectando (ConnectError)
+21:04:25 [SSE] reconectando (ConnectError)
+21:04:33 [SSE] reconectando (ConnectError)
+21:04:40 [SSE] reconectando (ConnectError)
+21:04:47 [SSE] reconectando (ConnectError)
+21:04:50 [MQTT] farmacias/ESP32_FARMACIA_01/eventos {"schema_version":"1.0","device_id":"ESP32_FARMACIA_01","boot_id":25,"event_type":"lwt_offline"}
+21:04:52 [QA] C5: backend encendido
+21:04:53 [SSE] reconectando (RemoteProtocolError)
+21:04:59 [SSE] conectado (200)
+21:06:50 [SSE] reconectando (RemoteProtocolError)
+21:06:56 [SSE] reconectando (RemoteProtocolError)
+21:07:02 [SSE] conectado (200)
+21:07:49 [MQTT] farmacias/ESP32_FARMACIA_01/eventos {"schema_version":"1.0","device_id":"ESP32_FARMACIA_01","boot_id":26,"event_type":"online","occurred_at":null,"time_quality":"unsynced","uptime_s":5,"detail":{"rssi_dbm":-37,"pendientes":4,"firmware_version":"v1.2.0"}}
+21:07:49 [MQTT] farmacias/ESP32_FARMACIA_01/eventos {"schema_version":"1.0","device_id":"ESP32_FARMACIA_01","boot_id":26,"event_type":"arranque","occurred_at":null,"time_quality":"unsynced","uptime_s":0,"detail":{"reset_reason":"POWERON","firmware_version":"v1.2.0","intervalo_s":30,"mc38_instalado":true,"sensado_energia":false,"fs_formateado":false,"
+21:07:49 [SSE] online {"device_id": "ESP32_FARMACIA_01", "tipo_evento": "online", "timestamp": "2026-10-09T02:07:49.419984+00:00", "detalle": {"rssi_dbm": -37, "pendientes": 4, "firmware_version": "v1.2.0"}, "boot_id": 26}
+21:07:49 [SSE] conectividad {"device_id": "ESP32_FARMACIA_01", "estado": "online", "desde": "2026-10-09T02:07:49.429635+00:00", "boot_id": 26, "origen": "online"}
+21:07:49 [SSE] arranque {"device_id": "ESP32_FARMACIA_01", "tipo_evento": "arranque", "timestamp": "2026-10-09T02:07:49.444827+00:00", "detalle": {"reset_reason": "POWERON", "firmware_version": "v1.2.0", "intervalo_s": 30, "mc38_instalado": true, "sensado_energia": false, "fs_formateado": false, "pendientes_recuperados": 3
+21:07:53 [QA] C5bis: nodo reconectado
+21:09:04 [SSE] reconectando (RemoteProtocolError)
+21:09:05 [QA] C5bis: backend detenido
+21:09:12 [SSE] reconectando (ConnectError)
+21:09:20 [SSE] reconectando (ConnectError)
+21:09:27 [SSE] reconectando (ConnectError)
+21:09:34 [SSE] reconectando (ConnectError)
+21:09:42 [SSE] reconectando (ConnectError)
+21:09:49 [SSE] reconectando (ConnectError)
+21:09:57 [SSE] reconectando (ConnectError)
+21:10:04 [SSE] reconectando (ConnectError)
+21:10:12 [SSE] reconectando (ConnectError)
+21:10:19 [SSE] reconectando (ConnectError)
+21:10:27 [SSE] reconectando (ConnectError)
+21:10:35 [SSE] reconectando (ConnectError)
+21:10:42 [SSE] reconectando (ConnectError)
+21:10:50 [SSE] reconectando (ConnectError)
+21:10:57 [SSE] reconectando (ConnectError)
+21:11:02 [QA] C5bis: usuario confirma corte
+21:11:04 [SSE] reconectando (ConnectError)
+21:11:12 [SSE] reconectando (ConnectError)
+21:11:19 [SSE] reconectando (ConnectError)
+21:11:27 [SSE] reconectando (ConnectError)
+21:11:34 [SSE] reconectando (ConnectError)
+21:11:42 [SSE] reconectando (ConnectError)
+21:11:49 [SSE] reconectando (ConnectError)
+21:11:56 [SSE] reconectando (ConnectError)
+21:12:04 [SSE] reconectando (ConnectError)
+21:12:11 [SSE] reconectando (ConnectError)
+21:12:19 [SSE] reconectando (ConnectError)
+21:12:19 [MQTT] farmacias/ESP32_FARMACIA_01/eventos {"schema_version":"1.0","device_id":"ESP32_FARMACIA_01","boot_id":26,"event_type":"lwt_offline"}
+21:12:21 [QA] C5bis: backend encendido
+21:12:24 [SSE] reconectando (RemoteProtocolError)
+21:12:30 [SSE] conectado (200)
+21:15:01 [MQTT] farmacias/ESP32_FARMACIA_01/eventos {"schema_version":"1.0","device_id":"ESP32_FARMACIA_01","boot_id":27,"event_type":"online","occurred_at":null,"time_quality":"unsynced","uptime_s":5,"detail":{"rssi_dbm":-35,"pendientes":5,"firmware_version":"v1.2.0"}}
+21:15:01 [MQTT] farmacias/ESP32_FARMACIA_01/eventos {"schema_version":"1.0","device_id":"ESP32_FARMACIA_01","boot_id":27,"event_type":"arranque","occurred_at":null,"time_quality":"unsynced","uptime_s":0,"detail":{"reset_reason":"POWERON","firmware_version":"v1.2.0","intervalo_s":30,"mc38_instalado":true,"sensado_energia":false,"fs_formateado":false,"
+21:15:01 [SSE] online {"device_id": "ESP32_FARMACIA_01", "tipo_evento": "online", "timestamp": "2026-10-09T02:15:01.426400+00:00", "detalle": {"rssi_dbm": -35, "pendientes": 5, "firmware_version": "v1.2.0"}, "boot_id": 27}
+21:15:01 [SSE] conectividad {"device_id": "ESP32_FARMACIA_01", "estado": "online", "desde": "2026-10-09T02:15:01.430925+00:00", "boot_id": 27, "origen": "online"}
+21:15:01 [SSE] arranque {"device_id": "ESP32_FARMACIA_01", "tipo_evento": "arranque", "timestamp": "2026-10-09T02:15:01.452877+00:00", "detalle": {"reset_reason": "POWERON", "firmware_version": "v1.2.0", "intervalo_s": 30, "mc38_instalado": true, "sensado_energia": false, "fs_formateado": false, "pendientes_recuperados": 4
+21:15:14 [MQTT] farmacias/ESP32_FARMACIA_01/eventos {"schema_version": "1.0", "device_id": "ESP32_FARMACIA_01", "boot_id": 27, "event_type": "lwt_offline"}
+21:15:14 [SSE] lwt_offline {"device_id": "ESP32_FARMACIA_01", "tipo_evento": "lwt_offline", "timestamp": "2026-10-09T02:15:14.371828+00:00", "detalle": null, "boot_id": 27}
+21:15:14 [SSE] conectividad {"device_id": "ESP32_FARMACIA_01", "estado": "offline", "desde": "2026-10-09T02:15:14.374308+00:00", "boot_id": 27, "origen": "lwt"}
+21:15:26 [SSE] conectividad {"device_id": "ESP32_FARMACIA_01", "estado": "online", "desde": "2026-10-09T02:15:26.879078+00:00", "boot_id": 27, "origen": "telemetria"}

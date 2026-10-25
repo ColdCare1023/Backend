@@ -42,6 +42,13 @@ class ITrazabilidadRepository(ABC):
         ...
 
     @abstractmethod
+    async def buscar_por_payload(
+        self, tipo_evento: str, clave: str, valor: str
+    ) -> RegistroTrazabilidad | None:
+        """HU-28: primer eslabón de `tipo_evento` cuyo payload[clave] == valor."""
+        ...
+
+    @abstractmethod
     async def listar(
         self,
         tipo_evento: str | None = None,

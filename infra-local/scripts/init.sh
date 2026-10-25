@@ -64,7 +64,7 @@ PG_PASS=$(rand 16); JWT=$(rand 32); EMQX_DASH=$(rand 12)
 MQTT_BACKEND=$(rand 16); WEBHOOK=$(rand 32); API_KEY=$(rand 8); API_SECRET=$(rand 32)
 HMAC_TRAZA=$(rand 32)
 # BE-023: contraseñas de los usuarios demo (scripts/seed_dev.py), aleatorias.
-SEED_ADMIN=$(rand 16); SEED_FARMA=$(rand 16); SEED_TECNICO=$(rand 16)
+SEED_ADMIN=$(rand 16); SEED_FARMA=$(rand 16); SEED_TECNICO=$(rand 16); SEED_AUDITOR=$(rand 16)
 
 cat > .env <<ENV
 POSTGRES_USER=farmacia
@@ -82,6 +82,7 @@ DEVICE_REGISTRY_ESTRICTO=true
 SEED_ADMIN_PASSWORD=${SEED_ADMIN}
 SEED_FARMACEUTICO_PASSWORD=${SEED_FARMA}
 SEED_TECNICO_PASSWORD=${SEED_TECNICO}
+SEED_AUDITOR_PASSWORD=${SEED_AUDITOR}
 BROKER_IP=${IP}
 ENV
 

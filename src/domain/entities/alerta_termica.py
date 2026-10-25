@@ -35,6 +35,9 @@ class AlertaTermica:
     estado: EstadoAlerta = EstadoAlerta.PENDIENTE
     reconocida_en: datetime | None = None
     atendida_en: datetime | None = None
+    # HU-53: el episodio ya fue avisado por correo (dedup persistente).
+    notificada_en: datetime | None = None
+    notificacion_intentos: int = 0
 
     def marcar_revisada(self, usuario_id: UUID) -> None:
         self.revisada = True
