@@ -293,6 +293,11 @@ class DetalleInconsistenciaResponse(BaseModel):
     hash_esperado: str
     hash_almacenado: str
     mensaje: str
+    # HU-26 escenario 2: dónde y de qué tipo es cada discrepancia.
+    chain_id: str | None = None
+    indice: int | None = None
+    tipo_discrepancia: Literal["payload_alterado", "enlace_roto", "no_verificable"] | None = None
+    aislada: bool = False
 
 
 class VerificacionIntegridadResponse(BaseModel):
@@ -301,6 +306,14 @@ class VerificacionIntegridadResponse(BaseModel):
     primer_registro_inconsistente: int | None
     detalle_inconsistencia: DetalleInconsistenciaResponse | None = None
     registros_posteriores_afectados: int = 0
+    # HU-26: la verificación no se detiene en la primera ruptura.
+    estado: Literal["integra", "ruptura_aislada", "ruptura_detectada"] = "integra"
+    total_rupturas: int = 0
+    rupturas: list[DetalleInconsistenciaResponse] = Field(default_factory=list)
+    registros_posteriores_consistentes: int = 0
+    integra_desde: datetime | None = None
+    # HU-26 escenario 4: alcance explícito del resultado (no es certificación DIGEMID).
+    alcance: str
 
 
 class EstadoCadenaResponse(BaseModel):
@@ -324,6 +337,7 @@ class VerificacionSegmentoResponse(BaseModel):
     total_bloques_verificados: int
     registros_del_dispositivo: list[EstadoRegistroSegmentoResponse]
     primer_registro_inconsistente: UUID | None = None
+    alcance: str
 
 
 class ReporteBPAResponse(BaseModel):
