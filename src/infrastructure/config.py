@@ -222,6 +222,10 @@ class Settings(BaseSettings):
     # `timestamp_demasiado_antiguo`. 168 h = 7 días.
     lectura_antiguedad_max_horas: int = Field(default=168, ge=1, le=24 * 90)
 
+    # HU-35 / HU-04 esc. 3: segundos de apertura continua a partir de los
+    # cuales el dashboard destaca la puerta abierta como prolongada.
+    puerta_umbral_prolongada_segundos: int = 60
+
     # Modelo preventivo temporal (docs/ml/06_BACKEND_INTEGRATION.md).
     # desactivado: el flujo de lecturas es exactamente el anterior.
     # sombra: predice y guarda en `predicciones_preventivas` sin afectar
