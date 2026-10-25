@@ -64,6 +64,7 @@ async def ingestar_lectura(
         registro_dispositivos_estricto=settings.device_registry_estricto,
         audit_log_repository=SQLAlchemyAuditLogRepository(session),
         ventana_normalizacion_alerta_minutos=settings.alerta_ventana_normalizacion_minutos,
+        antiguedad_maxima_horas=settings.lectura_antiguedad_max_horas,
     )
     lectura = LecturaTermica(
         device_id=body.device_id,

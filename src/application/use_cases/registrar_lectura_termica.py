@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from src.application.use_cases.clasificar_riesgo_termico import ClasificarRiesgoTermicoUseCase
@@ -39,8 +39,10 @@ class RegistrarLecturaTermicaUseCase:
         audit_log_repository: IAuditLogRepository | None = None,
         ventana_normalizacion_alerta_minutos: int | None = None,
         prediccion_preventiva: "PredecirRiesgoPreventivoUseCase | None" = None,
+        antiguedad_maxima_horas: int | None = None,
     ) -> None:
         self._lectura_repository = lectura_repository
+        self._antiguedad_maxima = timedelta(hours=antiguedad_maxima_horas) if antiguedad_maxima_horas else None
         self._generar_alerta = GenerarAlertaUseCase(
             alerta_repository,
             **(
@@ -95,7 +97,7 @@ class RegistrarLecturaTermicaUseCase:
         # timestamps futuros permitiría insertar registros que alteran el orden
         # temporal de la evidencia térmica.
         timestamp_valido, motivo = LecturaTermica.es_timestamp_valido(
-            lectura.timestamp, origen=lectura.origen
+            lectura.timestamp, origen=lectura.origen, antiguedad_maxima=self._antiguedad_maxima
         )
         if not timestamp_valido:
             if self._audit_log_repository is not None:
