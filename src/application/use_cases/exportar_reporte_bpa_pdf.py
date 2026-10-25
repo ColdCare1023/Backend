@@ -125,6 +125,12 @@ class ExportarReporteBPAPDFUseCase:
             "total_registros": resultado.total_registros,
             "primer_registro_inconsistente": resultado.primer_registro_inconsistente,
             "registros_posteriores_afectados": resultado.registros_posteriores_afectados,
+            "estado": resultado.estado.value,
+            "total_rupturas": resultado.total_rupturas,
+            "integra_desde": (
+                resultado.integra_desde.strftime("%Y-%m-%d %H:%M UTC") if resultado.integra_desde else None
+            ),
+            "alcance": resultado.alcance,
             "verificado_en": datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
             "digest_cadena": (resultado.hash_final or "")[:16] + "…" if resultado.hash_final else "N/A",
         }

@@ -75,6 +75,7 @@ class _BrokerFalso:
     async def subscribe(self, topic, qos=0):
         self.suscripciones.append(topic)
         self.qos_suscripciones.append(qos)
+        return (qos,)  # QoS concedido, como el SUBACK real de aiomqtt
 
     async def publish(self, topic, payload=None, qos=0, **_kwargs):
         self.acks_publicados.append((topic, payload))
