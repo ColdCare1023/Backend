@@ -14,16 +14,26 @@ from src.interface.api.dispositivos_router import get_broker_admin
 from tests.conftest import auth_header
 
 DEVICE_ID = "FARM-BE003"
-SECRETO = "secreto-del-broker-para-pruebas-0123456789"
 
 
 class _Espia:
     def __init__(self) -> None:
         self.acuses: list[dict] = []
         self.expulsados: list[str] = []
+        self.aprovisionados: dict[str, str] = {}
+        self.eliminados: list[str] = []
 
     async def publish(self, topic, payload=None, qos=0, **_kwargs):
         self.acuses.append(json.loads(payload))
+
+    async def aprovisionar_credencial(self, device_id: str, token: str) -> bool:
+        self.aprovisionados[device_id] = token
+        return True
+
+    async def eliminar_credencial(self, device_id: str) -> bool:
+        self.aprovisionados.pop(device_id, None)
+        self.eliminados.append(device_id)
+        return True
 
     async def desconectar_cliente(self, client_id: str) -> bool:
         self.expulsados.append(client_id)
@@ -43,7 +53,6 @@ class _Mensaje:
 
 @pytest.fixture
 def espia(app, monkeypatch, db_session_factory):
-    monkeypatch.setenv("BROKER_WEBHOOK_SECRET", SECRETO)
     get_settings.cache_clear()
     monkeypatch.setattr(main, "_session_factory", db_session_factory)
     doble = _Espia()
@@ -69,13 +78,12 @@ def _baja(client, token_admin) -> None:
 
 async def test_baja_revoca_credencial_y_expulsa_la_sesion(client, token_admin, espia, db_session_factory):
     token = _alta_con_credencial(client, token_admin)
+    assert espia.aprovisionados[DEVICE_ID] == token  # el broker lo conoce tras el alta
     _baja(client, token_admin)
 
-    autenticacion = client.post(
-        "/api/dispositivos/autenticar", json={"device_id": DEVICE_ID, "token": token},
-        headers={"X-Broker-Auth": SECRETO},
-    )
-    assert autenticacion.json()["result"] == "deny"
+    # La baja elimina el usuario del broker (autenticación integrada) y cierra su sesión.
+    assert DEVICE_ID not in espia.aprovisionados
+    assert espia.eliminados[-1] == DEVICE_ID
     assert espia.expulsados[-1] == DEVICE_ID
     async with db_session_factory() as session:
         assert (await session.get(DeviceModel, DEVICE_ID)).mqtt_token_activo is False

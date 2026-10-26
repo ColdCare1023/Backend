@@ -773,12 +773,17 @@ async def _procesar_lectura_mqtt(
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     app.state.sse_broadcaster = SSEBroadcaster()
-    if settings.environment == "production" and settings.mqtt_enabled and not settings.broker_webhook_secret:
-        # BE-002: sin el webhook, el broker no consulta al backend y revocar o
-        # rotar una credencial de dispositivo no tiene efecto en el broker.
+    if (
+        settings.environment == "production"
+        and settings.mqtt_enabled
+        and not (settings.broker_api_url and settings.broker_api_key and settings.broker_api_secret)
+    ):
+        # BE-002: sin la API de administración del broker, las credenciales de
+        # dispositivo no se aprovisionan ni se revocan en la autenticación
+        # integrada de EMQX.
         logger.warning(
-            "BROKER_WEBHOOK_SECRET no configurado: la autenticación de dispositivos no pasa por el "
-            "backend y la revocación de credenciales no se aplica en el broker."
+            "BROKER_API_URL/BROKER_API_KEY/BROKER_API_SECRET no configurados: las credenciales de "
+            "dispositivos no se aprovisionan ni se revocan en el broker."
         )
 
     # HU-53: UNA instancia por proceso (D1) — la cola, el worker y los

@@ -1,10 +1,11 @@
 """Aprovisionamiento de dispositivos contra el backend local (BE-002).
 
 La credencial MQTT de un dispositivo la emite el backend
-(POST /api/dispositivos/{id}/credenciales/rotar) y el broker la valida a
-través del webhook /api/dispositivos/autenticar. Ningún script crea usuarios
-de dispositivo directamente en la base interna de EMQX: eso dejaría una
-credencial que el backend no puede revocar.
+(POST /api/dispositivos/{id}/credenciales/rotar) y la aprovisiona en la
+autenticación integrada de EMQX con la API de administración del broker
+(usuario = device_id, contraseña = token). Ningún script crea usuarios de
+dispositivo directamente en EMQX: eso dejaría una credencial que el backend
+no puede revocar.
 
 Credenciales del administrador: COLDCARE_ADMIN_EMAIL / COLDCARE_ADMIN_PASSWORD
 (si no están, las del usuario semilla "Admin Demo" de scripts/seed_dev.py, cuya

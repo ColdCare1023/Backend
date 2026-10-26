@@ -111,33 +111,19 @@ class Settings(BaseSettings):
     # provisionados en la tabla `devices` pueden registrar lecturas.
     device_registry_estricto: bool = True
 
-    # BE-011: secreto compartido con el broker para el webhook de
-    # autenticación de dispositivos (`POST /api/dispositivos/autenticar`).
-    # El broker lo envía en la cabecera `X-Broker-Auth`. Vacío = el webhook
-    # queda deshabilitado (fallo cerrado), nunca abierto a cualquiera.
-    broker_webhook_secret: str = ""
-
     # BE-007: clave HMAC de los eslabones de trazabilidad (v3). Fuera de la
     # base de datos: quien solo pueda escribir en PostgreSQL no puede
     # recalcular la cadena. Vacía = eslabones v2 (SHA-256 sin clave), solo
     # admitido fuera de producción.
     trazabilidad_hmac_key: str = ""
-    # BE-002: API REST de administración del broker (EMQX), para expulsar la
-    # sesión de un dispositivo al revocar o rotar su credencial. Sin estos
-    # valores la revocación solo aplica en la siguiente reconexión.
+    # BE-002: API REST de administración del broker (EMQX). Aprovisiona y
+    # elimina las credenciales de los dispositivos en la autenticación integrada
+    # del broker (usuario = device_id, contraseña = token) y expulsa su sesión
+    # al revocar o rotar. Sin estos valores el token emitido no queda
+    # aprovisionado en el broker.
     broker_api_url: str = ""
     broker_api_key: str = ""
     broker_api_secret: str = ""
-    # Vida máxima de una autenticación de dispositivo (`expire_at` en la
-    # respuesta del webhook, EMQX >= 5.8): fuerza reautenticación periódica
-    # aunque la expulsión activa falle. 0 = sin caducidad.
-    broker_auth_ttl_seconds: int = 0
-    # IOT-006: exigir certificado de cliente (TLS mutuo, CN = device_id) a
-    # TODOS los dispositivos. Aun en falso, un dispositivo que ya se conectó
-    # una vez con su certificado no vuelve a aceptarse solo con el token.
-    # Requiere un broker que pida certificado de cliente y pase su CN al
-    # webhook (`cert_common_name`).
-    broker_exigir_certificado: bool = False
 
     # Hosts permitidos en producción (mitiga ataques por header Host).
     allowed_hosts: list[str] = []
@@ -303,7 +289,6 @@ class Settings(BaseSettings):
                 for nombre, valor in (
                     ("JWT_SECRET_KEY", self.jwt_secret_key),
                     ("TRAZABILIDAD_HMAC_KEY", self.trazabilidad_hmac_key),
-                    ("BROKER_WEBHOOK_SECRET", self.broker_webhook_secret),
                 )
                 if valor and _secreto_publicado(valor)
             ]
@@ -338,8 +323,6 @@ class Settings(BaseSettings):
                 )
             if self.trazabilidad_hmac_key == self.jwt_secret_key:
                 raise ValueError("TRAZABILIDAD_HMAC_KEY no puede reutilizar JWT_SECRET_KEY.")
-            if self.broker_webhook_secret and len(self.broker_webhook_secret.encode()) < 32:
-                raise ValueError("BROKER_WEBHOOK_SECRET debe tener al menos 32 bytes en producción.")
             if self.mqtt_enabled:
                 # RNF-05: transmisión sobre TLS y credenciales fuera del código fuente.
                 if not self.mqtt_tls_enabled:

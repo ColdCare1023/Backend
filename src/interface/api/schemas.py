@@ -516,39 +516,13 @@ class CredencialDispositivoResponse(BaseModel):
     device_id: str
     token: str
     generado_en: datetime
+    # BE-002: True si el token quedó aprovisionado en la autenticación
+    # integrada del broker; False si el broker lo rechazó; None si la API del
+    # broker no está configurada (el token no sirve hasta aprovisionarlo).
+    credencial_aprovisionada: bool | None = None
     # BE-002: True si el broker cerró la sesión anterior; None si la API del
-    # broker no está configurada (la credencial vieja muere al reconectar).
+    # broker no está configurada.
     sesion_broker_cerrada: bool | None = None
-
-
-class AutenticarDispositivoRequest(BaseModel):
-    """Sin _PeticionEstricta: la llama EMQX Cloud (webhook de autenticación
-    HTTP), no un cliente de este backend con sesión."""
-
-    device_id: DeviceId
-    token: str = Field(min_length=1, max_length=200)
-    # IOT-006: CN del certificado de cliente verificado por el broker
-    # (placeholder `${cert_common_name}` de EMQX). Sin certificado, EMQX lo
-    # envía vacío o como "undefined".
-    cert_common_name: str | None = Field(default=None, max_length=256)
-
-    @field_validator("cert_common_name")
-    @classmethod
-    def _sin_certificado_es_none(cls, valor: str | None) -> str | None:
-        if valor is None or valor.strip() in ("", "undefined", "null"):
-            return None
-        return valor
-
-
-class AutenticarDispositivoResponse(BaseModel):
-    """BE-002: formato del autenticador HTTP de EMQX (`result`,
-    `is_superuser`, `expire_at` opcional). `autorizado` se conserva por
-    compatibilidad con clientes anteriores."""
-
-    result: Literal["allow", "deny"]
-    is_superuser: bool = False
-    expire_at: int | None = None
-    autorizado: bool
 
 
 class RegistrarVersionModeloRequest(_PeticionEstricta):

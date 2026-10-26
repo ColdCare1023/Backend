@@ -6,15 +6,9 @@ from uuid import UUID
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.domain.exceptions import DomainError, RecursoNoEncontradoError
 from src.domain.repositories.i_device_repository import IDeviceRepository
-from src.infrastructure.security.password_hasher import hash_password, verify_password
+from src.infrastructure.security.password_hasher import hash_password
 
 _MOTIVOS_BAJA = frozenset({"falla_hardware", "mantenimiento", "reemplazo", "fin_de_servicio"})
-
-# BE-011: hash señuelo para igualar tiempos. Sin él, "dispositivo inexistente
-# o sin credencial" respondía de inmediato y "token incorrecto" tardaba lo que
-# un Argon2: la diferencia revelaba qué device_id tienen credencial activa.
-_HASH_SENUELO = hash_password("senuelo-credencial-dispositivo")
-
 
 class DarDeBajaDispositivoUseCase:
     """HU-43: retira un ESP32/sensor de operación sin corromper la trazabilidad
@@ -176,7 +170,8 @@ class RotarCredencialDispositivoUseCase:
     sobrescribe el hash, no se conservan hashes previos como válidos). El
     valor en claro se devuelve UNA sola vez para aprovisionarlo en el ESP32
     — igual que una API key, el backend nunca vuelve a poder mostrarlo
-    porque solo conserva su hash."""
+    porque solo conserva su hash. El llamador lo aprovisiona además en la
+    autenticación integrada del broker (BrokerAdmin.aprovisionar_credencial)."""
 
     def __init__(
         self, device_repository: IDeviceRepository, registrar_hash: RegistrarHashEncadenadoUseCase
@@ -230,67 +225,6 @@ class RevocarCredencialDispositivoUseCase:
             usuario_id=admin_id,
             timestamp=cuando,
         )
-
-
-class VerificarCredencialDispositivoUseCase:
-    """Punto de integración con el broker: EMQX Cloud puede configurarse con
-    un backend de autenticación HTTP que llame a este caso de uso (vía
-    /api/dispositivos/autenticar, protegido por el secreto del broker) para decidir si
-    acepta la conexión de un ESP32. Un token revocado o nunca aprovisionado
-    se rechaza; el reason code MQTT 5.0 exacto (0x87) lo aplica EMQX según
-    la respuesta HTTP, no este caso de uso.
-
-    IOT-006: si el broker verificó un certificado de cliente, su CN debe ser
-    el device_id. La primera conexión con certificado liga el dispositivo a
-    él: desde entonces el token solo ya no basta (quien lo copie necesita
-    además la clave privada, que no sale del nodo). `exigir_certificado`
-    aplica esa regla a todos los dispositivos."""
-
-    def __init__(
-        self,
-        device_repository: IDeviceRepository,
-        registrar_hash: RegistrarHashEncadenadoUseCase | None = None,
-    ) -> None:
-        self._device_repository = device_repository
-        self._registrar_hash = registrar_hash
-
-    async def execute(
-        self,
-        device_id: str,
-        token: str,
-        cert_common_name: str | None = None,
-        exigir_certificado: bool = False,
-    ) -> bool:
-        credencial = await self._device_repository.obtener_credencial(device_id)
-        utilizable = (
-            credencial is not None
-            # BE-003: un dispositivo dado de baja no se autentica aunque su
-            # credencial no se hubiera revocado explícitamente.
-            and credencial.get("activo", True)
-            and credencial["mqtt_token_activo"]
-            and credencial["mqtt_token_hash"] is not None
-        )
-        if not utilizable:
-            verify_password(token, _HASH_SENUELO)
-            return False
-        if not verify_password(token, credencial["mqtt_token_hash"]):
-            return False
-
-        if cert_common_name is not None and cert_common_name != device_id:
-            return False  # certificado válido, pero de otro dispositivo
-        ligado = credencial.get("exige_certificado", False)
-        if cert_common_name is None:
-            return not (exigir_certificado or ligado)
-        if not ligado:
-            await self._device_repository.exigir_certificado(device_id)
-            if self._registrar_hash is not None:
-                await self._registrar_hash.execute(
-                    tipo_evento="CERTIFICADO_DISPOSITIVO_VINCULADO",
-                    payload={"device_id": device_id},
-                    device_id=device_id,
-                    timestamp=datetime.now(timezone.utc),
-                )
-        return True
 
 
 class RegistrarAltaDispositivoUseCase:

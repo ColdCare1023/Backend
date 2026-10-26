@@ -1,9 +1,8 @@
-import hmac
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.gestionar_dispositivos import (
@@ -16,7 +15,6 @@ from src.application.use_cases.gestionar_dispositivos import (
     RegistrarCalibracionUseCase,
     RevocarCredencialDispositivoUseCase,
     RotarCredencialDispositivoUseCase,
-    VerificarCredencialDispositivoUseCase,
 )
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.domain.exceptions import DomainError, RecursoNoEncontradoError
@@ -29,11 +27,8 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
 from src.infrastructure.mqtt.broker_admin import BrokerAdmin, obtener_broker_admin
-from src.interface.api.api_protection import limitar_por_ip
 from src.interface.api.deps import DbSessionDep, SettingsDep, require_roles
 from src.interface.api.schemas import (
-    AutenticarDispositivoRequest,
-    AutenticarDispositivoResponse,
     CalibracionRequest,
     CredencialDispositivoResponse,
     DispositivoAltaRequest,
@@ -288,7 +283,9 @@ async def dar_de_baja(
         ip_origen=ip,
     )
     await session.commit()
-    # BE-003: la baja revoca la credencial; se cierra además la sesión abierta.
+    # BE-003: la baja revoca la credencial (se elimina del broker) y cierra la sesión abierta.
+    if await broker.eliminar_credencial(device_id) is not True:
+        logger.warning("Dispositivo %s dado de baja, pero su credencial no se eliminó del broker.", device_id)
     if await broker.desconectar_cliente(device_id) is not True:
         logger.warning("Dispositivo %s dado de baja, pero su sesión MQTT no se pudo expulsar.", device_id)
     return DispositivoResponse(**dispositivo)
@@ -327,11 +324,16 @@ async def rotar_credencial(
         ip_origen=request.client.host if request.client else None,
     )
     await session.commit()
-    # BE-002: tras el COMMIT, para que la reconexión ya vea el token nuevo.
+    # BE-002: tras el COMMIT. Primero se aprovisiona el token nuevo en el broker
+    # (autenticación integrada de EMQX) y luego se expulsa la sesión anterior,
+    # para que la reconexión ya use la credencial nueva.
+    aprovisionada = await broker.aprovisionar_credencial(device_id, token)
+    if aprovisionada is not True:
+        logger.warning("Credencial de %s rotada, pero no se aprovisionó en el broker.", device_id)
     cerrada = await broker.desconectar_cliente(device_id)
     return CredencialDispositivoResponse(
         device_id=device_id, token=token, generado_en=datetime.now(tz=timezone.utc),
-        sesion_broker_cerrada=cerrada,
+        credencial_aprovisionada=aprovisionada, sesion_broker_cerrada=cerrada,
     )
 
 
@@ -365,69 +367,13 @@ async def revocar_credencial(
         ip_origen=request.client.host if request.client else None,
     )
     await session.commit()
-    # BE-002: revocar sin cerrar la sesión abierta dejaba al dispositivo (o a
-    # quien tuviera su token) publicando hasta la próxima reconexión.
+    # BE-002: se elimina el usuario del broker y se cierra la sesión abierta;
+    # sin esto el dispositivo (o quien tuviera su token) seguiría publicando
+    # hasta la próxima reconexión.
+    if await broker.eliminar_credencial(device_id) is not True:
+        logger.warning("Credencial de %s revocada, pero no se eliminó del broker.", device_id)
     if await broker.desconectar_cliente(device_id) is not True:
         logger.warning("Credencial de %s revocada, pero su sesión MQTT no se pudo expulsar.", device_id)
-
-
-def verificar_llamada_del_broker(
-    settings: SettingsDep, x_broker_auth: str | None = Header(default=None)
-) -> None:
-    """BE-011: solo el broker puede consultar credenciales de dispositivos.
-
-    Sin secreto configurado el webhook no atiende a nadie (503): un oráculo
-    público de credenciales es peor que un webhook deshabilitado. La
-    comparación es de tiempo constante."""
-    secreto = settings.broker_webhook_secret
-    if not secreto:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="La autenticación HTTP del broker no está configurada.",
-        )
-    if x_broker_auth is None or not hmac.compare_digest(x_broker_auth.encode(), secreto.encode()):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Llamada no autorizada.")
-
-
-@router.post(
-    "/autenticar",
-    response_model=AutenticarDispositivoResponse,
-    response_model_exclude_none=True,
-    dependencies=[
-        limitar_por_ip("dispositivos_autenticar", 30, 60),
-        Depends(verificar_llamada_del_broker),
-    ],
-)
-async def autenticar_dispositivo(
-    body: AutenticarDispositivoRequest, session: DbSessionDep, settings: SettingsDep
-) -> AutenticarDispositivoResponse:
-    """Backend de autenticación HTTP para el broker (HU-10/HU-44): sin JWT de
-    sesión a propósito — lo llama el broker, autenticado con su secreto
-    compartido (`X-Broker-Auth`), no un usuario. La cuota por IP acota el
-    costo de un intento de fuerza bruta contra el hash."""
-    use_case = VerificarCredencialDispositivoUseCase(
-        SQLAlchemyDeviceRepository(session),
-        RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session)),
-    )
-    autorizado = await use_case.execute(
-        body.device_id,
-        body.token,
-        cert_common_name=body.cert_common_name,
-        exigir_certificado=settings.broker_exigir_certificado,
-    )
-    if not autorizado:
-        # Sin el token: solo qué identidad intentó conectarse y que falló.
-        logger.warning(
-            "Autenticación de dispositivo rechazada para device_id=%s (certificado: %s)",
-            body.device_id,
-            "sí" if body.cert_common_name else "no",
-        )
-        return AutenticarDispositivoResponse(result="deny", autorizado=False)
-    await session.commit()  # IOT-006: el vínculo con el certificado, si es el primero
-    expira = None
-    if settings.broker_auth_ttl_seconds > 0:
-        expira = int(datetime.now(tz=timezone.utc).timestamp()) + settings.broker_auth_ttl_seconds
-    return AutenticarDispositivoResponse(result="allow", expire_at=expira, autorizado=True)
 
 
 @router.patch("/{device_id}/instalacion", response_model=DispositivoResponse)

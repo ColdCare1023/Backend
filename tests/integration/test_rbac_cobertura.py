@@ -27,11 +27,6 @@ PUBLICOS = {
     # envía): se autentica con un ticket de un solo uso emitido por
     # POST /api/auth/sse-ticket, que sí exige JWT.
     ("GET", "/api/sse/lecturas"): "autenticado por ticket efímero, no por cabecera",
-    # HU-44/HU-10: backend de autenticación HTTP para el broker — lo llama
-    # el broker (con el device_id + token del ESP32 en el cuerpo), no un
-    # usuario con sesión. BE-011: se autentica con el secreto compartido del
-    # broker (cabecera X-Broker-Auth), no vía JWT; sin secreto responde 503.
-    ("POST", "/api/dispositivos/autenticar"): "autenticado por secreto del broker, no por JWT",
     # BE-025: recuperación de contraseña. Quien la usa no tiene sesión; la
     # solicitud responde igual exista o no la cuenta y el restablecimiento se
     # autoriza con el token de un solo uso enviado al correo del usuario.

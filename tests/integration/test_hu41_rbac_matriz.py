@@ -54,8 +54,6 @@ MATRIZ_ESPERADA: dict[tuple[str, str], frozenset[str] | str] = {
     ("POST", "/api/dispositivos/{device_id}/baja"): frozenset({A}),
     ("POST", "/api/dispositivos/{device_id}/credenciales/rotar"): frozenset({A}),
     ("POST", "/api/dispositivos/{device_id}/credenciales/revocar"): frozenset({A}),
-    # Lo usa el broker para autenticar nodos (token propio + rate limit por IP).
-    ("POST", "/api/dispositivos/autenticar"): PUBLICO,
     ("PATCH", "/api/dispositivos/{device_id}/instalacion"): frozenset({A}),
     ("PATCH", "/api/dispositivos/{device_id}/responsable"): frozenset({A}),
     ("GET", "/api/dispositivos/{device_id}/historial-configuracion"): frozenset({A, AU}),

@@ -61,7 +61,7 @@ printf '[req]\ndistinguished_name = dn\n[dn]\n' > certs/openssl_min.cnf
 
 # --- Secretos y usuarios MQTT ----------------------------------------------
 PG_PASS=$(rand 16); JWT=$(rand 32); EMQX_DASH=$(rand 12)
-MQTT_BACKEND=$(rand 16); WEBHOOK=$(rand 32); API_KEY=$(rand 8); API_SECRET=$(rand 32)
+MQTT_BACKEND=$(rand 16); API_KEY=$(rand 8); API_SECRET=$(rand 32)
 HMAC_TRAZA=$(rand 32)
 # BE-023: contraseñas de los usuarios demo (scripts/seed_dev.py), aleatorias.
 SEED_ADMIN=$(rand 16); SEED_FARMA=$(rand 16); SEED_TECNICO=$(rand 16); SEED_AUDITOR=$(rand 16)
@@ -75,7 +75,6 @@ TRAZABILIDAD_HMAC_KEY=${HMAC_TRAZA}
 EMQX_DASHBOARD_USER=admin
 EMQX_DASHBOARD_PASSWORD=${EMQX_DASH}
 MQTT_BACKEND_PASSWORD=${MQTT_BACKEND}
-BROKER_WEBHOOK_SECRET=${WEBHOOK}
 EMQX_API_KEY=${API_KEY}
 EMQX_API_SECRET=${API_SECRET}
 DEVICE_REGISTRY_ESTRICTO=true
@@ -87,15 +86,16 @@ BROKER_IP=${IP}
 ENV
 
 # usuario,clave,es_superusuario  (EMQX los hashea al importar).
-# BE-002: solo la cuenta de servicio del backend vive en la base interna de
-# EMQX. Los dispositivos se autentican contra el backend (webhook HTTP) con el
-# token que emite POST /api/dispositivos/{id}/credenciales/rotar.
+# BE-002: el bootstrap solo trae la cuenta de servicio del backend. Los
+# dispositivos (usuario = device_id, contraseña = token) los aprovisiona el
+# backend en la misma base con la API de EMQX al emitir el token con
+# POST /api/dispositivos/{id}/credenciales/rotar.
 cat > emqx/bootstrap_users.csv <<CSV
 user_id,password,is_superuser
 backend_service,${MQTT_BACKEND},false
 CSV
 
-# API key del backend para expulsar sesiones de dispositivos (formato key:secret).
+# API key del backend para aprovisionar credenciales y expulsar sesiones (formato key:secret).
 printf '%s:%s\n' "$API_KEY" "$API_SECRET" > emqx/api_keys.txt
 
 echo "Listo."

@@ -50,7 +50,7 @@ def valor_publicado(monkeypatch):
     return VALOR_DE_PRUEBA
 
 
-@pytest.mark.parametrize("campo", ["jwt_secret_key", "trazabilidad_hmac_key", "broker_webhook_secret"])
+@pytest.mark.parametrize("campo", ["jwt_secret_key", "trazabilidad_hmac_key"])
 def test_produccion_rechaza_un_secreto_publicado(valor_publicado, campo):
     with pytest.raises(ValueError, match="historial"):
         _produccion(**{campo: valor_publicado})

@@ -22,25 +22,26 @@ python scripts/crear_dispositivo.py FARM-02-TEST
 
 ### Credenciales de dispositivos (BE-002)
 
-EMQX autentica en cadena: primero su base interna, que solo contiene `backend_service`; después, el
-webhook `POST /api/dispositivos/autenticar` del backend (cabecera `X-Broker-Auth` con
-`BROKER_WEBHOOK_SECRET`). La credencial de cada nodo la emite el backend y vive en la tabla `devices`,
-así que **rotarla o revocarla desde la API tiene efecto en el broker**: el backend además expulsa la
-sesión abierta con la API de EMQX (`EMQX_API_KEY`/`EMQX_API_SECRET`). Sin el backend en marcha ningún
-nodo puede autenticarse (fallo cerrado). No crear usuarios de dispositivo en la base interna de EMQX.
+EMQX autentica con su **autenticación integrada** (usuario = `device_id`, contraseña = token), como
+describen OE2.I1, OE1.I2 y el criterio de HU-10. La base contiene `backend_service` (bootstrap) y los
+dispositivos, que **crea, reemplaza y elimina el backend** con la API de administración de EMQX
+(`EMQX_API_KEY`/`EMQX_API_SECRET`): emitir o rotar con `POST /api/dispositivos/{id}/credenciales/rotar`
+aprovisiona el token nuevo y expulsa la sesión anterior; revocar o dar de baja elimina el usuario del
+broker y expulsa la sesión. La respuesta de la rotación informa `credencial_aprovisionada` (`null` si el
+backend no tiene la API del broker configurada: en ese caso el token no sirve hasta aprovisionarlo). No
+crear usuarios de dispositivo a mano en EMQX: el backend no podría revocarlos.
 
-En EMQX Cloud (producción) hay que configurar lo mismo: autenticador HTTP hacia
-`https://<backend>/api/dispositivos/autenticar` con la cabecera `X-Broker-Auth`, y una API key para
-`BROKER_API_URL`/`BROKER_API_KEY`/`BROKER_API_SECRET` del backend.
+En EMQX Cloud (producción) hay que activar la misma autenticación integrada y generar una API key para
+`BROKER_API_URL`/`BROKER_API_KEY`/`BROKER_API_SECRET` del backend. Falta confirmar que el plan Serverless
+exponga la API de administración de usuarios (ver limitaciones de OE2.I1).
 
-### Certificado de cliente por nodo (IOT-006)
+### Certificado de cliente por nodo (IOT-006, opcional)
 
-El token es un secreto portátil: copiado de un nodo, sirve desde cualquier equipo. Para ligar la identidad
-a una clave que no sale del nodo, EMQX pide certificado de cliente (`verify_peer`), lo verifica contra la
-CA local y pasa su CN al webhook (`cert_common_name`). El backend exige que el CN sea el `device_id`, y la
-**primera** conexión con certificado liga el dispositivo: desde entonces el token solo ya no basta (queda
-en la cadena de trazabilidad como `CERTIFICADO_DISPOSITIVO_VINCULADO`). `BROKER_EXIGIR_CERTIFICADO=true`
-en `.env` lo exige a todos los nodos.
+El token es un secreto portátil: copiado de un nodo, sirve desde cualquier equipo. EMQX local pide
+certificado de cliente (`verify_peer`) y lo verifica contra la CA local, pero no es obligatorio y el
+backend ya no contrasta el CN con el `device_id`: la identidad del nodo la fijan usuario + token. Exigirlo
+solo es posible fuera de EMQX Serverless (que no admite certificados de cliente X.509), configurando el
+listener y la autorización del broker.
 
 ```bash
 # en la consola del nodo (desbloqueada, con Wi-Fi configurado): tls csr  → copiar la CSR a nodo.csr
@@ -49,10 +50,7 @@ en `.env` lo exige a todos los nodos.
 ```
 
 La clave se genera en el nodo y nunca se muestra; el script solo firma la CSR si su sujeto es exactamente
-`CN=<device_id>`, con uso `clientAuth`. Un nodo ligado que pierde la clave (`tls borrar`, NVS borrada)
-necesita una CSR nueva firmada para volver a conectarse; revocar el token sigue cortándolo aunque tenga
-certificado. En EMQX Cloud solo aplica si el plan admite TLS mutuo y el autenticador HTTP envía
-`${cert_common_name}`; si no, los nodos siguen autenticándose solo con el token.
+`CN=<device_id>`, con uso `clientAuth`.
 
 | Servicio | Acceso |
 |---|---|
