@@ -520,6 +520,9 @@ class CredencialDispositivoResponse(BaseModel):
     # integrada del broker; False si el broker lo rechazó; None si la API del
     # broker no está configurada (el token no sirve hasta aprovisionarlo).
     credencial_aprovisionada: bool | None = None
+    # Instrucción cuando el aprovisionamiento no fue automático (modo manual,
+    # p. ej. EMQX Serverless, o API sin configurar).
+    mensaje_broker: str | None = None
     # BE-002: True si el broker cerró la sesión anterior; None si la API del
     # broker no está configurada.
     sesion_broker_cerrada: bool | None = None

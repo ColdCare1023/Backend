@@ -331,9 +331,15 @@ async def rotar_credencial(
     if aprovisionada is not True:
         logger.warning("Credencial de %s rotada, pero no se aprovisionó en el broker.", device_id)
     cerrada = await broker.desconectar_cliente(device_id)
+    mensaje = None
+    if aprovisionada is None:
+        mensaje = (
+            f"Pendiente en el broker: cree o actualice el usuario «{device_id}» con este token en la "
+            "autenticación de la instancia de EMQX (consola). El token no se mostrará de nuevo."
+        )
     return CredencialDispositivoResponse(
         device_id=device_id, token=token, generado_en=datetime.now(tz=timezone.utc),
-        credencial_aprovisionada=aprovisionada, sesion_broker_cerrada=cerrada,
+        credencial_aprovisionada=aprovisionada, mensaje_broker=mensaje, sesion_broker_cerrada=cerrada,
     )
 
 

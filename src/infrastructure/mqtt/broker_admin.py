@@ -10,6 +10,11 @@ de autenticación del broker mediante la API REST de administración de EMQX:
 - además expulsa la sesión MQTT vigente (`DELETE /clients/{clientid}`), porque
   una sesión ya abierta seguiría publicando hasta cerrarse.
 
+Con `BROKER_USUARIOS_MODO=manual` (EMQX Cloud Serverless, cuya API no tiene
+endpoints de usuarios) las dos primeras operaciones no se llaman: el usuario se
+crea o retira a mano en la consola de la instancia y el backend lo informa como
+pendiente. La expulsión de sesiones sí está en la API de Serverless.
+
 La API de EMQX se autentica con HTTP Basic usando una API key (no un usuario
 del dashboard). Sin URL o sin API key configuradas el cliente no hace nada y
 lo informa: el llamador decide cómo registrarlo.
@@ -33,11 +38,17 @@ class BrokerAdmin:
         self._url = settings.broker_api_url.rstrip("/")
         self._key = settings.broker_api_key
         self._secret = settings.broker_api_secret
+        self._gestiona_usuarios = settings.broker_usuarios_modo == "api"
         self._transport = transport
 
     @property
     def configurado(self) -> bool:
         return bool(self._url and self._key and self._secret)
+
+    @property
+    def gestiona_usuarios(self) -> bool:
+        """True si el backend puede crear y eliminar usuarios por la API del broker."""
+        return self._gestiona_usuarios and self.configurado
 
     def _cliente(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(timeout=10, transport=self._transport, auth=(self._key, self._secret))
@@ -46,12 +57,13 @@ class BrokerAdmin:
         """Deja `token` como contraseña de `device_id` en el broker.
 
         True: aprovisionada (usuario creado o contraseña reemplazada). False: el
-        broker no la aceptó (error o inaccesible). None: no hay API del broker
-        configurada.
+        broker no la aceptó (error o inaccesible). None: no se intentó (modo manual
+        o sin API del broker): el usuario debe crearse a mano en la consola.
         """
-        if not self.configurado:
+        if not self.gestiona_usuarios:
             logger.warning(
-                "API de administración del broker no configurada: la credencial de %s no se aprovisionó.",
+                "El broker no gestiona usuarios por API (modo manual o API sin configurar): "
+                "la credencial de %s queda pendiente de aprovisionar en la consola.",
                 device_id,
             )
             return None
@@ -76,11 +88,14 @@ class BrokerAdmin:
         """Elimina el usuario `device_id` del broker (revocación o baja).
 
         True: eliminado, o no existía (404). False: el broker no lo eliminó.
-        None: no hay API del broker configurada.
+        None: no se intentó (modo manual o sin API del broker): el usuario debe
+        retirarse a mano en la consola.
         """
-        if not self.configurado:
+        if not self.gestiona_usuarios:
             logger.warning(
-                "API de administración del broker no configurada: la credencial de %s no se eliminó.", device_id
+                "El broker no gestiona usuarios por API (modo manual o API sin configurar): "
+                "la credencial de %s queda pendiente de retirar en la consola.",
+                device_id,
             )
             return None
         try:

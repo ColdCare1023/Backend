@@ -31,9 +31,22 @@ broker y expulsa la sesión. La respuesta de la rotación informa `credencial_ap
 backend no tiene la API del broker configurada: en ese caso el token no sirve hasta aprovisionarlo). No
 crear usuarios de dispositivo a mano en EMQX: el backend no podría revocarlos.
 
-En EMQX Cloud (producción) hay que activar la misma autenticación integrada y generar una API key para
-`BROKER_API_URL`/`BROKER_API_KEY`/`BROKER_API_SECRET` del backend. Falta confirmar que el plan Serverless
-exponga la API de administración de usuarios (ver limitaciones de OE2.I1).
+**EMQX Cloud Serverless (producción prevista):** su API de administración solo documenta clientes
+(listar, consultar, expulsar), suscripciones y publicación de mensajes; no hay endpoints para crear,
+cambiar ni borrar usuarios de autenticación ni reglas ACL (se configuran en la consola de la instancia).
+Por eso en producción se usa `BROKER_USUARIOS_MODO=manual`:
+
+1. Al emitir o rotar (`credenciales/rotar`) el backend genera el token, guarda su hash, expulsa la sesión
+   anterior por API y responde `credencial_aprovisionada: null` con un `mensaje_broker` que pide crear o
+   actualizar el usuario `device_id` con ese token en la consola de la instancia (el token se muestra una
+   sola vez).
+2. Al revocar o dar de baja, el backend marca la credencial como inactiva y expulsa la sesión; el usuario
+   debe **retirarse a mano de la consola** (hasta entonces el token seguiría aceptándose en una reconexión).
+3. `BROKER_API_URL`, `BROKER_API_KEY` y `BROKER_API_SECRET` siguen siendo necesarios para expulsar sesiones.
+
+Con `BROKER_USUARIOS_MODO=api` (EMQX 5 completo, como el de esta pila local, o un plan Dedicated) el
+backend crea, reemplaza y elimina los usuarios solo. Antes de desplegar hay que probar con la API key de la
+instancia real qué endpoints existen: no confiar solo en la documentación.
 
 ### Certificado de cliente por nodo (IOT-006, opcional)
 

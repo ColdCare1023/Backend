@@ -124,6 +124,15 @@ class Settings(BaseSettings):
     broker_api_url: str = ""
     broker_api_key: str = ""
     broker_api_secret: str = ""
+    # Quién gestiona los usuarios (credenciales de dispositivo) de la autenticación
+    # integrada del broker:
+    #   api: el backend los crea, reemplaza y elimina con la API de administración
+    #     (EMQX 5 completo, p. ej. el de infra-local o un plan Dedicated).
+    #   manual: se crean y retiran en la consola de la instancia (EMQX Cloud Serverless,
+    #     cuya API solo cubre clientes, suscripciones y publicación). El backend sigue
+    #     emitiendo el token, guarda su hash y expulsa la sesión por API, pero informa
+    #     que el aprovisionamiento en el broker queda pendiente.
+    broker_usuarios_modo: Literal["api", "manual"] = "api"
 
     # Hosts permitidos en producción (mitiga ataques por header Host).
     allowed_hosts: list[str] = []

@@ -3,8 +3,11 @@ credenciales MQTT por dispositivo. La autenticación es la integrada de EMQX
 (usuario = device_id, contraseña = token): el backend aprovisiona y elimina
 la credencial en el broker mediante su API de administración."""
 
+import httpx
 import pytest
 
+from src.infrastructure.config import Settings
+from src.infrastructure.mqtt.broker_admin import BrokerAdmin
 from src.interface.api.dispositivos_router import get_broker_admin
 from tests.conftest import auth_header
 
@@ -192,3 +195,38 @@ def test_rotar_expulsa_la_sesion_con_el_token_anterior(client, token_tecnico, to
     ).json()
     assert cuerpo["sesion_broker_cerrada"] is True
     assert broker_espia.expulsados == [DEVICE_ID]
+
+
+def test_rotar_en_modo_manual_pide_crear_el_usuario_en_la_consola(client, token_tecnico, token_admin, app):
+    """EMQX Serverless: el token se emite y se expulsa la sesión por API, pero el
+    usuario hay que crearlo a mano; la respuesta lo dice con un mensaje claro."""
+    llamadas: list[tuple[str, str]] = []
+
+    def manejar(peticion: httpx.Request) -> httpx.Response:
+        llamadas.append((peticion.method, peticion.url.path))
+        return httpx.Response(204)
+
+    ajustes = Settings(
+        broker_api_url="http://emqx:18083/api/v5", broker_api_key="k", broker_api_secret="s",
+        broker_usuarios_modo="manual",
+    )
+    app.dependency_overrides[get_broker_admin] = lambda: BrokerAdmin(ajustes, transport=httpx.MockTransport(manejar))
+    _provisionar(client, token_tecnico)
+
+    cuerpo = client.post(
+        f"/api/dispositivos/{DEVICE_ID}/credenciales/rotar", json={"motivo": "alta"}, headers=auth_header(token_admin)
+    ).json()
+
+    assert cuerpo["credencial_aprovisionada"] is None
+    assert DEVICE_ID in cuerpo["mensaje_broker"] and "consola" in cuerpo["mensaje_broker"]
+    assert cuerpo["sesion_broker_cerrada"] is True
+    assert llamadas == [("DELETE", f"/api/v5/clients/{DEVICE_ID}")]  # nada de /authentication
+
+
+def test_rotar_con_api_de_usuarios_no_trae_mensaje(client, token_tecnico, token_admin, broker_espia):
+    _provisionar(client, token_tecnico)
+    cuerpo = client.post(
+        f"/api/dispositivos/{DEVICE_ID}/credenciales/rotar", json={"motivo": "alta"}, headers=auth_header(token_admin)
+    ).json()
+    assert cuerpo["credencial_aprovisionada"] is True
+    assert cuerpo["mensaje_broker"] is None

@@ -120,3 +120,24 @@ async def test_sin_api_configurada_no_hace_nada_y_lo_informa():
     assert await broker.aprovisionar_credencial("FARM-01", "t") is None
     assert await broker.eliminar_credencial("FARM-01") is None
     assert await broker.desconectar_cliente("FARM-01") is None
+
+
+@pytest.mark.asyncio
+async def test_modo_manual_no_toca_los_usuarios_pero_si_expulsa_la_sesion():
+    """EMQX Serverless no tiene endpoints de usuarios: en modo manual el backend no
+    los llama (queda pendiente en la consola) y solo expulsa la sesión por API."""
+    vistas: list[httpx.Request] = []
+
+    def manejar(peticion: httpx.Request) -> httpx.Response:
+        vistas.append(peticion)
+        return httpx.Response(204)
+
+    broker = BrokerAdmin(_settings(broker_usuarios_modo="manual"), transport=httpx.MockTransport(manejar))
+
+    assert broker.gestiona_usuarios is False
+    assert await broker.aprovisionar_credencial("FARM-01", "t") is None
+    assert await broker.eliminar_credencial("FARM-01") is None
+    assert vistas == []  # ni una llamada a la API
+    assert await broker.desconectar_cliente("FARM-01") is True
+    assert [v.method for v in vistas] == ["DELETE"]
+    assert vistas[0].url.raw_path == b"/api/v5/clients/FARM-01"
