@@ -411,6 +411,31 @@ async def test_la_excursion_abierta_guarda_la_ultima_lectura(client, token_admin
     assert incidente.detalle["ultima_temperatura_interna"] == 5.0 and incidente.detalle["ultima_en_rango"] is True
 
 
+async def test_una_lectura_retenida_anterior_no_pisa_la_ultima_lectura(
+    client, token_admin, espia, db_session_factory
+):
+    """El drenaje FIFO reintenta la lectura más antigua: si llega después de la
+    muestra vigente, no debe presentarse como la temperatura actual."""
+    _alta(client, token_admin)
+    _rotar_por_compromiso(client, token_admin)
+    t0 = datetime.now(tz=timezone.utc) - timedelta(minutes=3)
+    for temperatura, seq, captura in ((12.0, 1, t0), (5.0, 3, t0 + timedelta(minutes=2))):
+        await main._procesar_evento_mqtt(
+            _Mensaje("eventos", _evento("lectura_vigente", {
+                "seq_no": seq, "temperatura_interna": temperatura, "captured_at": captura.isoformat(),
+            })),
+            _Broadcaster(), espia,
+        )
+    retenida = {**_telemetria("cola-2", 11.0), "timestamp": (t0 + timedelta(minutes=1)).isoformat()}
+    await main._procesar_lectura_mqtt(_Mensaje("lecturas", retenida), _Broadcaster(), espia)
+
+    incidente = (await _filas(
+        db_session_factory, IncidenteOperativoModel, IncidenteOperativoModel.tipo == "excursion_no_verificada"
+    ))[0]
+    assert incidente.detalle["ultima_temperatura_interna"] == 5.0
+    assert incidente.detalle["ultima_captura"] == (t0 + timedelta(minutes=2)).isoformat()
+
+
 async def test_el_par_lwt_online_de_una_rotacion_se_audita_como_reconexion(
     client, token_admin, espia, db_session_factory
 ):

@@ -15,9 +15,10 @@ significar quedarse ciego:
 
 La excursión no verificada es UN episodio por ventana: no se cierra aunque la
 temperatura vuelva a rango (no hay forma de saber si el dato es del nodo). Su
-`detalle` guarda la lectura que lo abrió y, aparte, la última recibida
-(`ultima_temperatura_interna`, `ultima_captura`, `ultima_en_rango`), para que
-el tablero no presente el dato inicial como el actual.
+`detalle` guarda la lectura que lo abrió y, aparte, la más reciente por hora
+de captura (`ultima_temperatura_interna`, `ultima_captura`, `ultima_en_rango`),
+para que el tablero no presente el dato inicial ni uno reintentado desde la
+cola como el actual.
 """
 
 from datetime import datetime, timezone
@@ -64,6 +65,22 @@ async def abrir_monitoreo_suspendido(
     return cambio, _aviso(cambio)
 
 
+def _es_mas_reciente(capturada_en: datetime | None, detalle: dict) -> bool:
+    """Compara con la última lectura anotada o, si aún no hay, con la que abrió
+    el episodio. Sin hora de captura (nodo sin SNTP) no se puede ordenar: solo
+    se anota si tampoco hay referencia."""
+    referencia = detalle.get("ultima_captura") or detalle.get("captured_at")
+    if referencia is None:
+        return True
+    if capturada_en is None:
+        return False
+    previa = datetime.fromisoformat(referencia)
+    if previa.tzinfo is None:
+        previa = previa.replace(tzinfo=timezone.utc)
+    actual = capturada_en if capturada_en.tzinfo else capturada_en.replace(tzinfo=timezone.utc)
+    return actual > previa
+
+
 async def evaluar_excursion_retenida(
     incidentes: IIncidenteRepository,
     auditoria: AuditarAccionCriticaUseCase,
@@ -81,7 +98,11 @@ async def evaluar_excursion_retenida(
         return None
     abierto = await incidentes.abierto(device_id, TIPO_EXCURSION_NO_VERIFICADA)
     if abierto is not None:
-        # Episodio ya abierto y avisado: solo se anota la última lectura.
+        # Episodio ya abierto y avisado: solo se anota la última lectura, si de
+        # verdad es la más reciente. Una lectura retenida que el nodo reintenta
+        # desde su cola es anterior a la muestra vigente ya recibida.
+        if not _es_mas_reciente(capturada_en, abierto.detalle or {}):
+            return None
         await incidentes.actualizar_detalle(abierto.id, {
             **(abierto.detalle or {}),
             "ultima_temperatura_interna": temperatura,
