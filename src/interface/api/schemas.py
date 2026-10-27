@@ -635,8 +635,8 @@ class InferenciaLecturaResponse(BaseModel):
     ia_experimental: bool = False
 
 
-# IOT-004: tamaño de la partición de aplicación del nodo (1216 KB).
-OTA_TAMANO_MAXIMO_BYTES = 0x130000
+# IOT-004: tamaño de la partición de aplicación del nodo (1280 KB, IoT ADR-18).
+OTA_TAMANO_MAXIMO_BYTES = 0x140000
 
 
 class FirmwareReleaseCreateRequest(_PeticionEstricta):
