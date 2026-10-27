@@ -36,12 +36,18 @@ crear usuarios de dispositivo a mano en EMQX: el backend no podría revocarlos.
 cambiar ni borrar usuarios de autenticación ni reglas ACL (se configuran en la consola de la instancia).
 Por eso en producción se usa `BROKER_USUARIOS_MODO=manual`:
 
+0. El **alta** del dispositivo (`POST /api/dispositivos`) ya emite el token (HU-43): la consola se
+   configura una sola vez. Toda operación que el broker no confirma queda **pendiente** en el
+   dispositivo (`broker_pendiente`, con fecha y responsable) hasta que el administrador la confirma con
+   `POST /api/dispositivos/{id}/broker/confirmar`. Las reglas ACL exactas para la consola las genera
+   `python -m scripts.reglas_acl_emqx` (ver `docs/operacion/ADR-ACL_EMQX_Serverless.md`).
 1. Al emitir o rotar (`credenciales/rotar`) el backend genera el token, guarda su hash, expulsa la sesión
    anterior por API y responde `credencial_aprovisionada: null` con un `mensaje_broker` que pide crear o
    actualizar el usuario `device_id` con ese token en la consola de la instancia (el token se muestra una
    sola vez).
 2. Al revocar o dar de baja, el backend marca la credencial como inactiva y expulsa la sesión; el usuario
-   debe **retirarse a mano de la consola** (hasta entonces el token seguiría aceptándose en una reconexión).
+   debe **retirarse a mano de la consola**. Hasta entonces el broker aceptaría una reconexión con el token
+   anterior, pero el backend rechaza y audita su telemetría y vuelve a expulsar la sesión en cada intento.
 3. `BROKER_API_URL`, `BROKER_API_KEY` y `BROKER_API_SECRET` siguen siendo necesarios para expulsar sesiones.
 
 Con `BROKER_USUARIOS_MODO=api` (EMQX 5 completo, como el de esta pila local, o un plan Dedicated) el
@@ -52,9 +58,9 @@ instancia real qué endpoints existen: no confiar solo en la documentación.
 
 El token es un secreto portátil: copiado de un nodo, sirve desde cualquier equipo. EMQX local pide
 certificado de cliente (`verify_peer`) y lo verifica contra la CA local, pero no es obligatorio y el
-backend ya no contrasta el CN con el `device_id`: la identidad del nodo la fijan usuario + token. Exigirlo
-solo es posible fuera de EMQX Serverless (que no admite certificados de cliente X.509), configurando el
-listener y la autorización del broker.
+backend ya no contrasta el CN con el `device_id`: la identidad del nodo la fijan usuario + token. La
+documentación de EMQX Cloud lista la autenticación X.509 también para Serverless, pero no se ha probado
+en la instancia real; hasta verificarlo, la identidad del nodo es usuario + token.
 
 ```bash
 # en la consola del nodo (desbloqueada, con Wi-Fi configurado): tls csr  → copiar la CSR a nodo.csr
