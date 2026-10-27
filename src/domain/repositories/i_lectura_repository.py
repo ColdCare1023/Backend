@@ -9,6 +9,11 @@ class ILecturaRepository(ABC):
     @abstractmethod
     async def agregar(self, lectura: LecturaTermica) -> LecturaTermica: ...
 
+    async def agregar_si_no_existe(self, lectura: LecturaTermica) -> tuple[LecturaTermica, bool]:
+        """HU-11/HU-22: inserta la lectura o, si otra transacción ya insertó la
+        misma identidad, devuelve esa. (lectura, True) solo si la creó esta."""
+        return await self.agregar(lectura), True
+
     @abstractmethod
     async def obtener_por_id(self, lectura_id: UUID) -> LecturaTermica | None: ...
 

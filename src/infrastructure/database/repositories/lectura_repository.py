@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.entities.lectura_termica import ORIGEN_DISPOSITIVO, LecturaTermica
@@ -89,6 +90,27 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
         await self._session.flush()
         await self._session.refresh(model)
         return _to_entity(model)
+
+    async def agregar_si_no_existe(self, lectura: LecturaTermica) -> tuple[LecturaTermica, bool]:
+        """HU-11/HU-22 (B-9): la consulta previa del caso de uso no basta con
+        dos consumidores o un reenvío QoS 1 simultáneo: ambos ven «no existe».
+        En PostgreSQL la decide el índice único (device_id, boot_id, seq_no) o
+        (device_id, timestamp): la inserción va en un SAVEPOINT y, si el índice
+        la rechaza, se devuelve la lectura que ganó, sin abortar la transacción."""
+        if lectura.es_manual or self._session.get_bind().dialect.name != "postgresql":
+            return await self.agregar(lectura), True
+        try:
+            async with self._session.begin_nested():
+                creada = await self.agregar(lectura)
+            return creada, True
+        except IntegrityError:
+            if lectura.boot_id is not None and lectura.seq_no is not None:
+                existente = await self.obtener_por_device_boot_seq(lectura.device_id, lectura.boot_id, lectura.seq_no)
+            else:
+                existente = await self.obtener_por_device_y_timestamp(lectura.device_id, lectura.timestamp)
+            if existente is None:
+                raise
+            return existente, False
 
     async def obtener_por_id(self, lectura_id: UUID) -> LecturaTermica | None:
         model = await self._session.get(ThermalReadingModel, lectura_id)

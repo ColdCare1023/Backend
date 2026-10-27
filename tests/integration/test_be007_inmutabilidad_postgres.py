@@ -1,57 +1,28 @@
 """BE-007: PostgreSQL rechaza modificar o borrar la evidencia (migración 0018).
 
-Requiere `pgserver` (PostgreSQL embebido, requirements-dev). Sin él la prueba
-se omite: SQLite, que usa el resto de la suite, no tiene triggers PL/pgSQL."""
+Usa PostgreSQL real (tests/postgres.py): el servicio del CI
+(`TEST_POSTGRES_URL`) o `pgserver` en local. SQLite, que usa el resto de la
+suite, no tiene triggers PL/pgSQL."""
 
 import asyncio
-import pathlib
-import tempfile
 import uuid
 
 import pytest
-from alembic.config import Config
 
-from alembic import command
+from tests.postgres import a_asyncpg, base_migrada
 
-pgserver = pytest.importorskip("pgserver")
 asyncpg = pytest.importorskip("asyncpg")
 
-RAIZ = pathlib.Path(__file__).resolve().parents[2]
-
 
 @pytest.fixture(scope="module")
-def postgres():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as carpeta:
-        servidor = pgserver.get_server(carpeta, cleanup_mode="stop")
-        servidor.psql("CREATE DATABASE evidencia;")
-        socket = servidor.get_uri().split("host=")[1]
-        try:
-            yield socket
-        finally:
-            servidor.cleanup()
+def migrada():
+    with base_migrada() as dsn:
+        yield dsn
 
 
-@pytest.fixture(scope="module")
-def migrada(postgres):
-    from src.infrastructure.config import get_settings
-
-    url = f"postgresql+asyncpg://postgres@/evidencia?host={postgres}"
-    parche = pytest.MonkeyPatch()
-    parche.setenv("DATABASE_URL", url)
-    get_settings.cache_clear()
-    try:
-        config = Config(str(RAIZ / "alembic.ini"))
-        config.set_main_option("script_location", str(RAIZ / "alembic"))
-        command.upgrade(config, "head")
-        yield postgres
-    finally:
-        parche.undo()
-        get_settings.cache_clear()
-
-
-def _ejecutar(socket: str, *sentencias: str):
+def _ejecutar(dsn: str, *sentencias: str):
     async def _correr():
-        conexion = await asyncpg.connect(user="postgres", database="evidencia", host=socket)
+        conexion = await asyncpg.connect(dsn)
         try:
             resultado = None
             for sentencia in sentencias:
@@ -132,7 +103,7 @@ def test_la_aplicacion_sigue_operando_con_los_triggers(migrada):
     )
 
     async def _flujo():
-        motor = create_async_engine(f"postgresql+asyncpg://postgres@/evidencia?host={migrada}")
+        motor = create_async_engine(a_asyncpg(migrada))
         fabrica = async_sessionmaker(motor, expire_on_commit=False)
         ahora = datetime.now(tz=timezone.utc)
         try:

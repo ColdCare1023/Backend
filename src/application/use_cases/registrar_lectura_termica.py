@@ -213,7 +213,11 @@ class RegistrarLecturaTermicaUseCase:
             if clasificacion.origen == ORIGEN_MODELO and not lectura.excursion_confirmada:
                 lectura.riesgo_efectivo = clasificacion.nivel_regla
 
-        lectura_guardada = await self._lectura_repository.agregar(lectura)
+        lectura_guardada, creada = await self._lectura_repository.agregar_si_no_existe(lectura)
+        if not creada:
+            # Otra transacción persistió la misma lectura entre la consulta y
+            # la inserción: ya tiene su eslabón y su alerta; esta no agrega nada.
+            return lectura_guardada
         if prediccion is not None and lectura_guardada.id is not None:
             await self._prediccion_preventiva.registrar(prediccion, lectura_guardada.id)
 
