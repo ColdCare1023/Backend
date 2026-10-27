@@ -335,7 +335,9 @@ async def rotar_credencial(
     if aprovisionada is None:
         mensaje = (
             f"Pendiente en el broker: cree o actualice el usuario «{device_id}» con este token en la "
-            "autenticación de la instancia de EMQX (consola). El token no se mostrará de nuevo."
+            "autenticación de la instancia de EMQX (consola) y, a continuación, cárguelo en el nodo con "
+            "`nvs set mqtt_token` por la consola serie. Hasta hacerlo el nodo no conecta (sus lecturas "
+            "quedan en LittleFS). El token no se mostrará de nuevo."
         )
     return CredencialDispositivoResponse(
         device_id=device_id, token=token, generado_en=datetime.now(tz=timezone.utc),

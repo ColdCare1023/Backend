@@ -11,6 +11,13 @@ class DispositivoNoAutorizadoError(DomainError):
     (principio de mínimo privilegio: solo dispositivos provisionados publican)."""
 
 
+class CredencialRevocadaError(DispositivoNoAutorizadoError):
+    """El dispositivo existe y sigue activo, pero su credencial MQTT fue revocada
+    (HU-44). Con EMQX Serverless el usuario del broker se retira a mano, así que
+    el backend no puede depender de que el broker ya rechace la conexión: deja de
+    aceptar la evidencia del nodo aunque este todavía consiga publicar."""
+
+
 class CadenaTrazabilidadRotaError(DomainError):
     """Se lanza cuando la verificación de integridad de la cadena de hash falla."""
 

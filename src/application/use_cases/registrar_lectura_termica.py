@@ -5,7 +5,7 @@ from src.application.use_cases.clasificar_riesgo_termico import ClasificarRiesgo
 from src.application.use_cases.generar_alerta import AvisoExcursion, GenerarAlertaUseCase
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.domain.entities.lectura_termica import LecturaTermica
-from src.domain.exceptions import DispositivoNoAutorizadoError, LecturaInvalidaError
+from src.domain.exceptions import CredencialRevocadaError, DispositivoNoAutorizadoError, LecturaInvalidaError
 from src.domain.repositories.i_alerta_repository import IAlertaRepository
 from src.domain.repositories.i_audit_log_repository import IAuditLogRepository
 from src.domain.repositories.i_device_repository import IDeviceRepository
@@ -14,6 +14,14 @@ from src.domain.repositories.i_trazabilidad_repository import ITrazabilidadRepos
 
 if TYPE_CHECKING:
     from src.application.use_cases.predecir_riesgo_preventivo import PredecirRiesgoPreventivoUseCase
+
+
+async def credencial_revocada(device_repository: IDeviceRepository, device_id: str) -> bool:
+    """HU-44: True si al dispositivo se le emitió una credencial MQTT y ya no está
+    vigente. Un dispositivo al que nunca se le emitió una (hash ausente) no cuenta
+    como revocado: ese caso lo gobierna el registro estricto."""
+    credencial = await device_repository.obtener_credencial(device_id)
+    return bool(credencial and credencial["mqtt_token_hash"] and not credencial["mqtt_token_activo"])
 
 
 class RegistrarLecturaTermicaUseCase:
@@ -66,7 +74,7 @@ class RegistrarLecturaTermicaUseCase:
         hace COMMIT los entrega al despachador DESPUÉS del commit (D2)."""
         return self._generar_alerta.avisos_pendientes
 
-    async def _autorizar_dispositivo(self, device_id: str) -> None:
+    async def _autorizar_dispositivo(self, device_id: str, *, es_manual: bool = False) -> None:
         if self._device_repository is None:
             return
         if self._estricto:
@@ -82,6 +90,13 @@ class RegistrarLecturaTermicaUseCase:
             raise DispositivoNoAutorizadoError(
                 f"El dispositivo '{device_id}' está dado de baja; la lectura se rechaza."
             )
+        # HU-44: credencial revocada = la telemetría del nodo no se persiste, aunque
+        # el broker todavía lo deje conectar. Una lectura manual la registra una
+        # persona y no depende de la credencial del nodo.
+        if not es_manual and await credencial_revocada(self._device_repository, device_id):
+            raise CredencialRevocadaError(
+                f"La credencial del dispositivo '{device_id}' está revocada; la lectura se rechaza."
+            )
 
     async def execute(self, lectura: LecturaTermica) -> LecturaTermica:
         # HU-05: received_at es el instante en que EL BACKEND recibió el
@@ -91,7 +106,7 @@ class RegistrarLecturaTermicaUseCase:
         if lectura.received_at is None:
             lectura.received_at = datetime.now(tz=timezone.utc)
 
-        await self._autorizar_dispositivo(lectura.device_id)
+        await self._autorizar_dispositivo(lectura.device_id, es_manual=lectura.es_manual)
 
         # B-10: un instante implausible se rechaza ANTES de persistir. Aceptar
         # timestamps futuros permitiría insertar registros que alteran el orden

@@ -22,9 +22,12 @@ from src.application.use_cases.detectar_anomalia_reloj import anomalias_de_reloj
 from src.application.use_cases.gestionar_firmware import RegistrarResultadoOtaUseCase, normalizar_version
 from src.application.use_cases.predecir_riesgo_preventivo import PredecirRiesgoPreventivoUseCase
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
-from src.application.use_cases.registrar_lectura_termica import RegistrarLecturaTermicaUseCase
+from src.application.use_cases.registrar_lectura_termica import (
+    RegistrarLecturaTermicaUseCase,
+    credencial_revocada,
+)
 from src.domain.entities.lectura_termica import LecturaTermica
-from src.domain.exceptions import DispositivoNoAutorizadoError, LecturaInvalidaError
+from src.domain.exceptions import CredencialRevocadaError, DispositivoNoAutorizadoError, LecturaInvalidaError
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.ai.prediccion_preventiva.servicio import obtener_servicio_preventivo
 from src.infrastructure.ai.random_forest_service import get_random_forest_service
@@ -44,6 +47,7 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
 )
 from src.infrastructure.database.session import _session_factory
 from src.infrastructure.mqtt import contrato_v1
+from src.infrastructure.mqtt.broker_admin import BrokerAdmin
 from src.infrastructure.mqtt.mqtt_client import ESTADO_CONEXION, mqtt_session
 from src.infrastructure.mqtt.payload_schema import (
     MAX_BYTES_PAYLOAD_MQTT,
@@ -160,6 +164,15 @@ def _payload_en_conflicto(existente, nueva) -> bool:
     )
 
 
+async def _expulsar_sesion_revocada(device_id: str) -> None:
+    """HU-44: un nodo con credencial revocada que sigue publicando se expulsa en
+    cada intento. Es el mismo efecto de `DELETE /clients/{id}` que al revocar, y
+    cubre la ventana en que el usuario sigue vivo en el broker (EMQX Serverless:
+    se retira a mano en la consola)."""
+    if await BrokerAdmin(get_settings()).desconectar_cliente(device_id) is False:
+        logger.warning("No se pudo expulsar la sesión del dispositivo con credencial revocada: %s", device_id)
+
+
 async def _procesar_mensaje_mqtt(
     message: aiomqtt.Message,
     broadcaster: SSEBroadcaster,
@@ -234,6 +247,18 @@ async def _procesar_evento_v1(
                 ip_origen=None,
             )
             await session.commit()
+            return
+        if await credencial_revocada(device_repository, evento.device_id):
+            # HU-44: credencial revocada: el evento no altera el estado del nodo.
+            await auditoria.execute(
+                usuario_id=None,
+                accion="EVENTO_CREDENCIAL_REVOCADA",
+                recurso="mqtt/eventos",
+                detalle={"device_id": evento.device_id, "tipo_evento": evento.event_type},
+                ip_origen=None,
+            )
+            await session.commit()
+            await _expulsar_sesion_revocada(evento.device_id)
             return
 
         tipo = _EVENTOS_V1.get(evento.event_type)
@@ -331,6 +356,19 @@ async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadc
             )
             await session.commit()
             logger.warning("Evento de dispositivo no registrado o dado de baja: %s", evento.device_id)
+            return
+        if await credencial_revocada(device_repository, evento.device_id):
+            # HU-44: credencial revocada: el evento no altera el estado del nodo.
+            await auditoria.execute(
+                usuario_id=None,
+                accion="EVENTO_CREDENCIAL_REVOCADA",
+                recurso="mqtt/eventos",
+                detalle={"device_id": evento.device_id, "tipo_evento": evento.tipo_evento.value},
+                ip_origen=None,
+            )
+            await session.commit()
+            logger.warning("Evento de dispositivo con credencial revocada: %s", evento.device_id)
+            await _expulsar_sesion_revocada(evento.device_id)
             return
 
         detalle_auditoria: dict = {"tipo_evento": evento.tipo_evento.value}
@@ -645,19 +683,22 @@ async def _procesar_lectura_mqtt(
         episodio_previo = await alerta_repository.obtener_episodio_abierto(payload.device_id)
         try:
             lectura_guardada = await use_case.execute(lectura)
-        except DispositivoNoAutorizadoError:
+        except DispositivoNoAutorizadoError as exc:
+            revocada = isinstance(exc, CredencialRevocadaError)
             auditoria = AuditarAccionCriticaUseCase(
                 SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
             )
             await auditoria.execute(
                 usuario_id=None,
-                accion="DISPOSITIVO_RECHAZADO",
+                accion="LECTURA_RECHAZADA_CREDENCIAL_REVOCADA" if revocada else "DISPOSITIVO_RECHAZADO",
                 recurso="mqtt/lecturas",
                 detalle={"device_id": payload.device_id},
                 ip_origen=None,
             )
             await session.commit()
-            logger.warning("Dispositivo no registrado rechazado: %s", payload.device_id)
+            logger.warning("Dispositivo no autorizado rechazado: %s (%s)", payload.device_id, exc)
+            if revocada:
+                await _expulsar_sesion_revocada(payload.device_id)
             # HU-07: rechazo PERMANENTE ya auditado — sin acuse, el firmware
             # reintentaría este bloque para siempre y bloquearía toda la cola
             # FIFO detrás de él.
