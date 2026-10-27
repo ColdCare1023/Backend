@@ -128,6 +128,17 @@ def test_confirmar_sin_pendiente_es_conflicto(client, token_admin, broker):
     assert respuesta.status_code == 409
 
 
+def test_la_rotacion_pide_cargar_primero_el_token_de_relevo(client, token_admin, broker):
+    """IoT ADR-17: en una rotación el token va primero al nodo (`mqtt_relevo`) y
+    después a la consola de EMQX, para no dejar fuera al nodo legítimo."""
+    _alta(client, token_admin)
+    mensaje = client.post(
+        f"/api/dispositivos/{DEVICE_ID}/credenciales/rotar", json={"motivo": "programada"},
+        headers=auth_header(token_admin),
+    ).json()["mensaje_broker"]
+    assert mensaje.index("nvs set mqtt_relevo") < mensaje.index("consola de EMQX")
+
+
 def test_aprovisionar_por_api_limpia_un_pendiente_anterior(client, token_admin, broker):
     _alta(client, token_admin)  # queda pendiente (modo manual)
     broker.resultado = True

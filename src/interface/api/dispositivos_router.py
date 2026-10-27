@@ -100,19 +100,35 @@ async def _registrar_resultado_broker(
     return pendiente
 
 
-def _mensaje_aprovisionar(device_id: str, resultado: bool | None) -> str | None:
+def _mensaje_aprovisionar(device_id: str, resultado: bool | None, alta: bool = False) -> str | None:
+    """Instrucción cuando el broker no aprovisionó el token por sí solo.
+
+    En el alta el nodo aún no tiene token: se carga como `mqtt_token`. En una
+    rotación el orden importa (IoT ADR-17): el token nuevo va PRIMERO al nodo
+    como `mqtt_relevo` y después a la consola de EMQX; el nodo, rechazado con
+    el viejo, entra con el relevo sin quedar fuera."""
     if resultado is True:
         return None
     causa = (
-        "La API del broker no aceptó la credencial: revise la instancia y"
+        "La API del broker no aceptó la credencial: revise la instancia."
         if resultado is False
-        else "Pendiente en el broker:"
+        else "Pendiente en el broker."
     )
+    if alta:
+        pasos = (
+            f"Cree el usuario «{device_id}» con este token en la autenticación de la instancia de EMQX "
+            "(consola), cárguelo en el nodo con `nvs set mqtt_token` por la consola serie y confirme la "
+            "operación en el sistema."
+        )
+    else:
+        pasos = (
+            "1) En el nodo (consola desbloqueada): `nvs set mqtt_relevo <token>`. "
+            f"2) En la consola de EMQX: cambie la contraseña del usuario «{device_id}» por este token. "
+            "3) El nodo reconecta solo con el relevo; confirme la operación en el sistema."
+        )
     return (
-        f"{causa} cree o actualice el usuario «{device_id}» con este token en la autenticación de la "
-        "instancia de EMQX (consola) y confirme la operación en el sistema. A continuación cárguelo en el "
-        "nodo con `nvs set mqtt_token` por la consola serie. Hasta hacerlo el nodo no conecta (sus "
-        "lecturas quedan en LittleFS). El token no se mostrará de nuevo."
+        f"{causa} {pasos} Hasta completarlo el nodo puede no conectar (sus lecturas quedan en LittleFS). "
+        "El token no se mostrará de nuevo."
     )
 
 # HU-43 Escenario 4: la HU pide "ADMINISTRADOR o TÉCNICO con permiso especial".
@@ -186,7 +202,7 @@ async def dar_de_alta(
         credencial=CredencialDispositivoResponse(
             device_id=body.device_id, token=token, generado_en=generado_en,
             credencial_aprovisionada=aprovisionada,
-            mensaje_broker=_mensaje_aprovisionar(body.device_id, aprovisionada),
+            mensaje_broker=_mensaje_aprovisionar(body.device_id, aprovisionada, alta=True),
             sesion_broker_cerrada=None,
         ),
     )
