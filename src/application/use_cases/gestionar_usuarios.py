@@ -5,7 +5,7 @@ from src.domain.entities.usuario import Usuario
 from src.domain.exceptions import DomainError, RecursoNoEncontradoError
 from src.domain.repositories.i_usuario_repository import IUsuarioRepository
 from src.domain.value_objects.rol import Rol
-from src.infrastructure.security.password_hasher import hash_password
+from src.infrastructure.security.password_hasher import hash_password_async
 
 
 async def _exigir_otro_administrador(
@@ -36,7 +36,7 @@ class CrearUsuarioUseCase:
         # BE-025: la contraseña inicial la conoce el administrador; el usuario
         # debe reemplazarla por una propia en su primer acceso.
         usuario = Usuario(
-            nombre=nombre, email=email, password_hash=hash_password(password), rol=rol, debe_cambiar_password=True
+            nombre=nombre, email=email, password_hash=await hash_password_async(password), rol=rol, debe_cambiar_password=True
         )
         return await self._usuario_repository.agregar(usuario)
 

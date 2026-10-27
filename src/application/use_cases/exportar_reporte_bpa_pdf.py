@@ -1,5 +1,8 @@
 from datetime import datetime, timezone
+from functools import partial
 from uuid import UUID
+
+import anyio
 
 from src.application.use_cases.exportar_reporte_bpa import (
     LIMITE_REGISTROS_REPORTE,
@@ -145,60 +148,65 @@ class ExportarReporteBPAPDFUseCase:
             "digest_cadena": (resultado.hash_final or "")[:16] + "…" if resultado.hash_final else "N/A",
         }
 
-        pdf_bytes = self._generador.generar(
-            lecturas=[
-                {
-                    "timestamp": lectura.timestamp,
-                    "temperatura_interna": lectura.temperatura_interna,
-                    "temperatura_ambiental": lectura.temperatura_ambiental,
-                    "humedad_ambiental": lectura.humedad_ambiental,
-                    "apertura_refrigerador": lectura.apertura_refrigerador,
-                    "nivel_riesgo": _riesgo_mostrado(lectura),
-                    "confianza_ia": lectura.confianza_ia,
-                    "origen": lectura.origen,
-                }
-                for lectura in lecturas
-            ],
-            alertas=[
-                {
-                    "created_at": a.created_at,
-                    "device_id": a.device_id,
-                    "nivel_riesgo": a.nivel_riesgo.value if a.nivel_riesgo is not None else None,
-                    "mensaje": a.mensaje,
-                    "revisada": a.revisada,
-                    "episodio_abierto": a.episodio_abierto,
-                }
-                for a in alertas
-            ],
-            trazabilidad=[
-                {
-                    "timestamp": r.timestamp,
-                    "tipo_evento": r.tipo_evento,
-                    "previous_hash": r.hash_encadenado.previous_hash,
-                    "hash_actual": r.hash_encadenado.hash_actual,
-                }
-                for r in trazabilidad
-            ],
-            checklists=[
-                {
-                    "fecha": c.fecha,
-                    "total_conformes": c.total_conformes(),
-                    "conforme": c.es_conforme(),
-                    "observaciones": c.observaciones,
-                    # BE-020: la fecha declarada junto a cuándo se registró y
-                    # modificó realmente; una declaración tardía queda a la vista.
-                    "registrado_en": c.created_at,
-                    "modificado_en": c.updated_at,
-                }
-                for c in checklists
-            ],
-            estadisticas=_calcular_estadisticas(lecturas),
-            veredicto_integridad=veredicto,
-            fecha_desde=fecha_desde.date().isoformat(),
-            fecha_hasta=fecha_hasta.date().isoformat(),
-            usuario=usuario_nombre,
-            device_id=device_id,
-            truncamiento=truncamiento,
+        # B-8: ReportLab es síncrono y tarda en reportes largos; se genera en un
+        # hilo de trabajo para no detener la ingesta MQTT ni los streams SSE.
+        pdf_bytes = await anyio.to_thread.run_sync(
+            partial(
+                self._generador.generar,
+                lecturas=[
+                    {
+                        "timestamp": lectura.timestamp,
+                        "temperatura_interna": lectura.temperatura_interna,
+                        "temperatura_ambiental": lectura.temperatura_ambiental,
+                        "humedad_ambiental": lectura.humedad_ambiental,
+                        "apertura_refrigerador": lectura.apertura_refrigerador,
+                        "nivel_riesgo": _riesgo_mostrado(lectura),
+                        "confianza_ia": lectura.confianza_ia,
+                        "origen": lectura.origen,
+                    }
+                    for lectura in lecturas
+                ],
+                alertas=[
+                    {
+                        "created_at": a.created_at,
+                        "device_id": a.device_id,
+                        "nivel_riesgo": a.nivel_riesgo.value if a.nivel_riesgo is not None else None,
+                        "mensaje": a.mensaje,
+                        "revisada": a.revisada,
+                        "episodio_abierto": a.episodio_abierto,
+                    }
+                    for a in alertas
+                ],
+                trazabilidad=[
+                    {
+                        "timestamp": r.timestamp,
+                        "tipo_evento": r.tipo_evento,
+                        "previous_hash": r.hash_encadenado.previous_hash,
+                        "hash_actual": r.hash_encadenado.hash_actual,
+                    }
+                    for r in trazabilidad
+                ],
+                checklists=[
+                    {
+                        "fecha": c.fecha,
+                        "total_conformes": c.total_conformes(),
+                        "conforme": c.es_conforme(),
+                        "observaciones": c.observaciones,
+                        # BE-020: la fecha declarada junto a cuándo se registró y
+                        # modificó realmente; una declaración tardía queda a la vista.
+                        "registrado_en": c.created_at,
+                        "modificado_en": c.updated_at,
+                    }
+                    for c in checklists
+                ],
+                estadisticas=_calcular_estadisticas(lecturas),
+                veredicto_integridad=veredicto,
+                fecha_desde=fecha_desde.date().isoformat(),
+                fecha_hasta=fecha_hasta.date().isoformat(),
+                usuario=usuario_nombre,
+                device_id=device_id,
+                truncamiento=truncamiento,
+            )
         )
 
         # Deja constancia de la exportación (quién descargó qué período).

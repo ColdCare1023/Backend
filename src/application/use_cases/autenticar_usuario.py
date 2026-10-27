@@ -4,7 +4,12 @@ from uuid import UUID
 from src.domain.exceptions import CredencialesInvalidasError
 from src.domain.repositories.i_usuario_repository import IUsuarioRepository
 from src.infrastructure.security.jwt_handler import JWTHandler
-from src.infrastructure.security.password_hasher import hash_password, necesita_rehash, verify_password
+from src.infrastructure.security.password_hasher import (
+    hash_password,
+    hash_password_async,
+    necesita_rehash,
+    verify_password_async,
+)
 
 # Hash señuelo: cuando el email no existe se verifica igualmente contra este
 # hash para que la respuesta tarde lo mismo que con un usuario real. Sin esto,
@@ -33,9 +38,9 @@ class AutenticarUsuarioUseCase:
     async def execute(self, email: str, password: str) -> ResultadoAutenticacion:
         usuario = await self._usuario_repository.obtener_por_email(email)
         if usuario is None:
-            verify_password(password, _HASH_SENUELO)
+            await verify_password_async(password, _HASH_SENUELO)
             raise CredencialesInvalidasError("Email o contraseña incorrectos")
-        if not verify_password(password, usuario.password_hash):
+        if not await verify_password_async(password, usuario.password_hash):
             raise CredencialesInvalidasError("Email o contraseña incorrectos")
         # HU-45: un usuario desactivado no puede volver a iniciar sesión.
         if not usuario.is_active:
@@ -43,7 +48,7 @@ class AutenticarUsuarioUseCase:
         # BE-021: los hashes heredados (bcrypt) o con parámetros antiguos se
         # sustituyen por Argon2id vigente; el llamador confirma la transacción.
         if necesita_rehash(usuario.password_hash):
-            usuario.password_hash = hash_password(password)
+            usuario.password_hash = await hash_password_async(password)
             await self._usuario_repository.actualizar(usuario)
 
         token = self._jwt_handler.crear_token(usuario.id, usuario.email, usuario.rol)

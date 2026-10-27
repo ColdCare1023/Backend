@@ -6,7 +6,7 @@ from uuid import UUID
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.domain.exceptions import DomainError, RecursoNoEncontradoError
 from src.domain.repositories.i_device_repository import IDeviceRepository
-from src.infrastructure.security.password_hasher import hash_password
+from src.infrastructure.security.password_hasher import hash_password_async
 
 _MOTIVOS_BAJA = frozenset({"falla_hardware", "mantenimiento", "reemplazo", "fin_de_servicio"})
 
@@ -190,7 +190,7 @@ class RotarCredencialDispositivoUseCase:
 
         token = secrets.token_urlsafe(32)
         cuando = datetime.now(tz=timezone.utc)
-        await self._device_repository.guardar_credencial(device_id, hash_password(token), cuando)
+        await self._device_repository.guardar_credencial(device_id, await hash_password_async(token), cuando)
 
         await self._registrar_hash.execute(
             tipo_evento=tipo_evento,

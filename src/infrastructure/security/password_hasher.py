@@ -10,6 +10,7 @@ login los reemplaza por Argon2id en cuanto el usuario se autentica
 (`necesita_rehash`).
 """
 
+import anyio
 import bcrypt
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
@@ -56,3 +57,15 @@ def necesita_rehash(password_hash: str) -> bool:
         return _argon2.check_needs_rehash(password_hash)
     except InvalidHashError:
         return True
+
+
+# B-8: Argon2id cuesta decenas de milisegundos de CPU a propósito. Llamado
+# dentro de una ruta asíncrona bloquearía el bucle de eventos (y con él la
+# ingesta MQTT y los streams SSE) durante cada login. Las rutas y casos de uso
+# asíncronos usan estas variantes, que lo ejecutan en un hilo de trabajo.
+async def hash_password_async(password: str) -> str:
+    return await anyio.to_thread.run_sync(hash_password, password)
+
+
+async def verify_password_async(password: str, password_hash: str) -> bool:
+    return await anyio.to_thread.run_sync(verify_password, password, password_hash)

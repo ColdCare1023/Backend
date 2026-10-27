@@ -19,7 +19,10 @@ from src.domain.entities.usuario import Usuario
 from src.domain.exceptions import CredencialesInvalidasError, DomainError, RecursoNoEncontradoError
 from src.domain.repositories.i_password_reset_repository import IPasswordResetRepository
 from src.domain.repositories.i_usuario_repository import IUsuarioRepository
-from src.infrastructure.security.password_hasher import hash_password, verify_password
+from src.infrastructure.security.password_hasher import (
+    hash_password_async,
+    verify_password_async,
+)
 
 VIGENCIA_ENLACE_RECUPERACION = timedelta(minutes=30)
 _ENLACE_INVALIDO = "El enlace de recuperación no es válido o ya caducó."
@@ -45,11 +48,11 @@ class CambiarPasswordUseCase:
         self._recuperacion = recuperacion
 
     async def execute(self, usuario: Usuario, actual: str, nueva: str) -> Usuario:
-        if not verify_password(actual, usuario.password_hash):
+        if not await verify_password_async(actual, usuario.password_hash):
             raise CredencialesInvalidasError("La contraseña actual no es correcta")
-        if verify_password(nueva, usuario.password_hash):
+        if await verify_password_async(nueva, usuario.password_hash):
             raise DomainError("La nueva contraseña debe ser distinta de la actual")
-        usuario.establecer_password(hash_password(nueva), _ahora(), temporal=False, conservar_token_nuevo=True)
+        usuario.establecer_password(await hash_password_async(nueva), _ahora(), temporal=False, conservar_token_nuevo=True)
         await self._recuperacion.anular_pendientes(usuario.id)
         return await self._usuarios.actualizar(usuario)
 
@@ -77,7 +80,7 @@ class RestablecerPasswordPorAdminUseCase:
         if not usuario.is_active:
             raise DomainError("El usuario está desactivado: reactívelo para asignarle una contraseña")
         temporal = generar_password_temporal()
-        usuario.establecer_password(hash_password(temporal), _ahora(), temporal=True)
+        usuario.establecer_password(await hash_password_async(temporal), _ahora(), temporal=True)
         await self._recuperacion.anular_pendientes(usuario.id)
         return await self._usuarios.actualizar(usuario), temporal
 
@@ -102,7 +105,7 @@ class ReactivarUsuarioUseCase:
         usuario.desactivado_por = None
         usuario.anonymized_for_gdpr = False
         temporal = generar_password_temporal()
-        usuario.establecer_password(hash_password(temporal), _ahora(), temporal=True)
+        usuario.establecer_password(await hash_password_async(temporal), _ahora(), temporal=True)
         await self._recuperacion.anular_pendientes(usuario.id)
         return await self._usuarios.actualizar(usuario), temporal
 
@@ -162,6 +165,6 @@ class RestablecerPasswordConEnlaceUseCase:
         usuario = await self._usuarios.obtener_por_id(usuario_id)
         if usuario is None or not usuario.is_active:
             raise CredencialesInvalidasError(_ENLACE_INVALIDO)
-        usuario.establecer_password(hash_password(nueva), _ahora(), temporal=False)
+        usuario.establecer_password(await hash_password_async(nueva), _ahora(), temporal=False)
         await self._recuperacion.anular_pendientes(usuario.id)
         return await self._usuarios.actualizar(usuario)
