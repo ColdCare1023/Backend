@@ -42,8 +42,11 @@ IoT `docs/evidencias/HU-44_rotacion_relevo_evidencia.md`.
    SIN_DATOS durante la retención: se abre «monitoreo_suspendido», que avisa con su propio texto (era la
    observación de la sección 7 de la evidencia de IoT).
 5. Cada rotación deja en la conectividad el par `lwt_offline`/`online` del LWT.
-   Es lo esperado. Queda pendiente etiquetarlo como «reconexión por rotación» en
-   la bitácora.
+   Es lo esperado. Desde `61670f8`, el backend anota cada expulsión de sesión
+   que provoca y, durante los 120 s siguientes, audita ese par con
+   `motivo: reconexion_por_rotacion`. Tras confirmar la consola, el motivo es
+   `reconexion_por_confirmacion_consola`, y tras revocar,
+   `expulsion_por_revocacion`.
 
 Consulta para la tabla de lecturas recuperadas:
 
@@ -70,6 +73,21 @@ reemplazan el banco.
 Suite completa: **1009** pruebas del backend y **121** nativas del firmware.
 
 ## Pruebas de banco que faltan (pila local)
+
+El script `scripts/pruebas_hu44_banco.py` ejecuta los pasos que no hace el
+nodo y deja la hora de cada resultado:
+
+| Subcomando | Prueba |
+|---|---|
+| `atacante` | D |
+| `token-invalido` y `acl` | G |
+| `confirmar` | B' y E |
+| `revocar` | F |
+| `informe` | Bitácora en CSV para `docs/evidencias/logs/` |
+
+Los tokens se leen de variables de entorno, nunca de los argumentos. El script
+todavía no se ha ejecutado contra la pila; sus pruebas unitarias solo comprueban
+que la telemetría que publica cumple el contrato v1.0.
 
 Para cada prueba se registra lo siguiente:
 

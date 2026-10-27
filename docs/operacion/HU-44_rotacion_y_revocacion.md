@@ -83,6 +83,14 @@ El dispositivo expone `rotacion_por_compromiso` y `posesion_pendiente`. Este
 último indica que la consola está confirmada y falta la prueba. El estado
 operativo del nodo es `MONITOREO_SUSPENDIDO`.
 
+## Bitácora de conectividad
+
+Cada expulsión de sesión que hace el backend (al rotar, al confirmar la consola
+o al revocar) queda anotada con su hora y su motivo. Durante los 120 s
+siguientes, el LWT y el `online` que produce esa expulsión se auditan con
+`motivo` = `reconexion_por_rotacion`, `reconexion_por_confirmacion_consola` o
+`expulsion_por_revocacion`, y así no se confunden con una caída del nodo.
+
 ## Límites conocidos
 
 - **Expulsión mutua.** Mientras el broker acepte el token filtrado, el nodo y
