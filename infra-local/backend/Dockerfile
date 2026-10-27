@@ -4,6 +4,12 @@
 FROM python:3.13-slim@sha256:98ce6fb13b3803744fbca11434f00818f1e300e4e48a4f204e07b2c928b6218e
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+# HU-29: pg_dump/pg_restore para el respaldo programado (scripts.respaldo_postgres)
+# y la prueba de restauración. Cliente 17 (Debian trixie): compatible con
+# servidores PostgreSQL ≤ 17.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
 # BE-021: requirements.txt es el lockfile (versiones exactas + hashes).
 COPY requirements.txt .
 RUN pip install --no-cache-dir --require-hashes -r requirements.txt
