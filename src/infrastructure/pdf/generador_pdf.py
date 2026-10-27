@@ -362,7 +362,7 @@ class GeneradorReporteBPAPDF:
             titulo = "◐ Cadena con ruptura aislada"
             detalle = (
                 f"La cadena registra <b>{veredicto.get('total_rupturas', 0)}</b> alteración(es) histórica(s), "
-                "todas aisladas por un administrador (HU-47). Los registros alterados no son verificables; "
+                "todas aisladas por un administrador (HU-26). Los registros alterados no son verificables; "
                 f"la cadena vuelve a ser íntegra desde <b>{veredicto.get('integra_desde') or '—'}</b>.<br/>"
                 f"Verificado el: <b>{fecha_verificacion}</b>"
             )
@@ -373,7 +373,7 @@ class GeneradorReporteBPAPDF:
                 f"La verificación detectó una inconsistencia en la posición <b>{posicion}</b> de la cadena, "
                 f"con <b>{veredicto.get('registros_posteriores_afectados', 0)}</b> registros posteriores afectados. "
                 "El contenido de este reporte debe considerarse NO verificable hasta que un administrador "
-                "aísle el registro corrupto y restaure la cadena (HU-47).<br/>"
+                "aísle el registro corrupto y restaure la cadena (HU-26).<br/>"
                 f"Verificado el: <b>{fecha_verificacion}</b>"
             )
 
