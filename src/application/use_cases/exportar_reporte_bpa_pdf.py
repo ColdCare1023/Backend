@@ -22,6 +22,16 @@ TEMP_MIN_RANGO = 2.0
 TEMP_MAX_RANGO = 8.0
 
 
+def _riesgo_mostrado(lectura: LecturaTermica) -> str | None:
+    """HU-34/HU-38: el reporte cuenta y rotula el riesgo EFECTIVO (regla 2-8 °C
+    + salvaguarda), no la clase cruda del modelo: el Random Forest es binario y
+    nunca produce `excursion_critica`, así que contar por `nivel_riesgo` daba
+    siempre cero excursiones. Lecturas antiguas sin riesgo efectivo calculado
+    conservan su clase."""
+    riesgo = lectura.riesgo_efectivo or lectura.nivel_riesgo
+    return riesgo.value if riesgo is not None else None
+
+
 def _calcular_estadisticas(lecturas: list[LecturaTermica]) -> dict:
     """Agregados del período. El % de tiempo en rango se aproxima por
     proporción de lecturas conformes: el muestreo del ESP32 es de cadencia
@@ -38,7 +48,7 @@ def _calcular_estadisticas(lecturas: list[LecturaTermica]) -> dict:
 
     por_nivel: dict[str, int] = {}
     for lectura in lecturas:
-        clave = lectura.nivel_riesgo.value if lectura.nivel_riesgo is not None else "sin_clasificar"
+        clave = _riesgo_mostrado(lectura) or "sin_clasificar"
         por_nivel[clave] = por_nivel.get(clave, 0) + 1
 
     return {
@@ -143,7 +153,7 @@ class ExportarReporteBPAPDFUseCase:
                     "temperatura_ambiental": lectura.temperatura_ambiental,
                     "humedad_ambiental": lectura.humedad_ambiental,
                     "apertura_refrigerador": lectura.apertura_refrigerador,
-                    "nivel_riesgo": lectura.nivel_riesgo.value if lectura.nivel_riesgo is not None else None,
+                    "nivel_riesgo": _riesgo_mostrado(lectura),
                     "confianza_ia": lectura.confianza_ia,
                     "origen": lectura.origen,
                 }
