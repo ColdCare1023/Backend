@@ -349,7 +349,16 @@ def importar_coldcare_csv(ruta_csv: Path) -> tuple[pd.DataFrame, InformeImportac
     """CSV exportado de `thermal_readings` (ver docs/ml/09_REPRODUCIBILITY.md):
     device_id, timestamp (ISO 8601 con zona), temperatura_interna y,
     opcional, apertura_refrigerador. Las lecturas manuales y simuladas deben
-    excluirse en la consulta de exportación (origen = 'dispositivo')."""
+    excluirse en la consulta de exportación (origen = 'dispositivo').
+
+    HU-17/HU-18 (corridas controladas en hardware), columnas opcionales:
+    - `corrida_id`: cada corrida es una serie propia (ninguna ventana ni
+      etiqueta la atraviesa) y la unidad de partición (particion.py).
+    - `time_quality`: `unsynced` (sin hora real) se excluye; se cuenta.
+    - `ds18b20_status` / `sensor_fault`: una lectura con SENSOR_FAULT no aporta
+      temperatura; se convierte en hueco y se cuenta.
+    - `temperatura_ambiental`, `humedad_ambiental`: contexto del SHT31 para la
+      ablación con y sin ese sensor."""
     informe = InformeImportacion(fuente="coldcare")
     texto = _leer_texto_acotado(ruta_csv)
     df = pd.read_csv(io.StringIO(texto), sep=detectar_separador(texto), dtype=str)
@@ -361,21 +370,38 @@ def importar_coldcare_csv(ruta_csv: Path) -> tuple[pd.DataFrame, InformeImportac
     ts = pd.to_datetime(df["timestamp"], utc=True, errors="coerce", format="ISO8601")
     temperatura = pd.to_numeric(df["temperatura_interna"], errors="coerce")
     informe.descartar("timestamp_invalido", int(ts.isna().sum()))
+    ok = ts.notna()
+    if "time_quality" in df.columns:
+        sin_hora = df["time_quality"].str.strip().str.lower().eq("unsynced") & ok
+        informe.descartar("time_quality_unsynced", int(sin_hora.sum()))
+        ok &= ~sin_hora
+    falla = pd.Series(False, index=df.index)
+    if "ds18b20_status" in df.columns:
+        falla |= df["ds18b20_status"].str.strip().str.upper().eq("SENSOR_FAULT")
+    if "sensor_fault" in df.columns:
+        falla |= df["sensor_fault"].str.strip().str.lower().isin(("true", "1"))
+    informe.descartar("sensor_fault", int((falla & ok).sum()))
+    temperatura = temperatura.mask(falla)
     puerta = (
         df["apertura_refrigerador"].str.strip().str.lower().map({"true": 1.0, "false": 0.0, "1": 1.0, "0": 0.0})
         if "apertura_refrigerador" in df.columns
         else pd.Series(np.nan, index=df.index)
     )
-    ok = ts.notna()
-    lecturas = pd.DataFrame(
-        {
-            "fuente": "coldcare",
-            "entorno_id": "coldcare_" + df.loc[ok, "device_id"].str.strip(),
-            "serie_id": df.loc[ok, "device_id"].str.strip(),
-            "timestamp": ts[ok],
-            "temperatura_interna": temperatura[ok].to_numpy(dtype=float),
-            "puerta_abierta": puerta[ok].to_numpy(dtype=float),
-        }
-    ).reset_index(drop=True)
+    device = df["device_id"].str.strip()
+    serie = device + "#" + df["corrida_id"].str.strip() if "corrida_id" in df.columns else device
+    columnas = {
+        "fuente": "coldcare",
+        "entorno_id": "coldcare_" + device[ok],
+        "serie_id": serie[ok],
+        "timestamp": ts[ok],
+        "temperatura_interna": temperatura[ok].to_numpy(dtype=float),
+        "puerta_abierta": puerta[ok].to_numpy(dtype=float),
+    }
+    if "corrida_id" in df.columns:
+        columnas["corrida_id"] = df.loc[ok, "corrida_id"].str.strip()
+    for nombre in ("temperatura_ambiental", "humedad_ambiental"):
+        if nombre in df.columns:
+            columnas[nombre] = pd.to_numeric(df.loc[ok, nombre], errors="coerce").to_numpy(dtype=float)
+    lecturas = pd.DataFrame(columnas).reset_index(drop=True)
     informe.filas_validas = int(lecturas["temperatura_interna"].notna().sum())
     return lecturas, informe

@@ -38,6 +38,7 @@ from src.infrastructure.ai.prediccion_preventiva.entrenamiento import (
     Observaciones,
     ajustar_baselines,
     baseline_mayoritario,
+    baseline_prior,
     buscar_hiperparametros,
     construir_observaciones,
     crear_modelo,
@@ -430,6 +431,9 @@ def ejecutar_experimento_hohenheim(
         "clase_mayoritaria": _evaluar_puntuaciones(
             "clase_mayoritaria", obs, prueba, baseline_mayoritario(y[dev], prueba.size), 0.5, episodios_prueba, config, True
         ),
+        "clase_prior": _evaluar_puntuaciones(
+            "clase_prior", obs, prueba, baseline_prior(y[dev], prueba.size), 0.5, episodios_prueba, config, True
+        ),
     }
     for nombre_base, puntuacion in puntuaciones_base.items():
         resultados_prueba[nombre_base] = _evaluar_puntuaciones(
@@ -618,6 +622,10 @@ def evaluar_criterios(resultado: dict) -> tuple[str, dict]:
             "cumple": ap(rf) > ap(mejor_base),
         },
     }
+    # Segundo juego de criterios (F1 macro ≥ 0,85, el que cita el TI): se
+    # reporta siempre junto al principal, sin decidir el estado por sí solo.
+    f1 = rf["observacion"].get("macro_f1")
+    criterio_f1 = {"valor": f1, "umbral": 0.85, "cumple": f1 is not None and f1 >= 0.85}
     if not detalle["suficiencia_incidentes"]["cumple"]:
         estado = ESTADO_EXPERIMENTAL
         motivo = "Incidentes independientes en prueba insuficientes para una evaluación concluyente."
@@ -627,7 +635,7 @@ def evaluar_criterios(resultado: dict) -> tuple[str, dict]:
     else:
         estado = ESTADO_RECHAZADO
         motivo = "Con eventos suficientes, no alcanza los criterios de desempeño."
-    return estado, {"criterios": c, "evaluacion": detalle, "motivo": motivo}
+    return estado, {"criterios": c, "evaluacion": detalle, "criterio_f1": criterio_f1, "motivo": motivo}
 
 
 def _sin_privados(d):

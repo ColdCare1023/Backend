@@ -2,6 +2,8 @@
 
 Baselines (todos usan SOLO información disponible en t):
 1. clase_mayoritaria  — DummyClassifier(most_frequent).
+1b. clase_prior       — DummyClassifier(prior): puntúa con la prevalencia de
+                        entrenamiento; su AP es la tasa base de positivos.
 2. proximidad_limite  — alarma si la distancia al límite más cercano es ≤ m;
                         m se elige en validación.
 3. tendencia_reciente — extrapola la pendiente de 10 min a t + h y alarma si
@@ -215,6 +217,13 @@ def ajustar_baselines(obs: Observaciones, etiquetadas: pd.DataFrame, indices_val
 
 def baseline_mayoritario(y_entrenamiento: np.ndarray, n: int) -> np.ndarray:
     modelo = DummyClassifier(strategy="most_frequent").fit(np.zeros((y_entrenamiento.size, 1)), y_entrenamiento)
+    return modelo.predict_proba(np.zeros((n, 1)))[:, list(modelo.classes_).index(1)] if 1 in modelo.classes_ else np.zeros(n)
+
+
+def baseline_prior(y_entrenamiento: np.ndarray, n: int) -> np.ndarray:
+    """DummyClassifier(strategy="prior"): la probabilidad de riesgo es la
+    prevalencia de positivos en entrenamiento, igual para todas las filas."""
+    modelo = DummyClassifier(strategy="prior").fit(np.zeros((y_entrenamiento.size, 1)), y_entrenamiento)
     return modelo.predict_proba(np.zeros((n, 1)))[:, list(modelo.classes_).index(1)] if 1 in modelo.classes_ else np.zeros(n)
 
 

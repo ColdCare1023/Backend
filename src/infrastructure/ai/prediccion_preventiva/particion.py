@@ -132,3 +132,65 @@ def auditar_particion(
     comprobaciones["transformaciones_ajustadas_con_prueba"] = 0
     resultado["aprobada"] = all(v == 0 for v in comprobaciones.values())
     return resultado
+
+
+@dataclass(frozen=True, slots=True)
+class ParticionCorridas:
+    entrenamiento: np.ndarray
+    prueba: np.ndarray
+    corridas_entrenamiento: list[str]
+    corridas_prueba: list[str]
+    corridas_descartadas: dict[str, str]
+    separacion_min: float | None
+
+    def como_dict(self) -> dict:
+        return {
+            "entrenamiento": self.corridas_entrenamiento,
+            "prueba": self.corridas_prueba,
+            "descartadas": self.corridas_descartadas,
+            "separacion_min": self.separacion_min,
+            "observaciones_entrenamiento": int(self.entrenamiento.size),
+            "observaciones_prueba": int(self.prueba.size),
+        }
+
+
+def dividir_por_corrida(
+    tabla: pd.DataFrame, corridas_prueba: list[str], config: ConfiguracionPreventiva
+) -> ParticionCorridas:
+    """HU-18 (TI §1.4.1): partición por corrida controlada, nunca por fila.
+
+    Una corrida entera va a entrenamiento o a prueba. Si una corrida de
+    entrenamiento del MISMO equipo queda a menos de H de una de prueba, se
+    descarta de entrenamiento (su horizonte podría ver la excursión de prueba).
+    Devuelve la separación mínima efectiva entre corridas de ambos lados."""
+    if "corrida_id" not in tabla.columns:
+        raise ValueError("La tabla no trae corrida_id: exporte las corridas controladas con esa columna")
+    prueba_set = set(corridas_prueba)
+    desconocidas = prueba_set - set(tabla["corrida_id"].unique())
+    if desconocidas:
+        raise ValueError(f"Corridas de prueba inexistentes: {sorted(desconocidas)}")
+    limites = tabla.groupby(["corrida_id", "entorno_id"])["g_ns"].agg(["min", "max"]).reset_index()
+    horizonte_ns = config.horizonte_min * NS_POR_MIN
+    descartadas: dict[str, str] = {}
+    separaciones: list[float] = []
+    for _, tr in limites[~limites["corrida_id"].isin(prueba_set)].iterrows():
+        for _, te in limites[limites["corrida_id"].isin(prueba_set)].iterrows():
+            if tr["entorno_id"] != te["entorno_id"]:
+                continue
+            hueco = max(te["min"] - tr["max"], tr["min"] - te["max"])
+            if hueco < horizonte_ns:
+                descartadas[tr["corrida_id"]] = f"a menos de H de la corrida de prueba {te['corrida_id']}"
+            else:
+                separaciones.append(hueco / NS_POR_MIN)
+    entrenamiento_corridas = sorted(
+        set(tabla["corrida_id"].unique()) - prueba_set - set(descartadas)
+    )
+    corrida = tabla["corrida_id"].to_numpy()
+    return ParticionCorridas(
+        entrenamiento=np.flatnonzero(np.isin(corrida, entrenamiento_corridas)),
+        prueba=np.flatnonzero(np.isin(corrida, sorted(prueba_set))),
+        corridas_entrenamiento=entrenamiento_corridas,
+        corridas_prueba=sorted(prueba_set),
+        corridas_descartadas=descartadas,
+        separacion_min=min(separaciones) if separaciones else None,
+    )

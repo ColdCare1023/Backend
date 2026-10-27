@@ -5,6 +5,7 @@
     python -m src.infrastructure.ai.prediccion_preventiva listar
     python -m src.infrastructure.ai.prediccion_preventiva verificar --version V
     python -m src.infrastructure.ai.prediccion_preventiva evaluar-coldcare --csv lecturas.csv --version V
+    python -m src.infrastructure.ai.prediccion_preventiva corridas --csv corridas.csv --prueba C3,C4 [--salida f.json]
     python -m src.infrastructure.ai.prediccion_preventiva estado --version V --nuevo ESTADO --motivo M \
         --responsable R [--evidencia informe_experimento_d.json]
 
@@ -37,6 +38,11 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("evaluar-coldcare", help="Experimento D: evalúa una versión con lecturas reales exportadas")
     p.add_argument("--csv", type=Path, required=True)
     p.add_argument("--version", required=True)
+    p.add_argument("--salida", type=Path, default=None)
+    p = sub.add_parser("corridas", help="HU-17/18: entrena y evalúa con corridas controladas (con y sin SHT31)")
+    p.add_argument("--csv", type=Path, required=True)
+    p.add_argument("--prueba", required=True, help="corrida_id de prueba separados por coma")
+    p.add_argument("--horizonte", type=int, default=30, help="H en minutos")
     p.add_argument("--salida", type=Path, default=None)
     p = sub.add_parser("estado", help="Cambia el estado de una versión (queda en el historial)")
     p.add_argument("--version", required=True)
@@ -74,6 +80,22 @@ def main(argv: list[str] | None = None) -> int:
         if args.salida:
             args.salida.write_text(json.dumps(informe, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
         _imprimir({k: informe[k] for k in ("version", "series", "observaciones", "positivas", "incidentes_independientes", "resultado")})
+    elif args.comando == "corridas":
+        from src.infrastructure.ai.prediccion_preventiva.configuracion import ConfiguracionPreventiva
+        from src.infrastructure.ai.prediccion_preventiva.corridas import ejecutar_pipeline_corridas
+
+        informe = ejecutar_pipeline_corridas(
+            args.csv, [c.strip() for c in args.prueba.split(",") if c.strip()],
+            ConfiguracionPreventiva(horizonte_min=args.horizonte),
+        )
+        if args.salida:
+            args.salida.write_text(json.dumps(informe, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+        _imprimir({
+            "corridas": informe["corridas"],
+            "excluidas": informe["importacion"],
+            "criterios": {c: r.get("criterios") for c, r in informe["resultados"].items()},
+            "ablacion_sht31": informe["ablacion_sht31"],
+        })
     elif args.comando == "estado":
         manifiesto = registro.cambiar_estado(args.version, args.nuevo, args.motivo, args.responsable, args.evidencia)
         _imprimir({"version": args.version, "estado": manifiesto["estado"]})

@@ -40,7 +40,11 @@ from src.infrastructure.ai.prediccion_preventiva.configuracion import (
 
 CONJUNTO_TERMICO = "termico_minimo"
 CONJUNTO_TERMICO_PUERTA = "termico_puerta"
-CONJUNTOS = (CONJUNTO_TERMICO, CONJUNTO_TERMICO_PUERTA)
+# HU-17 / ablación del TI §1.4.1: el conjunto térmico más el contexto del SHT31
+# (temperatura ambiental y humedad). Se compara contra `termico_minimo` para
+# medir si el segundo sensor aporta capacidad preventiva.
+CONJUNTO_TERMICO_AMBIENTE = "termico_ambiente"
+CONJUNTOS = (CONJUNTO_TERMICO, CONJUNTO_TERMICO_PUERTA, CONJUNTO_TERMICO_AMBIENTE)
 
 # Margen para "cerca del límite": el mismo 1 °C que usa la regla legada
 # `reglas_riesgo.MARGEN_PREVENTIVO_C`.
@@ -60,6 +64,8 @@ def nombres_features(config: ConfiguracionPreventiva, conjunto: str = CONJUNTO_T
     ]
     if conjunto == CONJUNTO_TERMICO_PUERTA:
         nombres += ["puerta_actual", f"frac_puerta_{w}m"]
+    if conjunto == CONJUNTO_TERMICO_AMBIENTE:
+        nombres += ["temp_amb_actual", "humedad_actual", "dif_interna_ambiente", f"media_temp_amb_{w}m"]
     return nombres
 
 
@@ -84,9 +90,13 @@ def calcular_matriz(
     puertas: np.ndarray | None,
     config: ConfiguracionPreventiva,
     conjunto: str = CONJUNTO_TERMICO,
+    ambiente: np.ndarray | None = None,
+    humedad: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """(X, ok): X n x f en el orden de `nombres_features`; ok indica las
-    filas con historial suficiente. Las filas no ok NO deben predecirse."""
+    filas con historial suficiente. Las filas no ok NO deben predecirse.
+    `ambiente` y `humedad` (ventanas del SHT31) solo los usa
+    CONJUNTO_TERMICO_AMBIENTE; sin ellos esas filas quedan no ok."""
     k = config.puntos_ventana
     if temperaturas.ndim != 2 or temperaturas.shape[1] != k:
         raise ValueError(f"Se esperaban ventanas de {k} puntos, llegaron {temperaturas.shape}")
@@ -137,6 +147,13 @@ def calcular_matriz(
                 puertas = np.full_like(temperaturas, np.nan)
             ok &= np.isfinite(puertas[:, -1])
             columnas += [puertas[:, -1], np.nanmean(puertas, axis=1)]
+        if conjunto == CONJUNTO_TERMICO_AMBIENTE:
+            if ambiente is None:
+                ambiente = np.full_like(temperaturas, np.nan)
+            if humedad is None:
+                humedad = np.full_like(temperaturas, np.nan)
+            ok &= np.isfinite(ambiente[:, -1]) & np.isfinite(humedad[:, -1])
+            columnas += [ambiente[:, -1], humedad[:, -1], actual - ambiente[:, -1], np.nanmean(ambiente, axis=1)]
 
     x = np.column_stack(columnas).astype(float)
     ok &= np.isfinite(x).all(axis=1)
@@ -161,7 +178,12 @@ def features_de_rejillas(
         orden = indices[np.argsort(rejillas["g_ns"].to_numpy()[indices], kind="stable")]
         temps = matriz_ventanas(rejillas["temperatura"].to_numpy()[orden], k)
         puertas = matriz_ventanas(rejillas["puerta"].to_numpy()[orden], k)
-        xs, oks = calcular_matriz(temps, puertas, config, conjunto)
+        contexto = {
+            nombre: matriz_ventanas(rejillas[columna].to_numpy()[orden], k)
+            for nombre, columna in (("ambiente", "temp_ambiental"), ("humedad", "humedad"))
+            if columna in rejillas.columns
+        }
+        xs, oks = calcular_matriz(temps, puertas, config, conjunto, **contexto)
         x[posiciones[orden]] = xs
         ok[posiciones[orden]] = oks
     return x, ok

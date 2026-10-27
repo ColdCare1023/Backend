@@ -157,6 +157,7 @@ def remuestrear(
     ancla_ns: int = 0,
     desde_ns: int | None = None,
     hasta_ns: int | None = None,
+    extras: dict[str, np.ndarray] | None = None,
 ) -> pd.DataFrame:
     """Rejilla regular cada `paso_s`: media de temperatura y fracción de
     puerta abierta de las lecturas en (g - agregacion_s, g]; NaN donde no
@@ -179,7 +180,17 @@ def remuestrear(
         if con_puerta.any():
             orden_p = np.argsort(ts_ns[con_puerta], kind="stable")
             puerta, _ = _media_causal(ts_ns[con_puerta][orden_p], puertas[con_puerta][orden_p], rejilla, agregacion_ns)
-    return pd.DataFrame({"g_ns": rejilla, "temperatura": media, "n_lecturas": n, "puerta": puerta})
+    salida = pd.DataFrame({"g_ns": rejilla, "temperatura": media, "n_lecturas": n, "puerta": puerta})
+    # HU-17: canales contextuales (SHT31: temperatura ambiental y humedad), con
+    # la misma media causal. NaN donde el sensor no aportó lecturas válidas.
+    for nombre, valores in (extras or {}).items():
+        columna = np.full(rejilla.size, np.nan)
+        con_valor = np.isfinite(valores)
+        if con_valor.any():
+            orden_e = np.argsort(ts_ns[con_valor], kind="stable")
+            columna, _ = _media_causal(ts_ns[con_valor][orden_e], valores[con_valor][orden_e], rejilla, agregacion_ns)
+        salida[nombre] = columna
+    return salida
 
 
 def segmentar(rejilla: pd.DataFrame, config: ConfiguracionPreventiva) -> pd.DataFrame:
@@ -222,6 +233,10 @@ def segmentar(rejilla: pd.DataFrame, config: ConfiguracionPreventiva) -> pd.Data
     return salida
 
 
+# HU-17: lecturas del SHT31 que, si vienen en la fuente, pasan a la rejilla.
+COLUMNAS_CONTEXTO = {"temperatura_ambiental": "temp_ambiental", "humedad_ambiental": "humedad"}
+
+
 def preparar_rejillas(lecturas: pd.DataFrame, config: ConfiguracionPreventiva) -> pd.DataFrame:
     """Remuestrea y segmenta cada serie. Devuelve una tabla larga con
     columnas: fuente, entorno_id, serie_id, segmento_id, timestamp, g_ns,
@@ -231,8 +246,13 @@ def preparar_rejillas(lecturas: pd.DataFrame, config: ConfiguracionPreventiva) -
         ts_ns = a_epoch_ns(df["timestamp"])
         temps = df["temperatura_interna"].to_numpy(dtype=float)
         puertas = df["puerta_abierta"].to_numpy(dtype=float)
+        extras = {
+            destino: df[origen].to_numpy(dtype=float)
+            for origen, destino in COLUMNAS_CONTEXTO.items()
+            if origen in df.columns
+        }
         rejilla = segmentar(
-            remuestrear(ts_ns, temps, puertas, config.paso_rejilla_s, config.agregacion_s), config
+            remuestrear(ts_ns, temps, puertas, config.paso_rejilla_s, config.agregacion_s, extras=extras), config
         )
         if rejilla.empty:
             continue
