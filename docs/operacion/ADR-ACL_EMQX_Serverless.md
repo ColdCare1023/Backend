@@ -22,6 +22,11 @@ solo el EMQX local de `infra-local`. En EMQX Cloud Serverless:
    marcadores). El `acl.conf` queda solo para la pila local.
 2. La acción por defecto de la autorización debe ser **deny** (lo que no
    coincide se rechaza), igual que `authorization.no_match = deny` en local.
+   Serverless no tiene el selector de modo lista blanca: se consigue con una
+   regla en **All Users**: `#`, *Publish & Subscribe*, **Deny**. Las reglas
+   por usuario se evalúan antes que las de All Users, así que las de la tabla
+   siguen valiendo (documentación de EMQX Cloud, «Authorization Mode»).
+   Preparación completa del banco: `HU-44_banco_serverless.md`.
 3. Cada alta, baja o reemplazo de un nodo exige actualizar sus cuatro reglas en
    la consola. Hasta confirmarlo, el dispositivo queda con `broker_pendiente`
    en el backend (HU-43/HU-44) y su telemetría se rechaza si la credencial fue
