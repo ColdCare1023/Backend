@@ -7,6 +7,15 @@ from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEnc
 from src.domain.exceptions import DomainError, RecursoNoEncontradoError
 from src.domain.repositories.i_device_repository import IDeviceRepository
 from src.infrastructure.security.password_hasher import hash_password_async
+from src.infrastructure.security.privacidad import enmascarar_email
+
+
+def _contacto_minimizado(email: str | None, telefono: str | None) -> str:
+    """B-10 (Ley 29733): la cadena y el historial son inmutables; guardan el
+    contacto enmascarado, suficiente para saber a quién se avisaba."""
+    correo = enmascarar_email(email) if email else None
+    fono = f"***{telefono[-3:]}" if telefono else None
+    return f"{correo} / {fono}"
 
 _MOTIVOS_BAJA = frozenset({"falla_hardware", "mantenimiento", "reemplazo", "fin_de_servicio"})
 
@@ -357,8 +366,8 @@ class ActualizarResponsableDispositivoUseCase:
             await self._device_repository.registrar_evento_config(
                 device_id,
                 campo="responsable_contacto",
-                valor_anterior=f"{anterior['responsable_email']} / {anterior['responsable_telefono']}",
-                valor_nuevo=f"{email} / {telefono}",
+                valor_anterior=_contacto_minimizado(anterior["responsable_email"], anterior["responsable_telefono"]),
+                valor_nuevo=_contacto_minimizado(email, telefono),
                 actor_id=actor_id,
             )
 
@@ -367,12 +376,12 @@ class ActualizarResponsableDispositivoUseCase:
             payload={
                 "device_id": device_id,
                 "responsable_nombre": nombre,
-                # El correo/teléfono del responsable SÍ queda en el payload:
-                # es el dato que la auditoría necesita para confirmar a quién
-                # se avisó ante una excursión, igual que el resto de metadatos
-                # de contacto operativo que ya viajan en claro en esta cadena.
-                "responsable_email": email,
-                "responsable_telefono": telefono,
+                # B-10 (Ley 29733): la cadena es inmutable, así que guarda el
+                # contacto minimizado (inicial + dominio, últimos 3 dígitos):
+                # basta para confirmar a quién se avisó. El valor completo vive
+                # solo en `devices`, donde sí se puede rectificar o suprimir.
+                "responsable_email": enmascarar_email(email) if email else None,
+                "responsable_telefono": f"***{telefono[-3:]}" if telefono else None,
                 "actor_id": str(actor_id),
             },
             device_id=device_id,

@@ -24,6 +24,7 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
 from src.infrastructure.database.repositories.usuario_repository import SQLAlchemyUsuarioRepository
+from src.infrastructure.security.privacidad import enmascarar_email
 from src.interface.api.deps import DbSessionDep, require_roles
 from src.interface.api.mappers import nombre_visible
 from src.interface.api.schemas import (
@@ -77,7 +78,7 @@ async def crear_usuario(
         accion="CREAR_USUARIO",
         recurso=f"usuarios/{usuario.id}",
         # Ley 29733: audit_logs es inmutable; nunca el correo completo.
-        detalle={"email": usuario.email, "rol": usuario.rol.value},
+        detalle={"email": enmascarar_email(usuario.email), "rol": usuario.rol.value},
         ip_origen=request.client.host if request.client else None,
     )
     await session.commit()
