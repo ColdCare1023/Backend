@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
@@ -24,9 +25,10 @@ from src.application.use_cases.gestionar_dispositivos import ActualizarIntervalo
 from src.application.use_cases.gestionar_firmware import RegistrarResultadoOtaUseCase, normalizar_version
 from src.application.use_cases.predecir_riesgo_preventivo import PredecirRiesgoPreventivoUseCase
 from src.application.use_cases.prueba_posesion import (
-    debe_emitir_desafio,
-    emitir_desafio,
+    REEMISION_MINIMA,
+    espera_prueba,
     mensaje_desafio,
+    preparar_desafio,
     verificar_posesion,
 )
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
@@ -92,9 +94,21 @@ from src.interface.api.sse_broadcaster import SSEBroadcaster
 from src.interface.api.sse_router import router as sse_router
 from src.interface.api.trazabilidad_router import router as trazabilidad_router
 from src.interface.api.usuarios_router import router as usuarios_router
+from src.interface.limitador_auditoria import LimitadorAuditoria
 from src.interface.tareas import VigilanteSinDatos, tipo_sse
 
 logger = logging.getLogger("interface.main")
+
+# HU-44: una fila de auditoría por minuto y clave durante la retención (un
+# atacante con el token filtrado puede publicar en bucle) y última vez que se
+# envió el desafío a cada nodo (el reenvío se espacia REEMISION_MINIMA).
+_LIMITE_AUDITORIA = LimitadorAuditoria()
+_DESAFIOS_ENVIADOS: dict[str, float] = {}
+
+
+def _toca_reenviar_desafio(device_id: str, sesion_nueva: bool) -> bool:
+    previo = _DESAFIOS_ENVIADOS.get(device_id)
+    return sesion_nueva or previo is None or time.monotonic() - previo >= REEMISION_MINIMA.total_seconds()
 
 
 def _device_id_del_topic(topic: str, sufijo: str = "lecturas") -> str | None:
@@ -261,8 +275,9 @@ async def _atender_retencion(
                 ),
                 device_id, temperatura, capturada_en, origen, ahora, boot_id=boot_id, seq_no=seq_no,
             )
-        if debe_emitir_desafio(await dispositivos.obtener_credencial(device_id), ahora, forzar=sesion_nueva):
-            nonce = await emitir_desafio(dispositivos, device_id, ahora)
+        credencial = await dispositivos.obtener_credencial(device_id)
+        if espera_prueba(credencial) and _toca_reenviar_desafio(device_id, sesion_nueva):
+            nonce = await preparar_desafio(dispositivos, device_id, credencial, ahora)
         await session.commit()
     if excursion is not None:
         cambio, aviso = excursion
@@ -270,6 +285,7 @@ async def _atender_retencion(
             notificaciones.encolar(aviso)
         await broadcaster.publicar(cambio.como_evento_sse(), tipo_sse(cambio))
     if nonce is not None:
+        _DESAFIOS_ENVIADOS[device_id] = time.monotonic()
         await _publicar_desafio(client, device_id, nonce)
 
 
@@ -295,14 +311,18 @@ async def _procesar_prueba_posesion(evento: contrato_v1.EventoV1, broadcaster: S
             verificada, motivo = False, "formato_invalido"
         if motivo == "sin_retencion":
             return  # respuesta tardía o repetida: no hay nada que probar
-        await auditoria.execute(
-            usuario_id=None,
-            accion="CREDENCIAL_POSESION_VERIFICADA" if verificada else "PRUEBA_POSESION_FALLIDA",
-            recurso=f"dispositivos/{evento.device_id}/credenciales",
-            detalle={"motivo": motivo, "boot_id": evento.boot_id},
-            ip_origen=None,
-            device_id=evento.device_id,
-        )
+        # Un fallo por minuto y motivo: quien tiene el token viejo puede
+        # publicar respuestas falsas en bucle.
+        suprimidos = 0 if verificada else _LIMITE_AUDITORIA.permitir("pop_fallida", evento.device_id, motivo)
+        if suprimidos is not None:
+            await auditoria.execute(
+                usuario_id=None,
+                accion="CREDENCIAL_POSESION_VERIFICADA" if verificada else "PRUEBA_POSESION_FALLIDA",
+                recurso=f"dispositivos/{evento.device_id}/credenciales",
+                detalle={"motivo": motivo, "boot_id": evento.boot_id, "suprimidos_desde_anterior": suprimidos},
+                ip_origen=None,
+                device_id=evento.device_id,
+            )
         if verificada:
             cambios = await cerrar_retencion(SQLAlchemyIncidenteRepository(session), auditoria, evento.device_id, ahora)
         await session.commit()
@@ -426,14 +446,17 @@ async def _procesar_evento_v1(
         if await credencial_en_cuarentena(device_repository, evento.device_id):
             # HU-44: rotación por compromiso en curso: el evento puede venir de
             # quien tiene el token filtrado; no altera el estado del nodo.
-            await auditoria.execute(
-                usuario_id=None,
-                accion="EVENTO_RETENIDO_ROTACION_COMPROMISO",
-                recurso="mqtt/eventos",
-                detalle={"device_id": evento.device_id, "tipo_evento": evento.event_type},
-                ip_origen=None,
-            )
-            await session.commit()
+            suprimidos = _LIMITE_AUDITORIA.permitir("evento_retenido", evento.device_id)
+            if suprimidos is not None:
+                await auditoria.execute(
+                    usuario_id=None,
+                    accion="EVENTO_RETENIDO_ROTACION_COMPROMISO",
+                    recurso="mqtt/eventos",
+                    detalle={"device_id": evento.device_id, "tipo_evento": evento.event_type,
+                             "suprimidos_desde_anterior": suprimidos},
+                    ip_origen=None,
+                )
+                await session.commit()
             # Un `online` es una sesión nueva: el desafío anterior se perdió.
             await _atender_retencion(
                 evento.device_id, client, broadcaster, notificaciones, sesion_nueva=evento.event_type == "online"
@@ -579,14 +602,17 @@ async def _procesar_evento_mqtt(
             return
         if await credencial_en_cuarentena(device_repository, evento.device_id):
             # HU-44: rotación por compromiso en curso (ver arriba).
-            await auditoria.execute(
-                usuario_id=None,
-                accion="EVENTO_RETENIDO_ROTACION_COMPROMISO",
-                recurso="mqtt/eventos",
-                detalle={"device_id": evento.device_id, "tipo_evento": evento.tipo_evento.value},
-                ip_origen=None,
-            )
-            await session.commit()
+            suprimidos = _LIMITE_AUDITORIA.permitir("evento_retenido", evento.device_id)
+            if suprimidos is not None:
+                await auditoria.execute(
+                    usuario_id=None,
+                    accion="EVENTO_RETENIDO_ROTACION_COMPROMISO",
+                    recurso="mqtt/eventos",
+                    detalle={"device_id": evento.device_id, "tipo_evento": evento.tipo_evento.value,
+                             "suprimidos_desde_anterior": suprimidos},
+                    ip_origen=None,
+                )
+                await session.commit()
             await _atender_retencion(
                 evento.device_id, client, broadcaster, notificaciones,
                 sesion_nueva=evento.tipo_evento is TipoEventoDispositivo.LWT_ONLINE,
@@ -920,16 +946,18 @@ async def _procesar_lectura_mqtt(
         try:
             lectura_guardada = await use_case.execute(lectura)
         except CredencialEnCuarentenaError:
-            await AuditarAccionCriticaUseCase(
-                SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
-            ).execute(
-                usuario_id=None,
-                accion="LECTURA_RETENIDA_ROTACION_COMPROMISO",
-                recurso="mqtt/lecturas",
-                detalle={"device_id": payload.device_id},
-                ip_origen=None,
-            )
-            await session.commit()
+            suprimidos = _LIMITE_AUDITORIA.permitir("lectura_retenida", payload.device_id)
+            if suprimidos is not None:
+                await AuditarAccionCriticaUseCase(
+                    SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+                ).execute(
+                    usuario_id=None,
+                    accion="LECTURA_RETENIDA_ROTACION_COMPROMISO",
+                    recurso="mqtt/lecturas",
+                    detalle={"device_id": payload.device_id, "suprimidos_desde_anterior": suprimidos},
+                    ip_origen=None,
+                )
+                await session.commit()
             logger.warning("Lectura retenida: rotación por compromiso en curso para %s", payload.device_id)
             # HU-44: rechazo TRANSITORIO, sin acuse a propósito. El nodo legítimo
             # conserva la lectura en LittleFS y la reenvía cuando prueba que tiene

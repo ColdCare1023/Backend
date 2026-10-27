@@ -29,7 +29,7 @@ PREFIJO_CLAVE = "coldcare-pop-v1:"
 TIPO_DESAFIO = "desafio_posesion"
 # El nodo puede tardar en reconectar tras la expulsión: el nonce vale 10 min.
 VIGENCIA_DESAFIO = timedelta(minutes=10)
-# Un nonce nuevo por cada mensaje retenido inundaría el tópico de acuses.
+# Reenviar el desafío con cada mensaje retenido inundaría el tópico de acuses.
 REEMISION_MINIMA = timedelta(seconds=30)
 
 
@@ -58,19 +58,32 @@ def espera_prueba(credencial: dict | None) -> bool:
     return bool(credencial and credencial.get("rotacion_por_compromiso") and not credencial.get("broker_pendiente"))
 
 
-def debe_emitir_desafio(credencial: dict | None, ahora: datetime, forzar: bool = False) -> bool:
-    """`forzar`: el nodo acaba de iniciar sesión (evento `online`), así que un
-    desafío anterior pudo perderse con la sesión expulsada."""
-    if not espera_prueba(credencial) or not credencial.get("pop_clave"):
-        return False
-    emitido = _como_utc(credencial.get("pop_nonce_emitido_en"))
-    return forzar or emitido is None or ahora - emitido >= REEMISION_MINIMA
+def nonce_vigente(credencial: dict | None, ahora: datetime) -> str | None:
+    emitido = _como_utc((credencial or {}).get("pop_nonce_emitido_en"))
+    nonce = (credencial or {}).get("pop_nonce")
+    if not nonce or emitido is None or ahora - emitido > VIGENCIA_DESAFIO:
+        return None
+    return nonce
 
 
 async def emitir_desafio(dispositivos: IDeviceRepository, device_id: str, ahora: datetime) -> str:
     nonce = secrets.token_hex(16)
     await dispositivos.registrar_desafio_posesion(device_id, nonce, ahora)
     return nonce
+
+
+async def preparar_desafio(
+    dispositivos: IDeviceRepository, device_id: str, credencial: dict | None, ahora: datetime
+) -> str | None:
+    """Nonce que hay que (re)enviar al nodo, o None si no se espera prueba.
+
+    Mientras el nonce vigente no caduque se reenvía EL MISMO: si se generara uno
+    nuevo en cada reconexión, una respuesta al anterior que llegue tarde (el
+    desafío de la API y el de la ingesta se cruzan en la reconexión) se
+    auditaría como fallo aunque el nodo tenga el token correcto."""
+    if not espera_prueba(credencial) or not credencial.get("pop_clave"):
+        return None
+    return nonce_vigente(credencial, ahora) or await emitir_desafio(dispositivos, device_id, ahora)
 
 
 @dataclass(frozen=True, slots=True)

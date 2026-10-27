@@ -8,6 +8,7 @@ reconectando), la ingesta lo vuelve a emitir con el siguiente mensaje retenido.
 """
 
 import logging
+import secrets
 
 import aiomqtt
 
@@ -40,7 +41,9 @@ class PublicadorDesafios:
                 port=s.mqtt_port,
                 username=s.mqtt_username,
                 password=s.mqtt_password,
-                identifier=f"{s.mqtt_client_id}-pop",
+                # Sufijo aleatorio: dos confirmaciones simultáneas con el mismo
+                # client id harían que el broker expulsara una de las dos.
+                identifier=f"{s.mqtt_client_id}-pop-{secrets.token_hex(3)}",
                 tls_context=build_ssl_context(s.mqtt_tls_enabled, s.mqtt_ca_file),
                 keepalive=30,
             ) as cliente:
