@@ -8,4 +8,4 @@ aiosqlite>=0.20.0
 greenlet>=3.1.0
 ruff>=0.6.0
 # BE-007: PostgreSQL embebido para probar los triggers de solo anexado.
-pgserver>=0.1.4
+pgserver>=0.1.4; python_version < "3.13"

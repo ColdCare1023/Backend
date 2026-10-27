@@ -41,8 +41,8 @@ instala exactamente lo probado y rechaza cualquier paquete alterado.
 Tras editar un `.in`, regenerar ambos lockfiles y auditar:
 
 ```bash
-uv pip compile requirements.in --universal --generate-hashes --python-version 3.12 -o requirements.txt
-uv pip compile requirements-dev.in --universal --generate-hashes --python-version 3.12 -c requirements.txt -o requirements-dev.txt
+uv pip compile requirements.in --universal --generate-hashes --python-version 3.13 -o requirements.txt
+uv pip compile requirements-dev.in --universal --generate-hashes --python-version 3.13 -c requirements.txt -o requirements-dev.txt
 pip-audit --require-hashes --disable-pip -r requirements-dev.txt
 ```
 

@@ -1,6 +1,6 @@
 name: CI
 
-# Sin esto, las 355 pruebas y el linter solo corren si alguien se acuerda de
+# Sin esto, las pruebas y el linter solo corren si alguien se acuerda de
 # ejecutarlos. Que fallen en el servidor es la única forma de que un cambio no
 # entre roto: el firmware llevaba meses sin compilar precisamente porque nada
 # lo comprobaba.
@@ -12,13 +12,35 @@ on:
 jobs:
   pruebas:
     runs-on: ubuntu-latest
+    # B-7: el contenedor usa 3.13 (Dockerfile) y el lockfile se compila con
+    # 3.13; 3.12 se mantiene mientras haya entornos de desarrollo en esa versión.
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.13', '3.12']
+    # B-7/B-9: PostgreSQL real para los triggers de solo anexado (BE-007) y la
+    # idempotencia/concurrencia de la ingesta (HU-11/HU-22). Con
+    # TEST_POSTGRES_URL definida esas pruebas nunca se omiten.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       # BE-022: acciones fijadas por SHA de commit (las etiquetas se pueden mover).
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
           cache: pip
 
       # BE-021: versiones exactas con hashes (requirements-dev.txt se genera
@@ -30,7 +52,15 @@ jobs:
         run: ruff check .
 
       - name: Pruebas con cobertura
-        run: pytest --cov=src --cov-report=term
+        # -rs lista lo omitido: con PostgreSQL en el servicio no debe haber
+        # pruebas de PostgreSQL omitidas.
+        run: pytest --cov=src --cov-report=term -rs
+
+      - name: Ninguna prueba de PostgreSQL omitida
+        run: |
+          pytest -q -rs tests/integration/test_be007_inmutabilidad_postgres.py \
+            tests/integration/test_hu11_hu22_idempotencia_postgres.py | tee salida_pg.txt
+          ! grep -q "SKIPPED" salida_pg.txt
 
       # Se audita el lockfile (lo que se despliega), no el entorno del runner.
       - name: Vulnerabilidades en dependencias
