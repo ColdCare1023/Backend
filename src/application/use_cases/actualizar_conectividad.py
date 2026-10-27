@@ -39,6 +39,7 @@ VENTANA_EXPULSION = timedelta(seconds=120)
 MOTIVO_EXPULSION = {
     "rotacion": "reconexion_por_rotacion",
     "consola_confirmada": "reconexion_por_confirmacion_consola",
+    "reenvio_desafio": "reconexion_por_reenvio_desafio",
     "revocacion": "expulsion_por_revocacion",
 }
 

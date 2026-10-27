@@ -688,7 +688,7 @@ async def reenviar_desafio_posesion(
         ip_origen=request.client.host if request.client else None,
     )
     await session.commit()
-    await _anotar_expulsion(session, device_id, "consola_confirmada")
+    await _anotar_expulsion(session, device_id, "reenvio_desafio")
     if await broker.desconectar_cliente(device_id) is not True:
         logger.warning("Reenvío del desafío para %s: la sesión MQTT no se pudo expulsar.", device_id)
     if nonce is not None and await publicador.publicar(device_id, mensaje_desafio(device_id, nonce)) is not True:
