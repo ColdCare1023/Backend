@@ -70,7 +70,7 @@ reemplazan el banco.
 | `tests/integration/test_hu44_hu10_credenciales_dispositivo.py` | Revocación y rechazo de telemetría | pasan |
 | IoT `test/test_core/test_posesion.cpp` | HMAC-SHA256 (RFC 4231) y la misma firma que verifica el backend | 6 pasan |
 
-Suite completa: **1009** pruebas del backend y **121** nativas del firmware.
+Suite completa: **1012** pruebas del backend y **121** nativas del firmware.
 
 ## Pruebas de banco que faltan (pila local)
 
