@@ -78,6 +78,15 @@ def get_publicador_desafios(settings: SettingsDep) -> PublicadorDesafios:
     return obtener_publicador_desafios(settings)
 
 
+async def _anotar_expulsion(session, device_id: str, motivo: str) -> None:
+    """HU-44: se anota ANTES de expulsar: el LWT puede llegar antes de que
+    termine la llamada a la API del broker."""
+    await SQLAlchemyDeviceRepository(session).registrar_expulsion_sesion(
+        device_id, motivo, datetime.now(tz=timezone.utc)
+    )
+    await session.commit()
+
+
 def _motivo_pendiente(broker: BrokerAdmin, resultado: bool | None) -> str:
     if resultado is False:
         return "api_broker_error"
@@ -500,6 +509,7 @@ async def rotar_credencial(
     aprovisionada = await broker.aprovisionar_credencial(device_id, token)
     if aprovisionada is not True:
         logger.warning("Credencial de %s rotada, pero no se aprovisionó en el broker.", device_id)
+    await _anotar_expulsion(session, device_id, "rotacion")
     cerrada = await broker.desconectar_cliente(device_id)
     pendiente = await _registrar_resultado_broker(
         session, broker, device_id, OPERACION_BROKER_APROVISIONAR, aprovisionada, admin.id, ip
@@ -587,6 +597,7 @@ async def revocar_credencial(
     eliminada = await broker.eliminar_credencial(device_id)
     if eliminada is not True:
         logger.warning("Credencial de %s revocada, pero no se eliminó del broker.", device_id)
+    await _anotar_expulsion(session, device_id, "revocacion")
     if await broker.desconectar_cliente(device_id) is not True:
         logger.warning("Credencial de %s revocada, pero su sesión MQTT no se pudo expulsar.", device_id)
     await _registrar_resultado_broker(session, broker, device_id, OPERACION_BROKER_RETIRAR, eliminada, admin.id, ip)
@@ -633,6 +644,7 @@ async def confirmar_operacion_broker(
     if dispositivo.get("rotacion_por_compromiso"):
         nonce = await emitir_desafio(SQLAlchemyDeviceRepository(session), device_id, datetime.now(tz=timezone.utc))
     await session.commit()
+    await _anotar_expulsion(session, device_id, "consola_confirmada")
     if await broker.desconectar_cliente(device_id) is not True:
         logger.warning("Consola confirmada para %s, pero su sesión MQTT no se pudo expulsar.", device_id)
     if nonce is not None and await publicador.publicar(device_id, mensaje_desafio(device_id, nonce)) is not True:

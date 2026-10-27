@@ -46,6 +46,8 @@ def _to_dict(model: DeviceModel) -> dict:
         "rotacion_por_compromiso": bool(model.rotacion_por_compromiso),
         # HU-44: consola confirmada; falta que el nodo pruebe el token nuevo.
         "posesion_pendiente": bool(model.rotacion_por_compromiso and not model.broker_pendiente),
+        "sesion_expulsada_en": model.sesion_expulsada_en,
+        "sesion_expulsada_motivo": model.sesion_expulsada_motivo,
         "intervalo_reporte_segundos": model.intervalo_reporte_segundos or 30,
         "ultimo_latido_en": model.ultimo_latido_en,
     }
@@ -358,6 +360,12 @@ class SQLAlchemyDeviceRepository(IDeviceRepository):
         # prueba que tiene el token nuevo (`concluir_rotacion_por_compromiso`).
         await self._session.flush()
         return _to_dict(model)
+
+    async def registrar_expulsion_sesion(self, device_id: str, motivo: str, cuando: datetime) -> None:
+        model = await self._requerir(device_id)
+        model.sesion_expulsada_en = cuando
+        model.sesion_expulsada_motivo = motivo
+        await self._session.flush()
 
     async def registrar_desafio_posesion(self, device_id: str, nonce: str, cuando: datetime) -> None:
         model = await self._requerir(device_id)

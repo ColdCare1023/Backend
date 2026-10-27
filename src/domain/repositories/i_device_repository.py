@@ -149,6 +149,10 @@ class IDeviceRepository(ABC):
         que tiene el token nuevo (`concluir_rotacion_por_compromiso`)."""
 
     @abstractmethod
+    async def registrar_expulsion_sesion(self, device_id: str, motivo: str, cuando: datetime) -> None:
+        """HU-44: el backend va a expulsar la sesión MQTT del nodo y por qué."""
+
+    @abstractmethod
     async def registrar_desafio_posesion(self, device_id: str, nonce: str, cuando: datetime) -> None:
         """HU-44: nonce vigente del desafío de posesión (sustituye al anterior)."""
 

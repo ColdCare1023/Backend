@@ -333,3 +333,29 @@ async def test_una_sesion_nueva_recibe_un_desafio_nuevo(client, token_admin, esp
     await main._procesar_lectura_mqtt(_Mensaje("lecturas", _telemetria("s1")), _Broadcaster(), espia)
 
     assert len(espia.desafios) == 2 and espia.desafios[-1]["nonce"] != primero
+
+
+async def test_el_par_lwt_online_de_una_rotacion_se_audita_como_reconexion(
+    client, token_admin, espia, db_session_factory
+):
+    """El LWT y el `online` que siguen a la expulsión de la sesión no son una
+    caída del nodo: la bitácora los marca como reconexión por rotación."""
+    _alta(client, token_admin)
+    await main._procesar_evento_mqtt(_Mensaje("eventos", _evento("online", {"rssi_dbm": -60})), _Broadcaster(), espia)
+    respuesta = client.post(
+        f"/api/dispositivos/{DEVICE_ID}/credenciales/rotar",
+        json={"motivo": "rotación programada", "causa": "preventiva"}, headers=auth_header(token_admin),
+    )
+    assert respuesta.status_code == 200
+
+    lwt = {"schema_version": "1.0", "device_id": DEVICE_ID, "event_type": "lwt_offline", "boot_id": 687}
+    await main._procesar_evento_mqtt(_Mensaje("eventos", lwt), _Broadcaster(), espia)
+    await main._procesar_evento_mqtt(_Mensaje("eventos", _evento("online", {"rssi_dbm": -60})), _Broadcaster(), espia)
+
+    filas = [a for a in await _filas(db_session_factory, AuditLogModel)
+             if a.accion in ("DISPOSITIVO_OFFLINE", "DISPOSITIVO_ONLINE")]
+    motivos = [(a.accion, (a.detalle or {}).get("motivo")) for a in filas]
+    # El alta también confirma la consola y expulsa la sesión.
+    assert motivos[0] == ("DISPOSITIVO_ONLINE", "reconexion_por_confirmacion_consola")
+    assert motivos[-2:] == [("DISPOSITIVO_OFFLINE", "reconexion_por_rotacion"),
+                            ("DISPOSITIVO_ONLINE", "reconexion_por_rotacion")]

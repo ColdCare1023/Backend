@@ -132,6 +132,10 @@ class DeviceModel(Base):
     pop_clave: Mapped[str | None] = mapped_column(String(64), nullable=True)
     pop_nonce: Mapped[str | None] = mapped_column(String(64), nullable=True)
     pop_nonce_emitido_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # HU-44: última expulsión de sesión hecha por el backend (rotación, consola,
+    # revocación): el LWT y el `online` que siguen no son una caída del nodo.
+    sesion_expulsada_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sesion_expulsada_motivo: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
     # HU-54: intervalo de captura del nodo (el umbral SIN_DATOS es N veces este
     # valor) y último `estado_nodo` recibido (latido).

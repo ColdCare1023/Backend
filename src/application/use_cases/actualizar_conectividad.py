@@ -18,16 +18,29 @@ está enviando telemetría está, por definición, conectado.
 
 El caso de uso no publica nada: devuelve el cambio para que el llamador emita
 el evento SSE `conectividad` DESPUÉS del COMMIT (D2).
+
+HU-44: si el backend expulsó la sesión hace poco (rotación, confirmación de la
+consola, revocación), el LWT y el `online` que siguen se auditan con ese
+`motivo` (p. ej. «reconexion_por_rotacion»): no son una caída del nodo.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.domain.repositories.i_device_repository import IDeviceRepository
 
 OrigenConectividad = Literal["online", "lwt", "telemetria"]
+
+# El LWT llega a 1,5 x keepalive y el nodo reconecta en segundos (0,5 s medido
+# el 27/10/2026); pasado este margen el cambio ya no se atribuye a la expulsión.
+VENTANA_EXPULSION = timedelta(seconds=120)
+MOTIVO_EXPULSION = {
+    "rotacion": "reconexion_por_rotacion",
+    "consola_confirmada": "reconexion_por_confirmacion_consola",
+    "revocacion": "expulsion_por_revocacion",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +50,7 @@ class CambioConectividad:
     desde: datetime
     boot_id: int | None
     origen: OrigenConectividad
+    motivo: str | None = None
 
     def como_evento_sse(self) -> dict:
         return {
@@ -45,6 +59,7 @@ class CambioConectividad:
             "desde": self.desde.isoformat(),
             "boot_id": self.boot_id,
             "origen": self.origen,
+            "motivo": self.motivo,
         }
 
 
@@ -70,6 +85,13 @@ class ActualizarConectividadUseCase:
         if dispositivo is None:
             return None
         boot_vigente = dispositivo.get("conectividad_boot_id")
+        if origen in ("lwt", "online"):
+            expulsada = dispositivo.get("sesion_expulsada_en")
+            if expulsada is not None and expulsada.tzinfo is None:
+                expulsada = expulsada.replace(tzinfo=timezone.utc)
+            motivo = MOTIVO_EXPULSION.get(dispositivo.get("sesion_expulsada_motivo") or "")
+            if expulsada is not None and motivo and timedelta(0) <= momento - expulsada <= VENTANA_EXPULSION:
+                detalle = {**(detalle or {}), "motivo": motivo}
 
         if origen == "telemetria":
             if dispositivo.get("estado_conectividad") == "online":
@@ -113,4 +135,4 @@ class ActualizarConectividadUseCase:
             ip_origen=None,
             device_id=device_id,
         )
-        return CambioConectividad(device_id, estado, momento, boot_id, origen)
+        return CambioConectividad(device_id, estado, momento, boot_id, origen, (detalle or {}).get("motivo"))
