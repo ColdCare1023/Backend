@@ -194,6 +194,11 @@ def test_consultar_inferencia_de_lectura_devuelve_evidencia(client, token_tecnic
     cuerpo = respuesta.json()
     assert cuerpo["lectura_id"] == tercera["id"]
     assert cuerpo["device_id"] == DEVICE_ID
+    # B-13: el panel de evidencia muestra también el riesgo efectivo.
+    assert cuerpo["excursion_confirmada"] is False
+    assert cuerpo["riesgo_efectivo"] == tercera["riesgo_efectivo"]
+    assert cuerpo["estado_inferencia"] == tercera["estado_inferencia"]
+    assert cuerpo["ia_experimental"] is tercera["ia_experimental"]
     if cuerpo["modelo_version"] is not None:
         # Solo si hay un modelo Random Forest real cargado en este entorno.
         assert cuerpo["probabilidades_por_clase"] is not None

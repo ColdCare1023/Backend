@@ -231,4 +231,8 @@ class ConsultarInferenciaLecturaUseCase:
             "confianza": lectura.confianza_ia,
             "origen_clasificacion": lectura.origen_clasificacion,
             "version_era_activa_y_aprobada_en_ese_momento": coincide_con_version_activa_historica,
+            "estado_inferencia": lectura.estado_inferencia,
+            "excursion_confirmada": lectura.excursion_confirmada,
+            "riesgo_efectivo": lectura.riesgo_efectivo,
+            "ia_experimental": bool((lectura.payload or {}).get("ia_experimental")),
         }

@@ -619,6 +619,12 @@ class InferenciaLecturaResponse(BaseModel):
     confianza: float | None
     origen_clasificacion: str | None
     version_era_activa_y_aprobada_en_ese_momento: bool | None
+    # B-13: lo que el panel de evidencia muestra junto a la clase del modelo.
+    estado_inferencia: str | None = None
+    excursion_confirmada: bool = False
+    riesgo_efectivo: NivelRiesgo | None = None
+    # HU-20: la clase la produjo el modelo legado (datos sintéticos).
+    ia_experimental: bool = False
 
 
 # IOT-004: tamaño de la partición de aplicación del nodo (1216 KB).
