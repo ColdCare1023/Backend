@@ -410,6 +410,8 @@ class DispositivoResponse(BaseModel):
     broker_pendiente_por: UUID | None = None
     broker_confirmado_en: datetime | None = None
     broker_confirmado_por: UUID | None = None
+    # HU-44: rotación por compromiso pendiente: la telemetría se retiene.
+    rotacion_por_compromiso: bool = False
     # HU-54: intervalo de captura del nodo y último latido (`estado_nodo`).
     intervalo_reporte_segundos: int = 30
     ultimo_latido_en: datetime | None = None
@@ -520,6 +522,9 @@ class HistorialConfiguracionResponse(BaseModel):
 
 class RotarCredencialRequest(_PeticionEstricta):
     motivo: str = Field(min_length=1, max_length=200)
+    # HU-44: «compromiso» = el token anterior se filtró. Si la consola del broker
+    # queda pendiente, la telemetría del nodo se retiene hasta confirmarla.
+    causa: Literal["preventiva", "compromiso"] = "preventiva"
 
 
 class RevocarCredencialRequest(_PeticionEstricta):
@@ -543,6 +548,9 @@ class CredencialDispositivoResponse(BaseModel):
     # BE-002: True si el broker cerró la sesión anterior; None si la API del
     # broker no está configurada.
     sesion_broker_cerrada: bool | None = None
+    # HU-44: rotación por compromiso con la consola pendiente: la ingesta
+    # retiene la telemetría (sin acuse) hasta que se confirme la consola.
+    telemetria_retenida: bool = False
 
 
 class DispositivoAltaResponse(DispositivoResponse):

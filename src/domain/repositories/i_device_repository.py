@@ -141,6 +141,12 @@ class IDeviceRepository(ABC):
         """La API del broker completó la operación: ya no hay nada pendiente."""
 
     @abstractmethod
+    async def marcar_rotacion_por_compromiso(self, device_id: str) -> None:
+        """La rotación pendiente es por token filtrado: la ingesta retiene la
+        telemetría del nodo hasta que se confirme la consola (se limpia con el
+        pendiente)."""
+
+    @abstractmethod
     async def confirmar_broker(self, device_id: str, actor_id: UUID, cuando: datetime) -> dict:
         """El administrador confirma que hizo en la consola la operación pendiente."""
 

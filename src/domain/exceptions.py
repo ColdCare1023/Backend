@@ -18,6 +18,14 @@ class CredencialRevocadaError(DispositivoNoAutorizadoError):
     aceptar la evidencia del nodo aunque este todavía consiga publicar."""
 
 
+class CredencialEnCuarentenaError(DispositivoNoAutorizadoError):
+    """HU-44: rotación por compromiso con la consola del broker pendiente. El
+    broker aún acepta el token filtrado y el backend no sabe con cuál se
+    autenticó cada conexión, así que la telemetría no se acepta como evidencia.
+    A diferencia de la revocación, el rechazo es TRANSITORIO: no lleva acuse y
+    el nodo legítimo la conserva en LittleFS hasta que se confirme la consola."""
+
+
 class CadenaTrazabilidadRotaError(DomainError):
     """Se lanza cuando la verificación de integridad de la cadena de hash falla."""
 

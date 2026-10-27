@@ -26,11 +26,13 @@ from src.application.use_cases.predecir_riesgo_preventivo import PredecirRiesgoP
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.application.use_cases.registrar_lectura_termica import (
     RegistrarLecturaTermicaUseCase,
+    credencial_en_cuarentena,
     credencial_revocada,
 )
 from src.application.use_cases.vigilar_sin_datos import CambioIncidente, resolver_sin_datos_por_lectura
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.exceptions import (
+    CredencialEnCuarentenaError,
     CredencialRevocadaError,
     DispositivoNoAutorizadoError,
     DomainError,
@@ -261,6 +263,18 @@ async def _procesar_evento_v1(
             )
             await session.commit()
             return
+        if await credencial_en_cuarentena(device_repository, evento.device_id):
+            # HU-44: rotación por compromiso pendiente: el evento puede venir de
+            # quien tiene el token filtrado; no altera el estado del nodo.
+            await auditoria.execute(
+                usuario_id=None,
+                accion="EVENTO_RETENIDO_ROTACION_COMPROMISO",
+                recurso="mqtt/eventos",
+                detalle={"device_id": evento.device_id, "tipo_evento": evento.event_type},
+                ip_origen=None,
+            )
+            await session.commit()
+            return
         if await credencial_revocada(device_repository, evento.device_id):
             # HU-44: credencial revocada: el evento no altera el estado del nodo.
             await auditoria.execute(
@@ -321,8 +335,10 @@ async def _registrar_estado_nodo(evento: contrato_v1.EventoV1) -> None:
     intervalo = (evento.detail or {}).get("intervalo_s")
     async with _session_factory() as session:
         dispositivos = SQLAlchemyDeviceRepository(session)
-        if not await dispositivos.esta_activo(evento.device_id) or await credencial_revocada(
-            dispositivos, evento.device_id
+        if (
+            not await dispositivos.esta_activo(evento.device_id)
+            or await credencial_revocada(dispositivos, evento.device_id)
+            or await credencial_en_cuarentena(dispositivos, evento.device_id)
         ):
             return
         await dispositivos.registrar_latido(evento.device_id, datetime.now(timezone.utc))
@@ -388,6 +404,17 @@ async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadc
             )
             await session.commit()
             logger.warning("Evento de dispositivo no registrado o dado de baja: %s", evento.device_id)
+            return
+        if await credencial_en_cuarentena(device_repository, evento.device_id):
+            # HU-44: rotación por compromiso pendiente (ver arriba).
+            await auditoria.execute(
+                usuario_id=None,
+                accion="EVENTO_RETENIDO_ROTACION_COMPROMISO",
+                recurso="mqtt/eventos",
+                detalle={"device_id": evento.device_id, "tipo_evento": evento.tipo_evento.value},
+                ip_origen=None,
+            )
+            await session.commit()
             return
         if await credencial_revocada(device_repository, evento.device_id):
             # HU-44: credencial revocada: el evento no altera el estado del nodo.
@@ -716,6 +743,22 @@ async def _procesar_lectura_mqtt(
         episodio_previo = await alerta_repository.obtener_episodio_abierto(payload.device_id)
         try:
             lectura_guardada = await use_case.execute(lectura)
+        except CredencialEnCuarentenaError:
+            await AuditarAccionCriticaUseCase(
+                SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+            ).execute(
+                usuario_id=None,
+                accion="LECTURA_RETENIDA_ROTACION_COMPROMISO",
+                recurso="mqtt/lecturas",
+                detalle={"device_id": payload.device_id},
+                ip_origen=None,
+            )
+            await session.commit()
+            logger.warning("Lectura retenida: rotación por compromiso pendiente para %s", payload.device_id)
+            # HU-44: rechazo TRANSITORIO, sin acuse a propósito. El nodo legítimo
+            # conserva la lectura en LittleFS y la reenvía cuando el administrador
+            # confirma la consola y el broker ya solo acepta el token nuevo.
+            return
         except DispositivoNoAutorizadoError as exc:
             revocada = isinstance(exc, CredencialRevocadaError)
             auditoria = AuditarAccionCriticaUseCase(

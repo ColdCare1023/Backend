@@ -450,7 +450,7 @@ async def rotar_credencial(
         repositorio, RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session))
     )
     try:
-        token = await use_case.execute(device_id, admin.id, body.motivo)
+        token = await use_case.execute(device_id, admin.id, body.motivo, causa=body.causa)
     except RecursoNoEncontradoError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except DomainError as exc:
@@ -463,7 +463,7 @@ async def rotar_credencial(
         usuario_id=admin.id,
         accion="ROTAR_CREDENCIAL_DISPOSITIVO",
         recurso=f"dispositivos/{device_id}/credenciales",
-        detalle={"motivo": body.motivo},
+        detalle={"motivo": body.motivo, "causa": body.causa},
         ip_origen=ip,
     )
     await session.commit()
@@ -474,13 +474,33 @@ async def rotar_credencial(
     if aprovisionada is not True:
         logger.warning("Credencial de %s rotada, pero no se aprovisionó en el broker.", device_id)
     cerrada = await broker.desconectar_cliente(device_id)
-    await _registrar_resultado_broker(
+    pendiente = await _registrar_resultado_broker(
         session, broker, device_id, OPERACION_BROKER_APROVISIONAR, aprovisionada, admin.id, ip
     )
+    # HU-44: si el token anterior se filtró y la consola sigue sin cambiar, el
+    # broker aún lo acepta y el backend no distingue al nodo de quien lo tenga.
+    # Hasta la confirmación, la ingesta retiene la telemetría sin acuse.
+    retenida = pendiente and body.causa == "compromiso"
+    if retenida:
+        await repositorio.marcar_rotacion_por_compromiso(device_id)
+        await SQLAlchemyAuditLogRepository(session).registrar(
+            usuario_id=admin.id,
+            accion="TELEMETRIA_RETENIDA_ROTACION_COMPROMISO",
+            recurso=f"dispositivos/{device_id}/credenciales",
+            detalle={"motivo": body.motivo},
+            ip_origen=ip,
+        )
+        await session.commit()
+    mensaje = _mensaje_aprovisionar(device_id, aprovisionada)
+    if retenida and mensaje:
+        mensaje += (
+            " Rotación por compromiso: hasta que confirme la consola, el sistema retiene la telemetría "
+            "del nodo (sin acuse; queda en LittleFS) y la acepta al confirmar."
+        )
     return CredencialDispositivoResponse(
         device_id=device_id, token=token, generado_en=datetime.now(tz=timezone.utc),
-        credencial_aprovisionada=aprovisionada, mensaje_broker=_mensaje_aprovisionar(device_id, aprovisionada),
-        sesion_broker_cerrada=cerrada,
+        credencial_aprovisionada=aprovisionada, mensaje_broker=mensaje,
+        sesion_broker_cerrada=cerrada, telemetria_retenida=retenida,
     )
 
 
@@ -534,9 +554,14 @@ async def confirmar_operacion_broker(
     session: DbSessionDep,
     request: Request,
     admin=Depends(router_dep),
+    broker: BrokerAdmin = Depends(get_broker_admin),
 ) -> DispositivoResponse:
     """HU-43/HU-44: el administrador confirma que hizo en la consola del broker
-    la operación pendiente (crear/actualizar o retirar el usuario del nodo)."""
+    la operación pendiente (crear/actualizar o retirar el usuario del nodo).
+
+    Cambiar la contraseña en la consola no cierra las sesiones abiertas: tras
+    confirmar se expulsa la sesión, para que quien siguiera conectado con el
+    token anterior tenga que reautenticarse (y el broker ya lo rechace)."""
     use_case = ConfirmarOperacionBrokerUseCase(
         SQLAlchemyDeviceRepository(session), RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session))
     )
@@ -554,6 +579,8 @@ async def confirmar_operacion_broker(
         ip_origen=request.client.host if request.client else None,
     )
     await session.commit()
+    if await broker.desconectar_cliente(device_id) is not True:
+        logger.warning("Consola confirmada para %s, pero su sesión MQTT no se pudo expulsar.", device_id)
     return DispositivoResponse(**dispositivo)
 
 

@@ -122,6 +122,11 @@ class DeviceModel(Base):
     broker_confirmado_por: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
+    # HU-44: la rotación pendiente se hizo porque el token anterior se filtró.
+    # Mientras siga pendiente, la ingesta retiene la telemetría sin acuse.
+    rotacion_por_compromiso: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa_text("false")
+    )
 
     # HU-54: intervalo de captura del nodo (el umbral SIN_DATOS es N veces este
     # valor) y último `estado_nodo` recibido (latido).

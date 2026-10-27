@@ -189,7 +189,12 @@ class RotarCredencialDispositivoUseCase:
         self._registrar_hash = registrar_hash
 
     async def execute(
-        self, device_id: str, admin_id: UUID, motivo: str, tipo_evento: str = "ROTACION_CREDENCIAL_DISPOSITIVO"
+        self,
+        device_id: str,
+        admin_id: UUID,
+        motivo: str,
+        tipo_evento: str = "ROTACION_CREDENCIAL_DISPOSITIVO",
+        causa: str = "preventiva",
     ) -> str:
         dispositivo = await self._device_repository.obtener(device_id)
         if dispositivo is None:
@@ -203,7 +208,7 @@ class RotarCredencialDispositivoUseCase:
 
         await self._registrar_hash.execute(
             tipo_evento=tipo_evento,
-            payload={"device_id": device_id, "admin_id": str(admin_id), "motivo": motivo},
+            payload={"device_id": device_id, "admin_id": str(admin_id), "motivo": motivo, "causa": causa},
             device_id=device_id,
             usuario_id=admin_id,
             timestamp=cuando,

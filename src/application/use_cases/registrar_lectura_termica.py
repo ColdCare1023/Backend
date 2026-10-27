@@ -5,7 +5,12 @@ from src.application.use_cases.clasificar_riesgo_termico import ClasificarRiesgo
 from src.application.use_cases.generar_alerta import AvisoExcursion, GenerarAlertaUseCase
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.domain.entities.lectura_termica import LecturaTermica
-from src.domain.exceptions import CredencialRevocadaError, DispositivoNoAutorizadoError, LecturaInvalidaError
+from src.domain.exceptions import (
+    CredencialEnCuarentenaError,
+    CredencialRevocadaError,
+    DispositivoNoAutorizadoError,
+    LecturaInvalidaError,
+)
 from src.domain.repositories.i_alerta_repository import IAlertaRepository
 from src.domain.repositories.i_audit_log_repository import IAuditLogRepository
 from src.domain.repositories.i_device_repository import IDeviceRepository
@@ -23,6 +28,13 @@ async def credencial_revocada(device_repository: IDeviceRepository, device_id: s
     como revocado: ese caso lo gobierna el registro estricto."""
     credencial = await device_repository.obtener_credencial(device_id)
     return bool(credencial and credencial["mqtt_token_hash"] and not credencial["mqtt_token_activo"])
+
+
+async def credencial_en_cuarentena(device_repository: IDeviceRepository, device_id: str) -> bool:
+    """HU-44: True mientras una rotación por compromiso siga pendiente en el
+    broker. En esa ventana el broker todavía acepta el token anterior."""
+    credencial = await device_repository.obtener_credencial(device_id)
+    return bool(credencial and credencial.get("rotacion_por_compromiso") and credencial.get("broker_pendiente"))
 
 
 class RegistrarLecturaTermicaUseCase:
@@ -100,6 +112,10 @@ class RegistrarLecturaTermicaUseCase:
         if not es_manual and await credencial_revocada(self._device_repository, device_id):
             raise CredencialRevocadaError(
                 f"La credencial del dispositivo '{device_id}' está revocada; la lectura se rechaza."
+            )
+        if not es_manual and await credencial_en_cuarentena(self._device_repository, device_id):
+            raise CredencialEnCuarentenaError(
+                f"Rotación por compromiso de '{device_id}' pendiente en el broker; la lectura se retiene."
             )
 
     async def execute(self, lectura: LecturaTermica) -> LecturaTermica:

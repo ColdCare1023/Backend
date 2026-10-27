@@ -43,6 +43,7 @@ def _to_dict(model: DeviceModel) -> dict:
         "broker_pendiente_por": model.broker_pendiente_por,
         "broker_confirmado_en": model.broker_confirmado_en,
         "broker_confirmado_por": model.broker_confirmado_por,
+        "rotacion_por_compromiso": bool(model.rotacion_por_compromiso),
         "intervalo_reporte_segundos": model.intervalo_reporte_segundos or 30,
         "ultimo_latido_en": model.ultimo_latido_en,
     }
@@ -225,6 +226,8 @@ class SQLAlchemyDeviceRepository(IDeviceRepository):
             "mqtt_token_hash": model.mqtt_token_hash,
             "mqtt_token_activo": model.mqtt_token_activo,
             "activo": model.activo,
+            "rotacion_por_compromiso": bool(model.rotacion_por_compromiso),
+            "broker_pendiente": model.broker_pendiente,
         }
 
     # ── HU-51: ubicación y metadatos de instalación ────────────────────────
@@ -326,6 +329,12 @@ class SQLAlchemyDeviceRepository(IDeviceRepository):
         model.broker_pendiente_motivo = None
         model.broker_pendiente_desde = None
         model.broker_pendiente_por = None
+        model.rotacion_por_compromiso = False
+        await self._session.flush()
+
+    async def marcar_rotacion_por_compromiso(self, device_id: str) -> None:
+        model = await self._requerir(device_id)
+        model.rotacion_por_compromiso = True
         await self._session.flush()
 
     async def confirmar_broker(self, device_id: str, actor_id: UUID, cuando: datetime) -> dict:
@@ -336,6 +345,7 @@ class SQLAlchemyDeviceRepository(IDeviceRepository):
         model.broker_pendiente_por = None
         model.broker_confirmado_en = cuando
         model.broker_confirmado_por = actor_id
+        model.rotacion_por_compromiso = False
         await self._session.flush()
         return _to_dict(model)
 
