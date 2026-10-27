@@ -31,6 +31,9 @@ TIPO_DESAFIO = "desafio_posesion"
 VIGENCIA_DESAFIO = timedelta(minutes=10)
 # Reenviar el desafío con cada mensaje retenido inundaría el tópico de acuses.
 REEMISION_MINIMA = timedelta(seconds=30)
+# Un nonce a punto de caducar no se reenvía: el nodo podría responderlo
+# (reconexión, TLS) cuando ya no vale. Se reutiliza si le queda más de esto.
+MARGEN_REUTILIZACION = timedelta(minutes=1)
 
 
 def clave_posesion(token: str) -> str:
@@ -59,9 +62,10 @@ def espera_prueba(credencial: dict | None) -> bool:
 
 
 def nonce_vigente(credencial: dict | None, ahora: datetime) -> str | None:
+    """Nonce reutilizable: vigente y con más de MARGEN_REUTILIZACION por delante."""
     emitido = _como_utc((credencial or {}).get("pop_nonce_emitido_en"))
     nonce = (credencial or {}).get("pop_nonce")
-    if not nonce or emitido is None or ahora - emitido > VIGENCIA_DESAFIO:
+    if not nonce or emitido is None or ahora - emitido > VIGENCIA_DESAFIO - MARGEN_REUTILIZACION:
         return None
     return nonce
 
