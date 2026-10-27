@@ -45,6 +45,9 @@ class IIncidenteRepository(ABC):
     async def resolver(self, incidente_id: UUID, cuando: datetime) -> IncidenteOperativo: ...
 
     @abstractmethod
+    async def actualizar_detalle(self, incidente_id: UUID, detalle: dict) -> None: ...
+
+    @abstractmethod
     async def obtener(self, incidente_id: UUID) -> IncidenteOperativo | None: ...
 
     @abstractmethod

@@ -320,19 +320,95 @@ async def test_el_nonce_caduca(client, token_admin, espia, db_session_factory):
     assert motivos == ["nonce_caducado"]
 
 
-async def test_una_sesion_nueva_recibe_un_desafio_nuevo(client, token_admin, espia, db_session_factory):
-    """El desafío enviado al confirmar se pierde con la sesión expulsada: el
-    `online` de la reconexión dispara otro, sin esperar la reemisión mínima."""
+async def test_una_sesion_nueva_recibe_otra_vez_el_mismo_desafio(client, token_admin, espia, db_session_factory):
+    """El desafío enviado al confirmar puede perderse con la sesión expulsada: el
+    `online` de la reconexión lo reenvía enseguida, con EL MISMO nonce."""
     _alta(client, token_admin)
     _rotar_por_compromiso(client, token_admin)
     _confirmar(client, token_admin)
     primero = espia.desafios[-1]["nonce"]
 
     await main._procesar_evento_mqtt(_Mensaje("eventos", _evento("online", {"rssi_dbm": -60})), _Broadcaster(), espia)
-    # Una lectura retenida inmediatamente después no vuelve a emitir (≥ 30 s).
+    # Una lectura retenida inmediatamente después no lo reenvía otra vez (≥ 30 s).
     await main._procesar_lectura_mqtt(_Mensaje("lecturas", _telemetria("s1")), _Broadcaster(), espia)
 
-    assert len(espia.desafios) == 2 and espia.desafios[-1]["nonce"] != primero
+    assert [d["nonce"] for d in espia.desafios] == [primero, primero]
+
+
+async def test_la_respuesta_al_primer_desafio_sirve_aunque_se_haya_reenviado(
+    client, token_admin, espia, db_session_factory
+):
+    """Confirmar → `online` → respuesta al nonce de la API: verificada y sin
+    fallos espurios en la bitácora."""
+    _alta(client, token_admin)
+    token = _rotar_por_compromiso(client, token_admin)
+    _confirmar(client, token_admin)
+    primero = espia.desafios[0]["nonce"]
+    await main._procesar_evento_mqtt(_Mensaje("eventos", _evento("online", {"rssi_dbm": -60})), _Broadcaster(), espia)
+
+    await main._procesar_evento_mqtt(_Mensaje("eventos", _respuesta(token, primero)), _Broadcaster(), espia)
+
+    acciones = await _acciones(db_session_factory)
+    assert "CREDENCIAL_POSESION_VERIFICADA" in acciones
+    assert "PRUEBA_POSESION_FALLIDA" not in acciones
+
+
+async def test_respuestas_falsas_en_bucle_dejan_una_sola_fila_por_minuto(
+    client, token_admin, espia, db_session_factory
+):
+    _alta(client, token_admin)
+    _rotar_por_compromiso(client, token_admin)
+    _confirmar(client, token_admin)
+    nonce = espia.desafios[-1]["nonce"]
+    for _ in range(20):
+        await main._procesar_evento_mqtt(
+            _Mensaje("eventos", _respuesta("token-anterior-filtrado", nonce)), _Broadcaster(), espia
+        )
+    for n in range(10):
+        await main._procesar_lectura_mqtt(_Mensaje("lecturas", _telemetria(f"falsa-{n}")), _Broadcaster(), espia)
+
+    acciones = await _acciones(db_session_factory)
+    assert acciones.count("PRUEBA_POSESION_FALLIDA") == 1
+    assert acciones.count("LECTURA_RETENIDA_ROTACION_COMPROMISO") == 1
+
+
+async def test_reenviar_desafio_expulsa_la_sesion_y_reenvia_el_nonce(client, token_admin, espia, db_session_factory):
+    """Caso E: tras corregir la consola, el administrador fuerza la reconexión."""
+    _alta(client, token_admin)
+    _rotar_por_compromiso(client, token_admin)
+    antes = client.post(
+        f"/api/dispositivos/{DEVICE_ID}/credenciales/reenviar-desafio", headers=auth_header(token_admin)
+    )
+    assert antes.status_code == 409  # consola aún pendiente: no hay prueba que pedir
+    _confirmar(client, token_admin)
+    nonce = espia.desafios[-1]["nonce"]
+    espia.expulsados.clear()
+
+    respuesta = client.post(
+        f"/api/dispositivos/{DEVICE_ID}/credenciales/reenviar-desafio", headers=auth_header(token_admin)
+    )
+
+    assert respuesta.status_code == 200 and respuesta.json()["posesion_pendiente"] is True
+    assert espia.expulsados == [DEVICE_ID]
+    assert espia.desafios[-1]["nonce"] == nonce
+    assert "DESAFIO_POSESION_REENVIADO" in await _acciones(db_session_factory)
+
+
+async def test_la_excursion_abierta_guarda_la_ultima_lectura(client, token_admin, espia, db_session_factory):
+    _alta(client, token_admin)
+    _rotar_por_compromiso(client, token_admin)
+    for temperatura, seq in ((11.5, 1), (5.0, 2)):
+        await main._procesar_evento_mqtt(
+            _Mensaje("eventos", _evento("lectura_vigente", {"seq_no": seq, "temperatura_interna": temperatura})),
+            _Broadcaster(), espia,
+        )
+
+    incidente = (await _filas(
+        db_session_factory, IncidenteOperativoModel, IncidenteOperativoModel.tipo == "excursion_no_verificada"
+    ))[0]
+    assert incidente.resuelto_en is None  # un episodio por ventana
+    assert incidente.detalle["temperatura_interna"] == 11.5
+    assert incidente.detalle["ultima_temperatura_interna"] == 5.0 and incidente.detalle["ultima_en_rango"] is True
 
 
 async def test_el_par_lwt_online_de_una_rotacion_se_audita_como_reconexion(

@@ -12,6 +12,12 @@ significar quedarse ciego:
   entra en la cadena de lecturas: cuando el nodo pruebe el token nuevo, sus
   lecturas llegarán con su hora de captura y la regla abrirá la alerta normal;
 - al probar la posesión se cierran ambos incidentes.
+
+La excursión no verificada es UN episodio por ventana: no se cierra aunque la
+temperatura vuelva a rango (no hay forma de saber si el dato es del nodo). Su
+`detalle` guarda la lectura que lo abrió y, aparte, la última recibida
+(`ultima_temperatura_interna`, `ultima_captura`, `ultima_en_rango`), para que
+el tablero no presente el dato inicial como el actual.
 """
 
 from datetime import datetime, timezone
@@ -71,10 +77,20 @@ async def evaluar_excursion_retenida(
 ) -> tuple[CambioIncidente, AvisoSinDatos] | None:
     """Misma regla que la ingesta normal (P3): una lectura válida fuera de
     2-8 °C es crítica. Un dato de sensor en falla (None) nunca la dispara."""
-    if temperatura is None or RANGO_TERMICO_BPA.contiene(temperatura):
+    if temperatura is None:
         return None
-    if await incidentes.abierto(device_id, TIPO_EXCURSION_NO_VERIFICADA) is not None:
-        return None  # episodio ya abierto y avisado
+    abierto = await incidentes.abierto(device_id, TIPO_EXCURSION_NO_VERIFICADA)
+    if abierto is not None:
+        # Episodio ya abierto y avisado: solo se anota la última lectura.
+        await incidentes.actualizar_detalle(abierto.id, {
+            **(abierto.detalle or {}),
+            "ultima_temperatura_interna": temperatura,
+            "ultima_captura": capturada_en.isoformat() if capturada_en else None,
+            "ultima_en_rango": RANGO_TERMICO_BPA.contiene(temperatura),
+        })
+        return None
+    if RANGO_TERMICO_BPA.contiene(temperatura):
+        return None
     detalle = {
         "temperatura_interna": temperatura,
         "captured_at": capturada_en.isoformat() if capturada_en else None,

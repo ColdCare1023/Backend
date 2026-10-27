@@ -21,7 +21,7 @@ from src.application.use_cases.gestionar_dispositivos import (
     RevocarCredencialDispositivoUseCase,
     RotarCredencialDispositivoUseCase,
 )
-from src.application.use_cases.prueba_posesion import emitir_desafio, mensaje_desafio
+from src.application.use_cases.prueba_posesion import espera_prueba, mensaje_desafio, preparar_desafio
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.application.use_cases.retencion_compromiso import abrir_monitoreo_suspendido
 from src.application.use_cases.vigilar_sin_datos import umbral_sin_datos
@@ -642,7 +642,10 @@ async def confirmar_operacion_broker(
     )
     nonce = None
     if dispositivo.get("rotacion_por_compromiso"):
-        nonce = await emitir_desafio(SQLAlchemyDeviceRepository(session), device_id, datetime.now(tz=timezone.utc))
+        repositorio = SQLAlchemyDeviceRepository(session)
+        nonce = await preparar_desafio(
+            repositorio, device_id, await repositorio.obtener_credencial(device_id), datetime.now(tz=timezone.utc)
+        )
     await session.commit()
     await _anotar_expulsion(session, device_id, "consola_confirmada")
     if await broker.desconectar_cliente(device_id) is not True:
@@ -651,6 +654,46 @@ async def confirmar_operacion_broker(
         # El nodo puede estar reconectando: la ingesta lo reenvía con su próximo mensaje.
         logger.warning("Desafío de posesión para %s no publicado; se reenviará desde la ingesta.", device_id)
     return DispositivoResponse(**(await SQLAlchemyDeviceRepository(session).obtener(device_id) or dispositivo))
+
+
+@router.post("/{device_id}/credenciales/reenviar-desafio", response_model=DispositivoResponse)
+async def reenviar_desafio_posesion(
+    device_id: DeviceIdRuta,
+    session: DbSessionDep,
+    request: Request,
+    admin=Depends(router_dep),
+    broker: BrokerAdmin = Depends(get_broker_admin),
+    publicador: PublicadorDesafios = Depends(get_publicador_desafios),
+) -> DispositivoResponse:
+    """HU-44, caso E: se confirmó la consola pero el nodo sigue sin probar el
+    token nuevo (la contraseña no se cambió, o el nodo no recibió el desafío).
+    Tras corregir la consola, el administrador fuerza la reconexión: se expulsa
+    la sesión (el nodo vuelve a probar el relevo) y se reenvía el desafío.
+    Sin esto, la salida dependía del sondeo del relevo del nodo (cada 5 min)."""
+    repositorio = SQLAlchemyDeviceRepository(session)
+    credencial = await repositorio.obtener_credencial(device_id)
+    if credencial is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Dispositivo {device_id} no encontrado")
+    if not espera_prueba(credencial):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="El dispositivo no espera una prueba de posesión (sin rotación por compromiso o consola pendiente).",
+        )
+    nonce = await preparar_desafio(repositorio, device_id, credencial, datetime.now(tz=timezone.utc))
+    await SQLAlchemyAuditLogRepository(session).registrar(
+        usuario_id=admin.id,
+        accion="DESAFIO_POSESION_REENVIADO",
+        recurso=f"dispositivos/{device_id}/credenciales",
+        detalle={},
+        ip_origen=request.client.host if request.client else None,
+    )
+    await session.commit()
+    await _anotar_expulsion(session, device_id, "consola_confirmada")
+    if await broker.desconectar_cliente(device_id) is not True:
+        logger.warning("Reenvío del desafío para %s: la sesión MQTT no se pudo expulsar.", device_id)
+    if nonce is not None and await publicador.publicar(device_id, mensaje_desafio(device_id, nonce)) is not True:
+        logger.warning("Desafío de posesión para %s no publicado; se reenviará desde la ingesta.", device_id)
+    return DispositivoResponse(**(await repositorio.obtener(device_id) or {}))
 
 
 @router.patch("/{device_id}/intervalo", response_model=DispositivoResponse)

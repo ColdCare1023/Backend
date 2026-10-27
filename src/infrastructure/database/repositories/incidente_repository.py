@@ -64,6 +64,11 @@ class SQLAlchemyIncidenteRepository(IIncidenteRepository):
         await self._session.flush()
         return _to_entity(model)
 
+    async def actualizar_detalle(self, incidente_id: UUID, detalle: dict) -> None:
+        model = await self._modelo(incidente_id)
+        model.detalle = detalle
+        await self._session.flush()
+
     async def obtener(self, incidente_id: UUID) -> IncidenteOperativo | None:
         model = await self._session.get(IncidenteOperativoModel, incidente_id)
         return _to_entity(model) if model else None
