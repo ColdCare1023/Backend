@@ -246,6 +246,10 @@ class Settings(BaseSettings):
     #   desactivado: no se ejecuta; solo regla de rango y salvaguarda.
     #   activo: comportamiento anterior (su clase abre alertas preventivas).
     ia_legado_modo: Literal["experimental", "desactivado", "activo"] = "experimental"
+    # HU-46: criterio que debe cumplir una versión para activarse (decisión con
+    # el asesor). `por_incidente`: sensibilidad por incidente, IC95, falsas
+    # alarmas/día y anticipación; `f1`: F1 macro ≥ 0,85. Ambos se reportan.
+    ia_criterio_principal: Literal["por_incidente", "f1"] = "por_incidente"
 
     cors_origins: list[str] = ["http://localhost:5173"]
 

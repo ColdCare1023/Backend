@@ -540,6 +540,10 @@ class ModeloIAVersionModel(Base):
     activa: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     activada_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     desactivada_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # HU-46: evidencia de evaluación exigida para activar (migración 0031).
+    horizonte_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    metricas: Mapped[dict | None] = mapped_column(JSONVariant, nullable=True)
+    particiones: Mapped[dict | None] = mapped_column(JSONVariant, nullable=True)
 
 
 class PrediccionPreventivaModel(Base):

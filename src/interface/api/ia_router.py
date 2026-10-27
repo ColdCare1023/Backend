@@ -5,9 +5,12 @@ from pydantic import BaseModel, Field
 
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.gestionar_modelo_ia import (
+    ActivacionBloqueadaError,
     ActivarVersionModeloUseCase,
     ConsultarInferenciaLecturaUseCase,
     RegistrarVersionModeloUseCase,
+    evaluar_criterios_modelo,
+    motivos_bloqueo_activacion,
 )
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.domain.entities.version_modelo_ia import VersionModeloIA
@@ -17,6 +20,7 @@ from src.infrastructure.ai.features import FeaturesRiesgoTermico
 from src.infrastructure.ai.prediccion_preventiva import registro as registro_preventivo
 from src.infrastructure.ai.prediccion_preventiva.servicio import obtener_servicio_preventivo
 from src.infrastructure.ai.random_forest_service import get_random_forest_service
+from src.infrastructure.config import get_settings
 from src.infrastructure.database.repositories.audit_log_repository import SQLAlchemyAuditLogRepository
 from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
 from src.infrastructure.database.repositories.modelo_ia_repository import SQLAlchemyModeloIARepository
@@ -37,7 +41,16 @@ router = APIRouter(prefix="/api/ia", tags=["ia"])
 
 
 def _version_a_response(v: VersionModeloIA) -> VersionModeloResponse:
+    criterio = get_settings().ia_criterio_principal
+    motivos = motivos_bloqueo_activacion(v, criterio)
     return VersionModeloResponse(
+        horizonte_min=v.horizonte_min,
+        metricas=v.metricas,
+        particiones=v.particiones,
+        evaluacion_criterios=evaluar_criterios_modelo(v.metricas),
+        criterio_principal=criterio,
+        activable=not motivos,
+        motivos_bloqueo=motivos,
         id=v.id,
         version=v.version,
         model_hash=v.model_hash,
@@ -194,6 +207,9 @@ async def registrar_version_modelo(
             python_version=body.python_version,
             trained_at=body.trained_at,
             admin_id=admin.id,
+            horizonte_min=body.horizonte_min,
+            metricas=body.metricas,
+            particiones=body.particiones,
         )
     except DomainError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -225,16 +241,32 @@ async def activar_version_modelo(
     version: str,
     session: DbSessionDep,
     request: Request,
+    settings: SettingsDep,
     admin=Depends(require_roles(Rol.ADMINISTRADOR)),
 ) -> VersionModeloResponse:
     """HU-46 Escenario 2: activar una versión no registrada se rechaza (404)
-    — la versión activa vigente permanece intacta."""
+    — la versión activa vigente permanece intacta. Escenario 4 de HU-18: una
+    versión sin métricas, H y particiones, o que no cumple el criterio
+    principal, tampoco se activa (409)."""
     repositorio = SQLAlchemyModeloIARepository(session)
     use_case = ActivarVersionModeloUseCase(
-        repositorio, RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session))
+        repositorio, RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session)),
+        settings.ia_criterio_principal,
     )
     try:
         activada = await use_case.execute(version, admin.id)
+    except ActivacionBloqueadaError as exc:
+        await AuditarAccionCriticaUseCase(
+            SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+        ).execute(
+            usuario_id=admin.id,
+            accion="ACTIVAR_VERSION_MODELO_IA_RECHAZADO",
+            recurso=f"ia/modelo/versiones/{version}/activar",
+            detalle={"motivo": "criterios_no_cumplidos", "motivos": exc.motivos},
+            ip_origen=request.client.host if request.client else None,
+        )
+        await session.commit()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except RecursoNoEncontradoError as exc:
         await AuditarAccionCriticaUseCase(
             SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)

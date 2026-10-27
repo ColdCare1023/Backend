@@ -575,6 +575,10 @@ class RegistrarVersionModeloRequest(_PeticionEstricta):
     scikit_learn_version: str = Field(min_length=1, max_length=20)
     python_version: str = Field(min_length=1, max_length=20)
     trained_at: datetime
+    # HU-46: evidencia de evaluación. Opcional al registrar; obligatoria para activar.
+    horizonte_min: int | None = Field(default=None, ge=1, le=24 * 60)
+    metricas: dict[str, float | int] | None = None
+    particiones: dict[str, str | int | float | list[str]] | None = None
 
 
 class VersionModeloResponse(BaseModel):
@@ -591,6 +595,14 @@ class VersionModeloResponse(BaseModel):
     activa: bool
     activada_en: datetime | None = None
     desactivada_en: datetime | None = None
+    horizonte_min: int | None = None
+    metricas: dict | None = None
+    particiones: dict | None = None
+    # HU-46: ambos juegos de criterios y lo que impide activar la versión.
+    evaluacion_criterios: dict | None = None
+    criterio_principal: str | None = None
+    activable: bool = False
+    motivos_bloqueo: list[str] = Field(default_factory=list)
 
 
 class InferenciaLecturaResponse(BaseModel):

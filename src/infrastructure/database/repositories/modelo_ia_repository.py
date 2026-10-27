@@ -23,6 +23,9 @@ def _to_entity(model: ModeloIAVersionModel) -> VersionModeloIA:
         activa=model.activa,
         activada_en=model.activada_en,
         desactivada_en=model.desactivada_en,
+        horizonte_min=model.horizonte_min,
+        metricas=model.metricas,
+        particiones=model.particiones,
     )
 
 
@@ -40,6 +43,9 @@ class SQLAlchemyModeloIARepository(IModeloIARepository):
             python_version=version.python_version,
             trained_at=version.trained_at,
             aprobado_por=version.aprobado_por,
+            horizonte_min=version.horizonte_min,
+            metricas=version.metricas,
+            particiones=version.particiones,
         )
         self._session.add(model)
         await self._session.flush()

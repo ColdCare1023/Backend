@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
 
@@ -21,3 +21,8 @@ class VersionModeloIA:
     activa: bool = False
     activada_en: datetime | None = None
     desactivada_en: datetime | None = None
+    # HU-46: evidencia de evaluación (horizonte H de la etiqueta, métricas de
+    # prueba y particiones). Sin ella la versión puede registrarse, no activarse.
+    horizonte_min: int | None = None
+    metricas: dict | None = None
+    particiones: dict | None = field(default=None)
