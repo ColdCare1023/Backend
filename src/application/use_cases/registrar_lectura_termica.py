@@ -31,10 +31,13 @@ async def credencial_revocada(device_repository: IDeviceRepository, device_id: s
 
 
 async def credencial_en_cuarentena(device_repository: IDeviceRepository, device_id: str) -> bool:
-    """HU-44: True mientras una rotación por compromiso siga pendiente en el
-    broker. En esa ventana el broker todavía acepta el token anterior."""
+    """HU-44: True mientras dure una rotación por compromiso: desde que se rota
+    hasta que, con la consola confirmada, el nodo prueba la posesión del token
+    nuevo. En esa ventana el broker puede seguir aceptando el token anterior."""
     credencial = await device_repository.obtener_credencial(device_id)
-    return bool(credencial and credencial.get("rotacion_por_compromiso") and credencial.get("broker_pendiente"))
+    # La retención dura mientras la marca siga puesta: confirmar la consola no
+    # basta, el nodo debe probar que tiene el token nuevo (prueba_posesion.py).
+    return bool(credencial and credencial.get("rotacion_por_compromiso"))
 
 
 class RegistrarLecturaTermicaUseCase:

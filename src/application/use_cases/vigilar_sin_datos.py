@@ -22,7 +22,11 @@ from uuid import UUID
 
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.domain.repositories.i_device_repository import IDeviceRepository
-from src.domain.repositories.i_incidente_repository import IIncidenteRepository, IncidenteOperativo
+from src.domain.repositories.i_incidente_repository import (
+    TIPO_SIN_DATOS,
+    IIncidenteRepository,
+    IncidenteOperativo,
+)
 from src.domain.repositories.i_lectura_repository import ILecturaRepository
 
 # Ciclos perdidos tolerados antes de declarar SIN_DATOS: una reconexión breve
@@ -43,7 +47,8 @@ def _como_utc(instante: datetime | None) -> datetime | None:
 
 @dataclass(frozen=True, slots=True)
 class AvisoSinDatos:
-    """Aviso pendiente de un incidente SIN_DATOS recién abierto. Se entrega al
+    """Aviso pendiente de un incidente operativo recién abierto (SIN_DATOS y,
+    HU-44, monitoreo suspendido o excursión no verificada). Se entrega al
     despachador después del COMMIT, igual que `AvisoExcursion`."""
 
     incidente_id: UUID
@@ -51,6 +56,8 @@ class AvisoSinDatos:
     abierto_en: datetime
     ultimo_reporte_en: datetime | None
     umbral_segundos: int
+    tipo: str = TIPO_SIN_DATOS
+    detalle: dict | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,10 +77,11 @@ class CambioIncidente:
             ),
             "umbral_silencio_segundos": self.incidente.umbral_segundos,
             "recuperado_en": self.incidente.resuelto_en.isoformat() if self.incidente.resuelto_en else None,
+            "detalle": self.incidente.detalle,
         }
 
 
-async def _resolver(
+async def resolver_incidente(
     incidentes: IIncidenteRepository,
     auditoria: AuditarAccionCriticaUseCase,
     abierto: IncidenteOperativo,
@@ -83,7 +91,7 @@ async def _resolver(
     duracion = (cuando - _como_utc(abierto.abierto_en)).total_seconds()
     await auditoria.execute(
         usuario_id=None,
-        accion="SIN_DATOS_RESUELTO",
+        accion=f"{abierto.tipo.upper()}_RESUELTO",
         recurso=f"incidentes/{abierto.id}",
         detalle={
             "incidente_id": str(abierto.id),
@@ -108,7 +116,7 @@ async def resolver_sin_datos_por_lectura(
     abierto = await incidentes.abierto(device_id)
     if abierto is None:
         return None
-    return await _resolver(incidentes, auditoria, abierto, _como_utc(recibida_en))
+    return await resolver_incidente(incidentes, auditoria, abierto, _como_utc(recibida_en))
 
 
 class VigilarSinDatosUseCase:
@@ -135,7 +143,11 @@ class VigilarSinDatosUseCase:
             if not dispositivo.get("activo", True):
                 # Un nodo dado de baja deja de reportar a propósito.
                 if abierto is not None:
-                    cambios.append(await _resolver(self._incidentes, self._auditoria, abierto, ahora))
+                    cambios.append(await resolver_incidente(self._incidentes, self._auditoria, abierto, ahora))
+                continue
+            if dispositivo.get("rotacion_por_compromiso"):
+                # HU-44: la telemetría está retenida a propósito; el incidente es
+                # «monitoreo_suspendido» (abierto al rotar), no un SIN_DATOS.
                 continue
             ultima = await self._lecturas.ultima_recibida_por_device(dispositivo["id"])
             if ultima is None:
@@ -146,7 +158,7 @@ class VigilarSinDatosUseCase:
             if silencio >= umbral and abierto is None:
                 cambios.append(await self._abrir(dispositivo, ultimo_reporte, umbral))
             elif silencio < umbral and abierto is not None:
-                cambios.append(await _resolver(self._incidentes, self._auditoria, abierto, ultimo_reporte))
+                cambios.append(await resolver_incidente(self._incidentes, self._auditoria, abierto, ultimo_reporte))
         return cambios
 
     async def _abrir(self, dispositivo: dict, ultimo_reporte: datetime, umbral: int) -> CambioIncidente:

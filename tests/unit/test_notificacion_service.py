@@ -184,6 +184,29 @@ def test_el_correo_sin_datos_dice_desde_cuando_calla_el_nodo():
     assert "/dispositivos?id=ESP32-01" in correo.cuerpo
 
 
+def test_los_correos_de_la_retencion_por_compromiso_dicen_que_hacer():
+    """HU-44: monitoreo suspendido y excursión de origen no verificado."""
+    from src.application.use_cases.vigilar_sin_datos import AvisoSinDatos
+    from src.infrastructure.notifications.notificacion_service import componer_correo_sin_datos
+
+    suspendido = componer_correo_sin_datos(
+        AvisoSinDatos(incidente_id=uuid4(), device_id="ESP32-01", abierto_en=CAPTURA, ultimo_reporte_en=None,
+                      umbral_segundos=0, tipo="monitoreo_suspendido"),
+        "de@x.pe", "para@x.pe",
+    )
+    assert suspendido.asunto == "[ColdCare] MONITOREO SUSPENDIDO POR ROTACIÓN — ESP32-01"
+    assert "termómetro de respaldo" in suspendido.cuerpo
+
+    excursion = componer_correo_sin_datos(
+        AvisoSinDatos(incidente_id=uuid4(), device_id="ESP32-01", abierto_en=CAPTURA, ultimo_reporte_en=CAPTURA,
+                      umbral_segundos=0, tipo="excursion_no_verificada",
+                      detalle={"temperatura_interna": 11.5, "captured_at": CAPTURA.isoformat()}),
+        "de@x.pe", "para@x.pe",
+    )
+    assert excursion.asunto == "[ColdCare] EXCURSIÓN CRÍTICA (origen no verificado) — ESP32-01"
+    assert "11.50 °C" in excursion.cuerpo
+
+
 # ── Configuración de producción ──────────────────────────────────────────
 
 _PRODUCCION = {

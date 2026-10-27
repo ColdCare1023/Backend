@@ -17,7 +17,7 @@ from sqlalchemy import select
 from src.infrastructure.config import get_settings
 from src.infrastructure.database.models import AuditLogModel, ThermalReadingModel
 from src.interface import main
-from src.interface.api.dispositivos_router import get_broker_admin
+from src.interface.api.dispositivos_router import get_broker_admin, get_publicador_desafios
 from tests.conftest import auth_header
 
 DEVICE_ID = "FARM-HU44CMP"
@@ -28,11 +28,18 @@ class _Espia:
 
     def __init__(self) -> None:
         self.acuses: list[dict] = []
+        self.desafios: list[dict] = []
         self.expulsados: list[str] = []
         self.resultado: bool | None = None  # None = modo manual
 
     async def publish(self, topic, payload=None, qos=0, **_kwargs):
-        self.acuses.append(json.loads(payload))
+        mensaje = json.loads(payload)
+        (self.desafios if mensaje.get("tipo") == "desafio_posesion" else self.acuses).append(mensaje)
+
+    async def publicar(self, device_id: str, mensaje: str) -> bool:
+        """Publicador de desafíos de la API (confirmar consola)."""
+        self.desafios.append(json.loads(mensaje))
+        return True
 
     async def aprovisionar_credencial(self, device_id: str, token: str):
         return self.resultado
@@ -63,6 +70,7 @@ def espia(app, monkeypatch, db_session_factory):
     doble = _Espia()
     monkeypatch.setattr(main, "BrokerAdmin", lambda _settings: doble)
     app.dependency_overrides[get_broker_admin] = lambda: doble
+    app.dependency_overrides[get_publicador_desafios] = lambda: doble
     yield doble
     get_settings.cache_clear()
 
@@ -152,9 +160,12 @@ async def test_evento_durante_rotacion_por_compromiso_no_altera_el_estado(
     assert "DISPOSITIVO_ONLINE" not in acciones
 
 
-async def test_confirmar_la_consola_expulsa_la_sesion_y_reanuda_la_ingesta(
+async def test_confirmar_la_consola_expulsa_la_sesion_pero_sigue_reteniendo(
     client, token_admin, espia, db_session_factory
 ):
+    """Confirmar no basta: el administrador pudo no cambiar la consola. Se
+    expulsa la sesión y se envía el desafío de posesión; la telemetría sigue
+    retenida hasta que el nodo lo firme con el token nuevo."""
     _alta_confirmada(client, token_admin)
     _rotar(client, token_admin, "compromiso")
     await main._procesar_lectura_mqtt(_Mensaje("lecturas", _telemetria("c2")), _Broadcaster(), espia)
@@ -164,15 +175,15 @@ async def test_confirmar_la_consola_expulsa_la_sesion_y_reanuda_la_ingesta(
         f"/api/dispositivos/{DEVICE_ID}/broker/confirmar", json={"nota": "contraseña cambiada"},
         headers=auth_header(token_admin),
     )
-    # El nodo reenvía desde LittleFS la lectura retenida.
     await main._procesar_lectura_mqtt(_Mensaje("lecturas", _telemetria("c2")), _Broadcaster(), espia)
 
     assert confirmado.status_code == 200
-    assert confirmado.json()["rotacion_por_compromiso"] is False
+    assert confirmado.json()["rotacion_por_compromiso"] is True
+    assert confirmado.json()["posesion_pendiente"] is True
     # Cambiar la contraseña no cierra sesiones abiertas: se expulsa al confirmar.
     assert espia.expulsados == [DEVICE_ID]
-    assert len(await _lecturas(db_session_factory)) == 1
-    assert espia.acuses[-1]["estado"] == "commit_confirmado"
+    assert await _lecturas(db_session_factory) == []
+    assert espia.desafios and espia.desafios[-1]["tipo"] == "desafio_posesion"
 
 
 async def test_en_modo_api_la_rotacion_por_compromiso_no_deja_ventana(

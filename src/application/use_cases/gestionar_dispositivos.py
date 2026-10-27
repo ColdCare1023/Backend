@@ -3,6 +3,7 @@ from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 
+from src.application.use_cases.prueba_posesion import clave_posesion
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.domain.exceptions import DomainError, RecursoNoEncontradoError
 from src.domain.repositories.i_device_repository import IDeviceRepository
@@ -204,7 +205,9 @@ class RotarCredencialDispositivoUseCase:
 
         token = secrets.token_urlsafe(32)
         cuando = datetime.now(tz=timezone.utc)
-        await self._device_repository.guardar_credencial(device_id, await hash_password_async(token), cuando)
+        await self._device_repository.guardar_credencial(
+            device_id, await hash_password_async(token), cuando, pop_clave=clave_posesion(token)
+        )
 
         await self._registrar_hash.execute(
             tipo_evento=tipo_evento,

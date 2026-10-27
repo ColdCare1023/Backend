@@ -127,6 +127,11 @@ class DeviceModel(Base):
     rotacion_por_compromiso: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=sa_text("false")
     )
+    # HU-44: prueba de posesión. `pop_clave` = SHA-256("coldcare-pop-v1:" + token)
+    # (nunca el token); el nonce es de un solo uso y caduca.
+    pop_clave: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pop_nonce: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pop_nonce_emitido_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # HU-54: intervalo de captura del nodo (el umbral SIN_DATOS es N veces este
     # valor) y último `estado_nodo` recibido (latido).
@@ -617,11 +622,13 @@ class IncidenteOperativoModel(Base):
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     device_id: Mapped[str] = mapped_column(String(50), ForeignKey("devices.id"), nullable=False, index=True)
-    tipo: Mapped[str] = mapped_column(String(20), nullable=False)
+    tipo: Mapped[str] = mapped_column(String(40), nullable=False)
     abierto_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ultimo_reporte_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     umbral_segundos: Mapped[int] = mapped_column(Integer, nullable=False)
     resuelto_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notificado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notificacion_intentos: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # HU-44: lectura que disparó una excursión no verificada (temperatura, hora).
+    detalle: Mapped[dict | None] = mapped_column(JSONVariant, nullable=True)
     created_at: Mapped[datetime] = _created_at_column()

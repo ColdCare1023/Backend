@@ -23,6 +23,7 @@ def _to_entity(model: IncidenteOperativoModel) -> IncidenteOperativo:
         resuelto_en=model.resuelto_en,
         notificado_en=model.notificado_en,
         notificacion_intentos=model.notificacion_intentos or 0,
+        detalle=model.detalle,
     )
 
 
@@ -47,11 +48,11 @@ class SQLAlchemyIncidenteRepository(IIncidenteRepository):
 
     async def abrir(
         self, device_id: str, abierto_en: datetime, ultimo_reporte_en: datetime | None, umbral_segundos: int,
-        tipo: str = TIPO_SIN_DATOS,
+        tipo: str = TIPO_SIN_DATOS, detalle: dict | None = None,
     ) -> IncidenteOperativo:
         model = IncidenteOperativoModel(
             device_id=device_id, tipo=tipo, abierto_en=abierto_en,
-            ultimo_reporte_en=ultimo_reporte_en, umbral_segundos=umbral_segundos,
+            ultimo_reporte_en=ultimo_reporte_en, umbral_segundos=umbral_segundos, detalle=detalle,
         )
         self._session.add(model)
         await self._session.flush()

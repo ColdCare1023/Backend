@@ -21,10 +21,16 @@ from src.application.use_cases.gestionar_dispositivos import (
     RevocarCredencialDispositivoUseCase,
     RotarCredencialDispositivoUseCase,
 )
+from src.application.use_cases.prueba_posesion import emitir_desafio, mensaje_desafio
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
+from src.application.use_cases.retencion_compromiso import abrir_monitoreo_suspendido
 from src.application.use_cases.vigilar_sin_datos import umbral_sin_datos
 from src.domain.exceptions import DomainError, RecursoNoEncontradoError
-from src.domain.repositories.i_incidente_repository import IncidenteOperativo
+from src.domain.repositories.i_incidente_repository import (
+    TIPO_EXCURSION_NO_VERIFICADA,
+    TIPO_MONITOREO_SUSPENDIDO,
+    IncidenteOperativo,
+)
 from src.domain.value_objects.device_id import PATRON_DEVICE_ID
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.database.repositories.audit_log_repository import SQLAlchemyAuditLogRepository
@@ -35,6 +41,7 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
 from src.infrastructure.mqtt.broker_admin import BrokerAdmin, obtener_broker_admin
+from src.infrastructure.mqtt.desafio_posesion import PublicadorDesafios, obtener_publicador_desafios
 from src.interface.api.deps import DbSessionDep, SettingsDep, require_roles
 from src.interface.api.schemas import (
     CalibracionRequest,
@@ -65,6 +72,10 @@ logger = logging.getLogger("interface.api.dispositivos")
 
 def get_broker_admin(settings: SettingsDep) -> BrokerAdmin:
     return obtener_broker_admin(settings)
+
+
+def get_publicador_desafios(settings: SettingsDep) -> PublicadorDesafios:
+    return obtener_publicador_desafios(settings)
 
 
 def _motivo_pendiente(broker: BrokerAdmin, resultado: bool | None) -> str:
@@ -220,18 +231,24 @@ def _incidente_response(incidente: IncidenteOperativo) -> IncidenteOperativoResp
     return IncidenteOperativoResponse(
         id=str(incidente.id),
         device_id=incidente.device_id,
-        tipo="sin_datos",
+        tipo=incidente.tipo,
         estado="activo" if incidente.activo else "resuelto",
         detectado_en=_como_utc(incidente.abierto_en),
         ultimo_reporte_en=_como_utc(incidente.ultimo_reporte_en),
         umbral_silencio_segundos=incidente.umbral_segundos,
         recuperado_en=_como_utc(incidente.resuelto_en),
         notificado_en=_como_utc(incidente.notificado_en),
+        detalle=incidente.detalle,
     )
 
 
 def _estado_operativo(
-    device: dict, ultima, ahora: datetime, abierto: IncidenteOperativo | None, n_intervalos: int
+    device: dict,
+    ultima,
+    ahora: datetime,
+    abierto: IncidenteOperativo | None,
+    n_intervalos: int,
+    retencion: list[IncidenteOperativo] | None = None,
 ) -> EstadoOperativoResponse:
     """Clasifica el nodo por su última lectura recibida (no por la IA).
 
@@ -256,7 +273,11 @@ def _estado_operativo(
 
     incidencias: list[IncidenteOperativoResponse] = []
     silencio = (ahora - ultimo_reporte).total_seconds() if ultimo_reporte else None
-    if abierto is not None:
+    if device.get("rotacion_por_compromiso"):
+        # HU-44: la telemetría está retenida a propósito (no es un silencio).
+        estado = "MONITOREO_SUSPENDIDO"
+        incidencias.extend(_incidente_response(i) for i in retencion or [])
+    elif abierto is not None:
         estado = "SIN_DATOS"
         incidencias.append(_incidente_response(abierto))
     elif silencio is None or silencio >= umbral:
@@ -305,9 +326,13 @@ async def estado_operativo(
     for device in await SQLAlchemyDeviceRepository(session).listar():
         if not device.get("activo", True):
             continue
+        retencion = [
+            i for tipo in (TIPO_MONITOREO_SUSPENDIDO, TIPO_EXCURSION_NO_VERIFICADA)
+            if (i := await incidentes.abierto(device["id"], tipo)) is not None
+        ]
         estado = _estado_operativo(
             device, await lecturas.ultima_recibida_por_device(device["id"]), ahora,
-            await incidentes.abierto(device["id"]), settings.sin_datos_n_intervalos,
+            await incidentes.abierto(device["id"]), settings.sin_datos_n_intervalos, retencion,
         )
         if todos or estado.estado_operativo != "OPERATIVO":
             resultado.append(estado)
@@ -492,12 +517,30 @@ async def rotar_credencial(
             detalle={"motivo": body.motivo},
             ip_origen=ip,
         )
+        # El monitoreo queda suspendido: se avisa en lugar de dejar que un
+        # SIN_DATOS confunda la causa.
+        suspendido = await abrir_monitoreo_suspendido(
+            SQLAlchemyIncidenteRepository(session),
+            AuditarAccionCriticaUseCase(
+                SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+            ),
+            device_id, datetime.now(tz=timezone.utc), body.motivo,
+        )
         await session.commit()
+        if suspendido is not None:
+            cambio, aviso = suspendido
+            notificaciones = getattr(request.app.state, "notificaciones", None)
+            if notificaciones is not None:
+                notificaciones.encolar(aviso)
+            broadcaster = getattr(request.app.state, "sse_broadcaster", None)
+            if broadcaster is not None:
+                await broadcaster.publicar(cambio.como_evento_sse(), cambio.incidente.tipo)
     mensaje = _mensaje_aprovisionar(device_id, aprovisionada)
     if retenida and mensaje:
         mensaje += (
-            " Rotación por compromiso: hasta que confirme la consola, el sistema retiene la telemetría "
-            "del nodo (sin acuse; queda en LittleFS) y la acepta al confirmar."
+            " Rotación por compromiso: el sistema retiene la telemetría del nodo (sin acuse; queda en "
+            "LittleFS) hasta que confirme la consola y el nodo demuestre que tiene la credencial nueva. "
+            "Mientras tanto, las lecturas fuera de 2-8 °C generan una alerta de origen no verificado."
         )
     return CredencialDispositivoResponse(
         device_id=device_id, token=token, generado_en=datetime.now(tz=timezone.utc),
@@ -557,13 +600,19 @@ async def confirmar_operacion_broker(
     request: Request,
     admin=Depends(router_dep),
     broker: BrokerAdmin = Depends(get_broker_admin),
+    publicador: PublicadorDesafios = Depends(get_publicador_desafios),
 ) -> DispositivoResponse:
     """HU-43/HU-44: el administrador confirma que hizo en la consola del broker
     la operación pendiente (crear/actualizar o retirar el usuario del nodo).
 
     Cambiar la contraseña en la consola no cierra las sesiones abiertas: tras
     confirmar se expulsa la sesión, para que quien siguiera conectado con el
-    token anterior tenga que reautenticarse (y el broker ya lo rechace)."""
+    token anterior tenga que reautenticarse (y el broker ya lo rechace).
+
+    Rotación por compromiso: confirmar NO termina la retención. Si la consola
+    no se cambió (o el cambio no se guardó), el broker seguiría aceptando el
+    token filtrado. Se envía un desafío y la retención termina cuando el nodo
+    lo firma con el token nuevo (`posesion_pendiente` hasta entonces)."""
     use_case = ConfirmarOperacionBrokerUseCase(
         SQLAlchemyDeviceRepository(session), RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session))
     )
@@ -580,10 +629,16 @@ async def confirmar_operacion_broker(
         detalle={"operacion": operacion, "nota": body.nota},
         ip_origen=request.client.host if request.client else None,
     )
+    nonce = None
+    if dispositivo.get("rotacion_por_compromiso"):
+        nonce = await emitir_desafio(SQLAlchemyDeviceRepository(session), device_id, datetime.now(tz=timezone.utc))
     await session.commit()
     if await broker.desconectar_cliente(device_id) is not True:
         logger.warning("Consola confirmada para %s, pero su sesión MQTT no se pudo expulsar.", device_id)
-    return DispositivoResponse(**dispositivo)
+    if nonce is not None and await publicador.publicar(device_id, mensaje_desafio(device_id, nonce)) is not True:
+        # El nodo puede estar reconectando: la ingesta lo reenvía con su próximo mensaje.
+        logger.warning("Desafío de posesión para %s no publicado; se reenviará desde la ingesta.", device_id)
+    return DispositivoResponse(**(await SQLAlchemyDeviceRepository(session).obtener(device_id) or dispositivo))
 
 
 @router.patch("/{device_id}/intervalo", response_model=DispositivoResponse)

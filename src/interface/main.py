@@ -23,12 +23,19 @@ from src.application.use_cases.detectar_anomalia_reloj import anomalias_de_reloj
 from src.application.use_cases.gestionar_dispositivos import ActualizarIntervaloReporteUseCase
 from src.application.use_cases.gestionar_firmware import RegistrarResultadoOtaUseCase, normalizar_version
 from src.application.use_cases.predecir_riesgo_preventivo import PredecirRiesgoPreventivoUseCase
+from src.application.use_cases.prueba_posesion import (
+    debe_emitir_desafio,
+    emitir_desafio,
+    mensaje_desafio,
+    verificar_posesion,
+)
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.application.use_cases.registrar_lectura_termica import (
     RegistrarLecturaTermicaUseCase,
     credencial_en_cuarentena,
     credencial_revocada,
 )
+from src.application.use_cases.retencion_compromiso import cerrar_retencion, evaluar_excursion_retenida
 from src.application.use_cases.vigilar_sin_datos import CambioIncidente, resolver_sin_datos_por_lectura
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.exceptions import (
@@ -197,8 +204,146 @@ async def _procesar_mensaje_mqtt(
     registraban."""
     topico = str(message.topic)
     if topico.endswith("/eventos"):
-        return await _procesar_evento_mqtt(message, broadcaster)
+        return await _procesar_evento_mqtt(message, broadcaster, client, notificaciones)
     return await _procesar_lectura_mqtt(message, broadcaster, client, notificaciones)
+
+
+def _como_instante(valor) -> datetime | None:
+    if not isinstance(valor, str):
+        return None
+    try:
+        instante = datetime.fromisoformat(valor)
+    except ValueError:
+        return None
+    return instante if instante.tzinfo else instante.replace(tzinfo=timezone.utc)
+
+
+async def _publicar_desafio(client: aiomqtt.Client | None, device_id: str, nonce: str) -> None:
+    if client is None:
+        return
+    try:
+        await client.publish(_topico_ack(device_id), payload=mensaje_desafio(device_id, nonce), qos=1)
+    except Exception:  # pragma: no cover - defensa: no debe tumbar la ingesta
+        logger.exception("No se pudo publicar el desafío de posesión para %s", device_id)
+
+
+async def _atender_retencion(
+    device_id: str,
+    client: aiomqtt.Client | None,
+    broadcaster: SSEBroadcaster,
+    notificaciones: DespachadorNotificaciones | None,
+    *,
+    temperatura: float | None = None,
+    capturada_en: datetime | None = None,
+    origen: str | None = None,
+    boot_id: int | None = None,
+    seq_no: int | None = None,
+    sesion_nueva: bool = False,
+) -> None:
+    """HU-44: lo que se hace con un mensaje retenido por rotación por compromiso,
+    después de auditarlo.
+
+    - La regla 2-8 °C se aplica igual (P3): fuera de rango abre una excursión
+      crítica de origen no verificado y se avisa. No se persiste como lectura.
+    - Con la consola confirmada, el mensaje prueba que el nodo está en línea:
+      se le (re)envía el desafío de posesión. La retención solo termina cuando
+      el nodo lo firma con el token nuevo."""
+    ahora = datetime.now(timezone.utc)
+    excursion = None
+    nonce = None
+    async with _session_factory() as session:
+        dispositivos = SQLAlchemyDeviceRepository(session)
+        if origen is not None:
+            excursion = await evaluar_excursion_retenida(
+                SQLAlchemyIncidenteRepository(session),
+                AuditarAccionCriticaUseCase(
+                    SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+                ),
+                device_id, temperatura, capturada_en, origen, ahora, boot_id=boot_id, seq_no=seq_no,
+            )
+        if debe_emitir_desafio(await dispositivos.obtener_credencial(device_id), ahora, forzar=sesion_nueva):
+            nonce = await emitir_desafio(dispositivos, device_id, ahora)
+        await session.commit()
+    if excursion is not None:
+        cambio, aviso = excursion
+        if notificaciones is not None:
+            notificaciones.encolar(aviso)
+        await broadcaster.publicar(cambio.como_evento_sse(), tipo_sse(cambio))
+    if nonce is not None:
+        await _publicar_desafio(client, device_id, nonce)
+
+
+async def _procesar_prueba_posesion(evento: contrato_v1.EventoV1, broadcaster: SSEBroadcaster) -> None:
+    """HU-44: respuesta del nodo al desafío. Solo una firma válida con el token
+    nuevo termina la retención; una con el token anterior (consola sin cambiar)
+    queda auditada y la retención sigue."""
+    detalle = evento.detail or {}
+    nonce, firma = detalle.get("nonce"), detalle.get("hmac")
+    cambios = []
+    async with _session_factory() as session:
+        dispositivos = SQLAlchemyDeviceRepository(session)
+        if not await dispositivos.esta_activo(evento.device_id):
+            return
+        auditoria = AuditarAccionCriticaUseCase(
+            SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+        )
+        ahora = datetime.now(timezone.utc)
+        if isinstance(nonce, str) and isinstance(firma, str):
+            resultado = await verificar_posesion(dispositivos, evento.device_id, nonce, firma, ahora)
+            verificada, motivo = resultado.verificada, resultado.motivo
+        else:
+            verificada, motivo = False, "formato_invalido"
+        if motivo == "sin_retencion":
+            return  # respuesta tardía o repetida: no hay nada que probar
+        await auditoria.execute(
+            usuario_id=None,
+            accion="CREDENCIAL_POSESION_VERIFICADA" if verificada else "PRUEBA_POSESION_FALLIDA",
+            recurso=f"dispositivos/{evento.device_id}/credenciales",
+            detalle={"motivo": motivo, "boot_id": evento.boot_id},
+            ip_origen=None,
+            device_id=evento.device_id,
+        )
+        if verificada:
+            cambios = await cerrar_retencion(SQLAlchemyIncidenteRepository(session), auditoria, evento.device_id, ahora)
+        await session.commit()
+    if not verificada:
+        logger.warning("Prueba de posesión fallida para %s: %s", evento.device_id, motivo)
+    await broadcaster.publicar(
+        {"device_id": evento.device_id, "verificada": verificada, "motivo": motivo}, "prueba_posesion"
+    )
+    for cambio in cambios:
+        await broadcaster.publicar(cambio.como_evento_sse(), tipo_sse(cambio))
+
+
+async def _procesar_lectura_vigente(
+    evento: contrato_v1.EventoV1,
+    broadcaster: SSEBroadcaster,
+    client: aiomqtt.Client | None,
+    notificaciones: DespachadorNotificaciones | None,
+) -> None:
+    """HU-44: muestra de la última captura que el nodo publica mientras su cola
+    está detenida por falta de acuse. Solo se usa durante la retención: el
+    drenaje FIFO reintenta la lectura más antigua y, sin esta muestra, una
+    excursión ocurrida en la ventana no se vería hasta el final."""
+    async with _session_factory() as session:
+        dispositivos = SQLAlchemyDeviceRepository(session)
+        if not await dispositivos.esta_activo(evento.device_id) or not await credencial_en_cuarentena(
+            dispositivos, evento.device_id
+        ):
+            return
+    detalle = evento.detail or {}
+    temperatura = detalle.get("temperatura_interna")
+    if isinstance(temperatura, bool) or not isinstance(temperatura, (int, float)):
+        temperatura = None
+    seq_no = detalle.get("seq_no")
+    await _atender_retencion(
+        evento.device_id, client, broadcaster, notificaciones,
+        temperatura=float(temperatura) if temperatura is not None else None,
+        capturada_en=_como_instante(detalle.get("captured_at")),
+        origen="lectura_vigente",
+        boot_id=evento.boot_id,
+        seq_no=seq_no if isinstance(seq_no, int) and not isinstance(seq_no, bool) else None,
+    )
 
 
 # Contrato v1.0: `event_type` → tipo interno. Los que no tienen equivalente se
@@ -216,7 +361,11 @@ _EVENTOS_V1 = {
 
 
 async def _procesar_evento_v1(
-    message: aiomqtt.Message, crudo: dict, broadcaster: SSEBroadcaster
+    message: aiomqtt.Message,
+    crudo: dict,
+    broadcaster: SSEBroadcaster,
+    client: aiomqtt.Client | None = None,
+    notificaciones: DespachadorNotificaciones | None = None,
 ) -> None:
     """Eventos del firmware ColdCare (contrato v1.0)."""
     try:
@@ -227,6 +376,15 @@ async def _procesar_evento_v1(
     device_topic = _device_id_del_topic(str(message.topic), sufijo="eventos")
     if device_topic is None or device_topic != evento.device_id:
         logger.warning("Descartado: evento v1.0 de %s en tópico de %s", evento.device_id, device_topic)
+        return
+
+    # HU-44: los dos eventos de la retención por compromiso se atienden antes
+    # del filtro que descarta lo que llega durante ella.
+    if evento.event_type == "prueba_posesion":
+        await _procesar_prueba_posesion(evento, broadcaster)
+        return
+    if evento.event_type == "lectura_vigente":
+        await _procesar_lectura_vigente(evento, broadcaster, client, notificaciones)
         return
 
     ocurrido = evento.occurred_at or datetime.now(timezone.utc)
@@ -242,7 +400,9 @@ async def _procesar_evento_v1(
     # HU-54: sí deja el latido del nodo y, si cambió, su intervalo de captura
     # (`intervalo_s`), del que sale el umbral SIN_DATOS.
     if evento.event_type == "estado_nodo":
-        await _registrar_estado_nodo(evento)
+        if await _registrar_estado_nodo(evento):
+            await _atender_retencion(evento.device_id, client, broadcaster, notificaciones)
+            return
         await broadcaster.publicar(sse, "estado_nodo")
         return
 
@@ -264,7 +424,7 @@ async def _procesar_evento_v1(
             await session.commit()
             return
         if await credencial_en_cuarentena(device_repository, evento.device_id):
-            # HU-44: rotación por compromiso pendiente: el evento puede venir de
+            # HU-44: rotación por compromiso en curso: el evento puede venir de
             # quien tiene el token filtrado; no altera el estado del nodo.
             await auditoria.execute(
                 usuario_id=None,
@@ -274,6 +434,10 @@ async def _procesar_evento_v1(
                 ip_origen=None,
             )
             await session.commit()
+            # Un `online` es una sesión nueva: el desafío anterior se perdió.
+            await _atender_retencion(
+                evento.device_id, client, broadcaster, notificaciones, sesion_nueva=evento.event_type == "online"
+            )
             return
         if await credencial_revocada(device_repository, evento.device_id):
             # HU-44: credencial revocada: el evento no altera el estado del nodo.
@@ -331,16 +495,18 @@ async def _procesar_evento_v1(
         await broadcaster.publicar(cambio.como_evento_sse(), "conectividad")
 
 
-async def _registrar_estado_nodo(evento: contrato_v1.EventoV1) -> None:
+async def _registrar_estado_nodo(evento: contrato_v1.EventoV1) -> bool:
+    """Devuelve True si el latido llegó durante una retención por compromiso
+    (no se registra: puede venir de quien tiene el token filtrado)."""
     intervalo = (evento.detail or {}).get("intervalo_s")
     async with _session_factory() as session:
         dispositivos = SQLAlchemyDeviceRepository(session)
-        if (
-            not await dispositivos.esta_activo(evento.device_id)
-            or await credencial_revocada(dispositivos, evento.device_id)
-            or await credencial_en_cuarentena(dispositivos, evento.device_id)
+        if not await dispositivos.esta_activo(evento.device_id) or await credencial_revocada(
+            dispositivos, evento.device_id
         ):
-            return
+            return False
+        if await credencial_en_cuarentena(dispositivos, evento.device_id):
+            return True
         await dispositivos.registrar_latido(evento.device_id, datetime.now(timezone.utc))
         if isinstance(intervalo, int) and not isinstance(intervalo, bool):
             try:
@@ -350,9 +516,15 @@ async def _registrar_estado_nodo(evento: contrato_v1.EventoV1) -> None:
             except DomainError:
                 logger.warning("intervalo_s fuera de rango en estado_nodo de %s: %s", evento.device_id, intervalo)
         await session.commit()
+    return False
 
 
-async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadcaster) -> None:
+async def _procesar_evento_mqtt(
+    message: aiomqtt.Message,
+    broadcaster: SSEBroadcaster,
+    client: aiomqtt.Client | None = None,
+    notificaciones: DespachadorNotificaciones | None = None,
+) -> None:
     # BE-019: el mismo techo que las lecturas, ANTES de deserializar.
     if len(message.payload) > MAX_BYTES_PAYLOAD_MQTT:
         logger.warning(
@@ -365,7 +537,7 @@ async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadc
     except (ValueError, RecursionError):
         crudo = None
     if contrato_v1.es_v1(crudo):
-        await _procesar_evento_v1(message, crudo, broadcaster)
+        await _procesar_evento_v1(message, crudo, broadcaster, client, notificaciones)
         return
     try:
         evento = EventoDispositivoPayload.model_validate_json(message.payload)
@@ -406,7 +578,7 @@ async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadc
             logger.warning("Evento de dispositivo no registrado o dado de baja: %s", evento.device_id)
             return
         if await credencial_en_cuarentena(device_repository, evento.device_id):
-            # HU-44: rotación por compromiso pendiente (ver arriba).
+            # HU-44: rotación por compromiso en curso (ver arriba).
             await auditoria.execute(
                 usuario_id=None,
                 accion="EVENTO_RETENIDO_ROTACION_COMPROMISO",
@@ -415,6 +587,10 @@ async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadc
                 ip_origen=None,
             )
             await session.commit()
+            await _atender_retencion(
+                evento.device_id, client, broadcaster, notificaciones,
+                sesion_nueva=evento.tipo_evento is TipoEventoDispositivo.LWT_ONLINE,
+            )
             return
         if await credencial_revocada(device_repository, evento.device_id):
             # HU-44: credencial revocada: el evento no altera el estado del nodo.
@@ -754,10 +930,15 @@ async def _procesar_lectura_mqtt(
                 ip_origen=None,
             )
             await session.commit()
-            logger.warning("Lectura retenida: rotación por compromiso pendiente para %s", payload.device_id)
+            logger.warning("Lectura retenida: rotación por compromiso en curso para %s", payload.device_id)
             # HU-44: rechazo TRANSITORIO, sin acuse a propósito. El nodo legítimo
-            # conserva la lectura en LittleFS y la reenvía cuando el administrador
-            # confirma la consola y el broker ya solo acepta el token nuevo.
+            # conserva la lectura en LittleFS y la reenvía cuando prueba que tiene
+            # el token nuevo. La regla 2-8 °C se aplica igual (origen no verificado).
+            await _atender_retencion(
+                payload.device_id, client, broadcaster, notificaciones,
+                temperatura=payload.temperatura_interna, capturada_en=payload.timestamp,
+                origen="lectura_retenida", boot_id=payload.boot_id, seq_no=payload.seq_no,
+            )
             return
         except DispositivoNoAutorizadoError as exc:
             revocada = isinstance(exc, CredencialRevocadaError)

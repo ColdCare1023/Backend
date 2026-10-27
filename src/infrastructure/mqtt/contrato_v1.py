@@ -105,6 +105,9 @@ class EventoV1(BaseModel):
         "config_modificada", "reinicio_manual", "consola_desbloqueada", "consola_desbloqueo_fallido",
         # IOT-004: ciclo de la actualización OTA.
         "ota_iniciada", "ota_instalada", "ota_confirmada", "ota_rechazada", "ota_fallida", "ota_revertida",
+        # HU-44: retención por rotación por compromiso (respuesta al desafío de
+        # posesión y muestra de la última captura mientras no hay acuse).
+        "prueba_posesion", "lectura_vigente",
     ]
     # El LWT lo publica el broker: no lleva hora ni detalle. Desde HU-13 el
     # firmware incluye el boot_id de la sesión; uno anterior se acepta sin él.

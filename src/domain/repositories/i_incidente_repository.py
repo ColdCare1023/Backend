@@ -4,11 +4,16 @@ from datetime import datetime
 from uuid import UUID
 
 TIPO_SIN_DATOS = "sin_datos"
+# HU-44: rotación por compromiso. La telemetría está retenida (monitoreo
+# suspendido) o una lectura retenida salió de 2-8 °C con origen no verificado.
+TIPO_MONITOREO_SUSPENDIDO = "monitoreo_suspendido"
+TIPO_EXCURSION_NO_VERIFICADA = "excursion_no_verificada"
 
 
 @dataclass(slots=True)
 class IncidenteOperativo:
-    """HU-54: episodio de silencio de un nodo (SIN_DATOS)."""
+    """HU-54: episodio de silencio de un nodo (SIN_DATOS). HU-44: también la
+    retención por compromiso y sus excursiones de origen no verificado."""
 
     id: UUID
     device_id: str
@@ -19,6 +24,7 @@ class IncidenteOperativo:
     resuelto_en: datetime | None = None
     notificado_en: datetime | None = None
     notificacion_intentos: int = 0
+    detalle: dict | None = None
 
     @property
     def activo(self) -> bool:
@@ -32,7 +38,7 @@ class IIncidenteRepository(ABC):
     @abstractmethod
     async def abrir(
         self, device_id: str, abierto_en: datetime, ultimo_reporte_en: datetime | None, umbral_segundos: int,
-        tipo: str = TIPO_SIN_DATOS,
+        tipo: str = TIPO_SIN_DATOS, detalle: dict | None = None,
     ) -> IncidenteOperativo: ...
 
     @abstractmethod

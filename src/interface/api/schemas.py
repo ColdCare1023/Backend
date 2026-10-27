@@ -412,8 +412,11 @@ class DispositivoResponse(BaseModel):
     broker_pendiente_por: UUID | None = None
     broker_confirmado_en: datetime | None = None
     broker_confirmado_por: UUID | None = None
-    # HU-44: rotación por compromiso pendiente: la telemetría se retiene.
+    # HU-44: rotación por compromiso en curso: la telemetría se retiene.
     rotacion_por_compromiso: bool = False
+    # HU-44: consola confirmada; la retención sigue hasta que el nodo pruebe
+    # (desafío firmado) que tiene el token nuevo.
+    posesion_pendiente: bool = False
     # HU-54: intervalo de captura del nodo y último latido (`estado_nodo`).
     intervalo_reporte_segundos: int = 30
     ultimo_latido_en: datetime | None = None
@@ -448,11 +451,13 @@ class SensorIoTResponse(BaseModel):
 
 
 class IncidenteOperativoResponse(BaseModel):
-    """Incidente operativo (sin datos), separado del riesgo térmico y de la IA."""
+    """Incidente operativo, separado del riesgo térmico y de la IA: sin datos
+    (HU-54) y, durante una rotación por compromiso (HU-44), monitoreo suspendido
+    o excursión crítica de origen no verificado."""
 
     id: str
     device_id: str
-    tipo: Literal["sin_datos"]
+    tipo: Literal["sin_datos", "monitoreo_suspendido", "excursion_no_verificada"]
     estado: Literal["activo", "resuelto"]
     detectado_en: datetime
     ultimo_reporte_en: datetime | None
@@ -460,6 +465,8 @@ class IncidenteOperativoResponse(BaseModel):
     recuperado_en: datetime | None = None
     # HU-54: cuándo salió el aviso (correo) del incidente persistente.
     notificado_en: datetime | None = None
+    # HU-44: lectura que disparó la excursión no verificada.
+    detalle: dict | None = None
 
 
 class EstadoOperativoResponse(DispositivoResumenResponse):
@@ -473,7 +480,7 @@ class EstadoOperativoResponse(DispositivoResumenResponse):
     ultimo_reporte_en: datetime | None = None
     intervalo_reporte_segundos: int
     umbral_sin_datos_segundos: int
-    estado_operativo: Literal["OPERATIVO", "SIN_DATOS", "FALLA_SENSOR"]
+    estado_operativo: Literal["OPERATIVO", "SIN_DATOS", "FALLA_SENSOR", "MONITOREO_SUSPENDIDO"]
     sensores: list[SensorIoTResponse] = Field(default_factory=list)
     incidencias_operativas: list[IncidenteOperativoResponse] = Field(default_factory=list)
 

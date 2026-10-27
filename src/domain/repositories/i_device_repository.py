@@ -81,7 +81,9 @@ class IDeviceRepository(ABC):
 
     # ── HU-44/HU-10: credencial MQTT por dispositivo ───────────────────────
     @abstractmethod
-    async def guardar_credencial(self, device_id: str, token_hash: str, cuando: datetime) -> None: ...
+    async def guardar_credencial(
+        self, device_id: str, token_hash: str, cuando: datetime, pop_clave: str | None = None
+    ) -> None: ...
 
     @abstractmethod
     async def revocar_credencial(self, device_id: str, cuando: datetime) -> None: ...
@@ -143,8 +145,16 @@ class IDeviceRepository(ABC):
     @abstractmethod
     async def marcar_rotacion_por_compromiso(self, device_id: str) -> None:
         """La rotación pendiente es por token filtrado: la ingesta retiene la
-        telemetría del nodo hasta que se confirme la consola (se limpia con el
-        pendiente)."""
+        telemetría del nodo hasta que, con la consola confirmada, el nodo pruebe
+        que tiene el token nuevo (`concluir_rotacion_por_compromiso`)."""
+
+    @abstractmethod
+    async def registrar_desafio_posesion(self, device_id: str, nonce: str, cuando: datetime) -> None:
+        """HU-44: nonce vigente del desafío de posesión (sustituye al anterior)."""
+
+    @abstractmethod
+    async def concluir_rotacion_por_compromiso(self, device_id: str) -> None:
+        """HU-44: el nodo probó que tiene el token nuevo: termina la retención."""
 
     @abstractmethod
     async def confirmar_broker(self, device_id: str, actor_id: UUID, cuando: datetime) -> dict:

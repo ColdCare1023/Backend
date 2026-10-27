@@ -29,7 +29,9 @@ logger = logging.getLogger("interface.tareas")
 
 
 def tipo_sse(cambio: CambioIncidente) -> str:
-    return "sin_datos" if cambio.tipo == "abierto" else "sin_datos_resuelto"
+    """`sin_datos` / `sin_datos_resuelto`; HU-44: igual para
+    `monitoreo_suspendido` y `excursion_no_verificada`."""
+    return cambio.incidente.tipo if cambio.tipo == "abierto" else f"{cambio.incidente.tipo}_resuelto"
 
 
 class VigilanteSinDatos:

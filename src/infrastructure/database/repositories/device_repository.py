@@ -44,6 +44,8 @@ def _to_dict(model: DeviceModel) -> dict:
         "broker_confirmado_en": model.broker_confirmado_en,
         "broker_confirmado_por": model.broker_confirmado_por,
         "rotacion_por_compromiso": bool(model.rotacion_por_compromiso),
+        # HU-44: consola confirmada; falta que el nodo pruebe el token nuevo.
+        "posesion_pendiente": bool(model.rotacion_por_compromiso and not model.broker_pendiente),
         "intervalo_reporte_segundos": model.intervalo_reporte_segundos or 30,
         "ultimo_latido_en": model.ultimo_latido_en,
     }
@@ -201,11 +203,14 @@ class SQLAlchemyDeviceRepository(IDeviceRepository):
         return [_to_dict(m) for m in resultado.scalars().all()]
 
     # ── HU-44/HU-10: credencial MQTT por dispositivo ───────────────────────
-    async def guardar_credencial(self, device_id: str, token_hash: str, cuando: datetime) -> None:
+    async def guardar_credencial(
+        self, device_id: str, token_hash: str, cuando: datetime, pop_clave: str | None = None
+    ) -> None:
         model = await self._session.get(DeviceModel, device_id)
         if model is None:
             raise ValueError(f"Dispositivo {device_id} no encontrado")
         model.mqtt_token_hash = token_hash
+        model.pop_clave = pop_clave
         model.mqtt_token_activo = True
         model.mqtt_credencial_actualizada_en = cuando
         await self._session.flush()
@@ -228,6 +233,9 @@ class SQLAlchemyDeviceRepository(IDeviceRepository):
             "activo": model.activo,
             "rotacion_por_compromiso": bool(model.rotacion_por_compromiso),
             "broker_pendiente": model.broker_pendiente,
+            "pop_clave": model.pop_clave,
+            "pop_nonce": model.pop_nonce,
+            "pop_nonce_emitido_en": model.pop_nonce_emitido_en,
         }
 
     # ── HU-51: ubicación y metadatos de instalación ────────────────────────
@@ -345,9 +353,24 @@ class SQLAlchemyDeviceRepository(IDeviceRepository):
         model.broker_pendiente_por = None
         model.broker_confirmado_en = cuando
         model.broker_confirmado_por = actor_id
-        model.rotacion_por_compromiso = False
+        # HU-44: la retención por compromiso NO termina aquí: el administrador
+        # puede confirmar sin haber cambiado la consola. Termina cuando el nodo
+        # prueba que tiene el token nuevo (`concluir_rotacion_por_compromiso`).
         await self._session.flush()
         return _to_dict(model)
+
+    async def registrar_desafio_posesion(self, device_id: str, nonce: str, cuando: datetime) -> None:
+        model = await self._requerir(device_id)
+        model.pop_nonce = nonce
+        model.pop_nonce_emitido_en = cuando
+        await self._session.flush()
+
+    async def concluir_rotacion_por_compromiso(self, device_id: str) -> None:
+        model = await self._requerir(device_id)
+        model.rotacion_por_compromiso = False
+        model.pop_nonce = None
+        model.pop_nonce_emitido_en = None
+        await self._session.flush()
 
     # ── HU-54: intervalo de captura y latido del nodo ──────────────────────
     async def actualizar_intervalo_reporte(self, device_id: str, segundos: int) -> dict:

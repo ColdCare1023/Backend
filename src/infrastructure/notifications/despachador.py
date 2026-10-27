@@ -176,6 +176,7 @@ class DespachadorNotificaciones:
                     AvisoSinDatos(
                         incidente_id=incidente.id, device_id=incidente.device_id, abierto_en=incidente.abierto_en,
                         ultimo_reporte_en=incidente.ultimo_reporte_en, umbral_segundos=incidente.umbral_segundos,
+                        tipo=incidente.tipo, detalle=incidente.detalle,
                     )
                 )
         self.encolar_todos(avisos)
@@ -391,11 +392,23 @@ class DespachadorNotificaciones:
     ) -> None:
         telefono = dispositivo.get("responsable_telefono")
         try:
-            resultado = await self._canales_opcionales.notificar_sin_datos(
-                device_id=aviso.device_id,
-                ultimo_reporte=aviso.ultimo_reporte_en.isoformat() if aviso.ultimo_reporte_en else None,
-                telefono_destino=telefono,
-            )
+            if aviso.tipo == "excursion_no_verificada":
+                # HU-44: se trata como excursión crítica también por SMS.
+                detalle = aviso.detalle or {}
+                resultado = await self._canales_opcionales.notificar_excursion_critica(
+                    device_id=aviso.device_id,
+                    temperatura=detalle.get("temperatura_interna"),
+                    timestamp=detalle.get("captured_at") or aviso.abierto_en.isoformat(),
+                    telefono_destino=telefono,
+                )
+            elif aviso.tipo == "monitoreo_suspendido":
+                return  # solo correo: no es una excursión ni un silencio del nodo
+            else:
+                resultado = await self._canales_opcionales.notificar_sin_datos(
+                    device_id=aviso.device_id,
+                    ultimo_reporte=aviso.ultimo_reporte_en.isoformat() if aviso.ultimo_reporte_en else None,
+                    telefono_destino=telefono,
+                )
         except Exception:  # pragma: no cover - los canales ya tragan sus fallos
             logger.exception("Fallo en canales opcionales (SIN_DATOS) para %s", aviso.device_id)
             return

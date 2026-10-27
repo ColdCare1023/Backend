@@ -87,6 +87,49 @@ def componer_correo_excursion(
     )
 
 
+def _correo_retencion(
+    aviso: AvisoSinDatos, remitente: str, destinatario: str, frontend_url: str, dispositivo: dict
+) -> MensajeCorreo:
+    """HU-44: rotación por compromiso. El monitoreo queda suspendido (la
+    telemetría se retiene) o una lectura retenida salió de rango y su origen no
+    se puede comprobar."""
+    detalle = aviso.detalle or {}
+    if aviso.tipo == "excursion_no_verificada":
+        titulo = "EXCURSIÓN CRÍTICA (origen no verificado)"
+        temperatura = detalle.get("temperatura_interna")
+        lineas = [f"{titulo} — Cadena de frío", "", f"Dispositivo: {aviso.device_id}"]
+        if dispositivo.get("nombre"):
+            lineas.append(f"Equipo: {dispositivo['nombre']}")
+        captura = detalle.get("captured_at")
+        lineas += [
+            f"Temperatura interior: {temperatura:.2f} °C (fuera de 2-8 °C)" if temperatura is not None
+            else "Temperatura interior: —",
+            f"Capturada: {captura or 'sin hora sincronizada'}",
+            "",
+            "La lectura llegó durante una rotación de credencial por compromiso: puede venir del nodo o de "
+            "quien tenga el token filtrado, por eso no se registra todavía. Compruebe ya el refrigerador con "
+            "el termómetro de respaldo y actúe como ante una excursión real.",
+        ]
+    else:
+        titulo = "MONITOREO SUSPENDIDO POR ROTACIÓN"
+        lineas = [
+            f"{titulo} — Cadena de frío", "", f"Dispositivo: {aviso.device_id}", "",
+            "Se rotó la credencial del nodo por sospecha de compromiso. Hasta que el nodo demuestre que tiene "
+            "la credencial nueva, el sistema retiene su telemetría (el nodo la conserva) y solo vigila "
+            "excursiones con datos de origen no verificado.",
+            "Cambie la contraseña en la consola del broker, confirme en el sistema y, mientras tanto, controle "
+            "el refrigerador con el termómetro de respaldo.",
+        ]
+    if frontend_url:
+        lineas += ["", f"Ver el estado del nodo: {frontend_url.rstrip('/')}/dispositivos?id={aviso.device_id}"]
+    return MensajeCorreo(
+        remitente=remitente,
+        destinatario=destinatario,
+        asunto=f"[ColdCare] {titulo} — {aviso.device_id}",
+        cuerpo="\n".join(lineas),
+    )
+
+
 def componer_correo_sin_datos(
     aviso: AvisoSinDatos,
     remitente: str,
@@ -97,6 +140,8 @@ def componer_correo_sin_datos(
     """HU-54: el nodo dejó de reportar. No es una excursión: es no saber qué
     temperatura hay dentro del refrigerador."""
     dispositivo = dispositivo or {}
+    if aviso.tipo != "sin_datos":
+        return _correo_retencion(aviso, remitente, destinatario, frontend_url, dispositivo)
     lineas = ["SIN DATOS — Cadena de frío", "", f"Dispositivo: {aviso.device_id}"]
     if dispositivo.get("nombre"):
         lineas.append(f"Equipo: {dispositivo['nombre']}")
