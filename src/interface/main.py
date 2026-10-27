@@ -2,6 +2,7 @@ import contextlib
 import hashlib
 import json
 import logging
+import os
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
@@ -1030,6 +1031,15 @@ def create_app() -> FastAPI:
             "notificaciones": {
                 "worker_activo": despachador is not None and despachador.activo,
                 "cola_pendiente": despachador.pendientes if despachador is not None else 0,
+            },
+            # B-11: lo que el backend ve detrás del proxy de la plataforma. Con
+            # las cabeceras bien configuradas, `esquema` es https y `ip_cliente`
+            # es la del navegador, no la del proxy.
+            "proxy": {
+                "forwarded_allow_ips": os.environ.get("FORWARDED_ALLOW_IPS", "127.0.0.1"),
+                "esquema": request.url.scheme,
+                "ip_cliente": request.client.host if request.client else None,
+                "x_forwarded_for_presente": "x-forwarded-for" in request.headers,
             },
             "vigilancia_sin_datos": {
                 "activa": vigilante is not None and vigilante.activo,

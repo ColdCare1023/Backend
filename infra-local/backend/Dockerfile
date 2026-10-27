@@ -30,4 +30,7 @@ EXPOSE 8000
 # uvicorn como PID 1 para que reciba el SIGTERM del redespliegue, y un solo
 # worker por diseño: SSE, cola de notificaciones y consumidor MQTT con
 # client_id fijo viven en el proceso (README, «Topología»).
-CMD ["sh", "-c", "exec uvicorn src.interface.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --proxy-headers"]
+# B-11: --forwarded-allow-ips explícito (FORWARDED_ALLOW_IPS, por defecto solo
+# 127.0.0.1). /health/detalle muestra la IP y el esquema que ve el backend para
+# comprobarlo en Railway (docs/operacion/HU-55_despliegue_railway.md).
+CMD ["sh", "-c", "exec uvicorn src.interface.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --proxy-headers --forwarded-allow-ips \"${FORWARDED_ALLOW_IPS:-127.0.0.1}\""]
