@@ -53,6 +53,8 @@ def test_una_tabla_faltante_en_la_restauracion_no_coincide():
 
 def test_si_el_respaldo_falla_hay_log_critico_y_codigo_de_error(monkeypatch, tmp_path, caplog):
     monkeypatch.setattr(respaldo_postgres.shutil, "which", lambda _nombre: None)  # sin pg_dump
+    # alembic.fileConfig (test_migraciones) deshabilita los loggers existentes.
+    monkeypatch.setattr(respaldo_postgres.logger, "disabled", False)
     with caplog.at_level(logging.CRITICAL, logger="respaldo"):
         codigo = respaldo_postgres.main(["--destino", str(tmp_path)])
 
