@@ -50,14 +50,18 @@ class ClasificarRiesgoTermicoUseCase:
     """Enriquece la lectura con features derivadas del historial y ejecuta el
     modelo Random Forest (ver README secciones 7 y 15)."""
 
-    def __init__(self, ai_service: RandomForestRiesgoService) -> None:
+    def __init__(self, ai_service: RandomForestRiesgoService, modo_legado: str = "activo") -> None:
         self._ai_service = ai_service
+        # HU-20: IA_LEGADO_MODO. "desactivado" no ejecuta el modelo.
+        self._modo_legado = modo_legado
 
     @property
     def modelo_version(self) -> str | None:
         """Versión del modelo actualmente cargado (hallazgo AI-06: persistida
         por lectura para poder auditar retroactivamente con qué versión se
         clasificó cada registro histórico)."""
+        if self._modo_legado == "desactivado":
+            return None
         metadata = self._ai_service.metadata
         return metadata.get("model_version") if metadata else None
 
@@ -199,4 +203,6 @@ class ClasificarRiesgoTermicoUseCase:
             )
 
         features = self._construir_features(lectura, historial)
+        if self._modo_legado == "desactivado":
+            return self._ai_service.inferir_solo_regla(features)
         return self._ai_service.inferir(features)

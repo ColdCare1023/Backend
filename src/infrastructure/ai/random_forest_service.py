@@ -78,6 +78,10 @@ class ResultadoInferencia:
     # Forest (regla directa, modelo no disponible, fallo_sensor).
     probabilidades_por_clase: dict[str, float] | None = None
     vector_features: dict[str, float] | None = None
+    # HU-20: lo que dicta la salvaguarda determinista por sí sola. Con el
+    # modelo legado en modo experimental es lo único que decide el riesgo
+    # efectivo cuando no hay excursión confirmada.
+    nivel_regla: NivelRiesgo | None = None
 
 
 class RandomForestRiesgoService:
@@ -215,6 +219,7 @@ class RandomForestRiesgoService:
                 origen=ORIGEN_REGLA_SALVAGUARDA,
                 estado_inferencia=ESTADO_MODELO_NO_DISPONIBLE,
                 motivo_no_inferencia="modelo_no_cargado_en_este_entorno",
+                nivel_regla=nivel_regla,
             )
 
         try:
@@ -227,6 +232,7 @@ class RandomForestRiesgoService:
                 origen=ORIGEN_REGLA_SALVAGUARDA,
                 estado_inferencia=ESTADO_FALLIDA,
                 motivo_no_inferencia=f"excepcion_en_inferencia:{type(exc).__name__}",
+                nivel_regla=nivel_regla,
             )
 
         indice = int(probabilidades.argmax())
@@ -247,10 +253,25 @@ class RandomForestRiesgoService:
             return ResultadoInferencia(
                 nivel_regla, None, ORIGEN_REGLA_SALVAGUARDA, ESTADO_COMPLETADA,
                 probabilidades_por_clase=probabilidades_por_clase, vector_features=vector_features,
+                nivel_regla=nivel_regla,
             )
         return ResultadoInferencia(
             nivel_modelo, confianza, ORIGEN_MODELO, ESTADO_COMPLETADA,
             probabilidades_por_clase=probabilidades_por_clase, vector_features=vector_features,
+            nivel_regla=nivel_regla,
+        )
+
+    def inferir_solo_regla(self, features: FeaturesRiesgoTermico) -> ResultadoInferencia:
+        """HU-20 con IA_LEGADO_MODO=desactivado: el modelo no se carga ni se
+        ejecuta; decide solo la salvaguarda determinista."""
+        nivel_regla = clasificar_por_regla(features)
+        return ResultadoInferencia(
+            nivel=nivel_regla,
+            confianza=None,
+            origen=ORIGEN_REGLA_SALVAGUARDA,
+            estado_inferencia=ESTADO_MODELO_NO_DISPONIBLE,
+            motivo_no_inferencia="modelo_legado_desactivado",
+            nivel_regla=nivel_regla,
         )
 
     def predecir(self, features: FeaturesRiesgoTermico) -> NivelRiesgo:

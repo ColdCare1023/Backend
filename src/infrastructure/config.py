@@ -232,6 +232,15 @@ class Settings(BaseSettings):
     ia_preventivo_version: str = ""
     ia_preventivo_sha256: str = ""
 
+    # HU-20: modelo Random Forest legado, entrenado con escenarios SINTÉTICOS
+    # (docs/ml/01_DATASET_AUDIT.md). No hay un modelo validado con datos reales:
+    #   experimental: clasifica y su clase queda como evidencia marcada
+    #     `ia_experimental`, pero NO abre alertas preventivas; el riesgo
+    #     efectivo lo deciden la regla de rango 2-8 °C y la salvaguarda.
+    #   desactivado: no se ejecuta; solo regla de rango y salvaguarda.
+    #   activo: comportamiento anterior (su clase abre alertas preventivas).
+    ia_legado_modo: Literal["experimental", "desactivado", "activo"] = "experimental"
+
     cors_origins: list[str] = ["http://localhost:5173"]
 
     mqtt_host: str = "tu-instancia.emqx.cloud"

@@ -206,6 +206,9 @@ class LecturaResponse(BaseModel):
     origen_clasificacion: str | None = None
     estado_inferencia: str | None = None
     motivo_no_inferencia: str | None = None
+    # HU-20: la clase la produjo el modelo legado (datos sintéticos) en modo
+    # experimental. El tablero la rotula y no abre alertas preventivas por ella.
+    ia_experimental: bool = False
     estado_sensores: dict[str, str] | None = None
     # HU-05: identidad lógica declarada por el firmware (None en payloads
     # de dispositivos aún no actualizados) y versión del contrato de payload.

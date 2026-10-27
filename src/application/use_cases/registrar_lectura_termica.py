@@ -11,6 +11,7 @@ from src.domain.repositories.i_audit_log_repository import IAuditLogRepository
 from src.domain.repositories.i_device_repository import IDeviceRepository
 from src.domain.repositories.i_lectura_repository import ILecturaRepository
 from src.domain.repositories.i_trazabilidad_repository import ITrazabilidadRepository
+from src.infrastructure.ai.random_forest_service import ORIGEN_MODELO
 
 if TYPE_CHECKING:
     from src.application.use_cases.predecir_riesgo_preventivo import PredecirRiesgoPreventivoUseCase
@@ -48,6 +49,7 @@ class RegistrarLecturaTermicaUseCase:
         ventana_normalizacion_alerta_minutos: int | None = None,
         prediccion_preventiva: "PredecirRiesgoPreventivoUseCase | None" = None,
         antiguedad_maxima_horas: int | None = None,
+        ia_legado_modo: str = "activo",
     ) -> None:
         self._lectura_repository = lectura_repository
         self._antiguedad_maxima = timedelta(hours=antiguedad_maxima_horas) if antiguedad_maxima_horas else None
@@ -67,6 +69,8 @@ class RegistrarLecturaTermicaUseCase:
         # Modelo preventivo temporal (docs/ml/06_BACKEND_INTEGRATION.md).
         # None = desactivado: el flujo es exactamente el anterior.
         self._prediccion_preventiva = prediccion_preventiva
+        # HU-20: IA_LEGADO_MODO (ver Settings.ia_legado_modo).
+        self._ia_legado_modo = ia_legado_modo
 
     @property
     def avisos_pendientes(self) -> list[AvisoExcursion]:
@@ -183,9 +187,10 @@ class RegistrarLecturaTermicaUseCase:
         # activo (modelo aprobado) reemplaza la clasificación anterior. Nunca
         # interviene en la excursión confirmada, que se calcula justo abajo.
         prediccion = None
+        reemplazada = False
         if self._prediccion_preventiva is not None:
             prediccion = await self._prediccion_preventiva.predecir(lectura)
-            self._prediccion_preventiva.aplicar_a_lectura(lectura, prediccion)
+            reemplazada = self._prediccion_preventiva.aplicar_a_lectura(lectura, prediccion)
 
         # HU-18/21/34: excursión confirmada y riesgo efectivo se calculan
         # SIEMPRE aquí, sobre la lectura ya validada como físicamente
@@ -196,6 +201,17 @@ class RegistrarLecturaTermicaUseCase:
         # marcando excursion_confirmada=True y riesgo_efectivo=critica.
         lectura.excursion_confirmada = lectura.es_excursion_confirmada()
         lectura.riesgo_efectivo = lectura.calcular_riesgo_efectivo()
+        # HU-20: el modelo legado (datos sintéticos) en modo experimental deja su
+        # clase como evidencia marcada, pero no abre alertas preventivas: sin
+        # excursión, el riesgo efectivo es el de la salvaguarda determinista.
+        if (
+            not reemplazada
+            and self._ia_legado_modo == "experimental"
+            and clasificacion.probabilidades_por_clase is not None
+        ):
+            lectura.payload = {**(lectura.payload or {}), "ia_experimental": True}
+            if clasificacion.origen == ORIGEN_MODELO and not lectura.excursion_confirmada:
+                lectura.riesgo_efectivo = clasificacion.nivel_regla
 
         lectura_guardada = await self._lectura_repository.agregar(lectura)
         if prediccion is not None and lectura_guardada.id is not None:
@@ -232,6 +248,7 @@ class RegistrarLecturaTermicaUseCase:
                 "modelo_version": lectura_guardada.modelo_version,
                 "estado_inferencia": clasificacion.estado_inferencia,
                 "motivo_no_inferencia": clasificacion.motivo_no_inferencia,
+                "ia_experimental": bool((lectura_guardada.payload or {}).get("ia_experimental")),
                 # BE-001: la evidencia declara si la lectura es telemetría del
                 # nodo o una carga manual, y quién la hizo.
                 "origen": lectura_guardada.origen,

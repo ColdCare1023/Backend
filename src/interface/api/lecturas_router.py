@@ -53,7 +53,7 @@ async def ingestar_lectura(
     lectura_repository = SQLAlchemyLecturaRepository(session)
     alerta_repository = SQLAlchemyAlertaRepository(session)
     trazabilidad_repository = SQLAlchemyTrazabilidadRepository(session)
-    clasificar_use_case = ClasificarRiesgoTermicoUseCase(get_random_forest_service())
+    clasificar_use_case = ClasificarRiesgoTermicoUseCase(get_random_forest_service(), settings.ia_legado_modo)
 
     use_case = RegistrarLecturaTermicaUseCase(
         lectura_repository,
@@ -65,6 +65,7 @@ async def ingestar_lectura(
         audit_log_repository=SQLAlchemyAuditLogRepository(session),
         ventana_normalizacion_alerta_minutos=settings.alerta_ventana_normalizacion_minutos,
         antiguedad_maxima_horas=settings.lectura_antiguedad_max_horas,
+        ia_legado_modo=settings.ia_legado_modo,
     )
     lectura = LecturaTermica(
         device_id=body.device_id,

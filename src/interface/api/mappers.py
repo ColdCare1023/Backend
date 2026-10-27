@@ -71,6 +71,7 @@ def lectura_to_response(lectura: LecturaTermica) -> LecturaResponse:
         origen_clasificacion=lectura.origen_clasificacion,
         estado_inferencia=lectura.estado_inferencia,
         motivo_no_inferencia=lectura.motivo_no_inferencia,
+        ia_experimental=bool((lectura.payload or {}).get("ia_experimental")),
         reading_id=lectura.reading_id,
         schema_version=lectura.schema_version,
         excursion_confirmada=lectura.excursion_confirmada,

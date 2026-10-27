@@ -574,7 +574,7 @@ async def _procesar_lectura_mqtt(
         lectura_repository = SQLAlchemyLecturaRepository(session)
         alerta_repository = SQLAlchemyAlertaRepository(session)
         trazabilidad_repository = SQLAlchemyTrazabilidadRepository(session)
-        clasificar_use_case = ClasificarRiesgoTermicoUseCase(get_random_forest_service())
+        clasificar_use_case = ClasificarRiesgoTermicoUseCase(get_random_forest_service(), settings.ia_legado_modo)
         servicio_preventivo = obtener_servicio_preventivo(
             settings.ia_preventivo_modo, settings.ia_preventivo_version, settings.ia_preventivo_sha256
         )
@@ -588,6 +588,7 @@ async def _procesar_lectura_mqtt(
             audit_log_repository=SQLAlchemyAuditLogRepository(session),
             ventana_normalizacion_alerta_minutos=settings.alerta_ventana_normalizacion_minutos,
             antiguedad_maxima_horas=settings.lectura_antiguedad_max_horas,
+            ia_legado_modo=settings.ia_legado_modo,
             prediccion_preventiva=(
                 PredecirRiesgoPreventivoUseCase(
                     servicio_preventivo, lectura_repository, SQLAlchemyPrediccionPreventivaRepository(session)
