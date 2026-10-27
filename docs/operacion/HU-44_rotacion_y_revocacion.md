@@ -34,6 +34,11 @@ termine la retención.
   - la auditoría guarda el tiempo entre la captura y la alerta
     (`captura_a_alerta_s`).
 - Un sensor en falla (`null`) nunca dispara la regla.
+- Es **un episodio por ventana**: no se cierra aunque la temperatura vuelva a
+  rango, porque no hay forma de saber si el dato viene del nodo. Su `detalle`
+  conserva la lectura que lo abrió y, además, la última recibida
+  (`ultima_temperatura_interna`, `ultima_captura` y `ultima_en_rango`).
+- El SMS también lo marca como «ORIGEN NO VERIFICADO».
 - El incidente no se persiste como lectura ni entra en la cadena de lecturas.
   Cuando el nodo prueba la posesión, entrega lo retenido con su hora de captura
   original y la regla abre entonces la alerta térmica normal.
@@ -61,6 +66,9 @@ demuestra que su sesión usa el token nuevo:
    - Si el nodo no lo recibe porque estaba reconectando, la ingesta lo reenvía
      con el siguiente mensaje retenido (como mucho cada 30 s) o enseguida tras
      el `online` de una sesión nueva.
+   - Mientras no caduque, se reenvía **el mismo** nonce. Así una respuesta al
+     desafío de la API que llegue después del reenvío de la ingesta no se
+     audita como fallo.
 3. El nodo responde con el evento `prueba_posesion` y
    `hmac = HMAC-SHA256(pop_clave, nonce + ":" + device_id)`, calculado con el
    token de **su sesión**.
@@ -74,6 +82,34 @@ demuestra que su sesión usa el token nuevo:
    - `nonce_desconocido`
    - `nonce_caducado`
    - `consola_pendiente`
+
+### Si se confirmó sin cambiar la consola (caso E)
+
+En ese caso la retención sigue y la bitácora muestra `PRUEBA_POSESION_FALLIDA`
+con motivo `firma_invalida`. La operación ya no está pendiente
+(`broker_pendiente` es nulo), así que no se puede confirmar otra vez. Para
+salir:
+
+1. Cambie la contraseña del usuario `<device_id>` en la consola de EMQX.
+2. Use **«Reenviar desafío»** en Dispositivos
+   (`POST /api/dispositivos/{id}/credenciales/reenviar-desafio`). El backend
+   expulsa la sesión, el nodo vuelve a probar el relevo, el broker ya lo acepta
+   y el nodo responde el desafío con el token nuevo. Queda auditado como
+   `DESAFIO_POSESION_REENVIADO`.
+
+Sin ese botón, la salida depende del sondeo del relevo que hace el nodo cada
+5 min (IoT ADR-17) o de un reinicio. En la prueba E se mide cuánto tarda
+cada camino.
+
+### Tope de la bitácora durante la retención
+
+Quien tiene el token filtrado puede publicar en bucle lecturas, eventos o
+respuestas falsas en los tópicos del nodo. Por eso se audita como mucho una
+fila por minuto para cada combinación de dispositivo, tipo de registro y motivo
+(`LECTURA_RETENIDA_*`, `EVENTO_RETENIDO_*`, `PRUEBA_POSESION_FALLIDA`). Cada
+fila lleva `suprimidos_desde_anterior`, con la cantidad de intentos que solo se
+contaron. El contador vive en memoria: el backend corre con una réplica y un
+worker.
 
 Un evento `credencial_rotada origen=relevo` no sirve como prueba: lo puede
 publicar cualquiera que tenga el token viejo en el tópico del dispositivo.
