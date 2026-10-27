@@ -372,6 +372,54 @@ async def test_respuestas_falsas_en_bucle_dejan_una_sola_fila_por_minuto(
     assert acciones.count("LECTURA_RETENIDA_ROTACION_COMPROMISO") == 1
 
 
+async def test_los_fallos_en_bucle_solo_avisan_una_vez_por_sse(client, token_admin, espia, db_session_factory):
+    _alta(client, token_admin)
+    _rotar_por_compromiso(client, token_admin)
+    _confirmar(client, token_admin)
+    nonce = espia.desafios[-1]["nonce"]
+    sse = _Broadcaster()
+    for _ in range(5):
+        await main._procesar_evento_mqtt(_Mensaje("eventos", _respuesta("token-anterior-filtrado", nonce)), sse, espia)
+
+    assert [d["motivo"] for tipo, d in sse.eventos if tipo == "prueba_posesion"] == ["firma_invalida"]
+
+
+async def test_al_verificar_se_auditan_los_intentos_que_solo_se_contaron(
+    client, token_admin, espia, db_session_factory
+):
+    _alta(client, token_admin)
+    token = _rotar_por_compromiso(client, token_admin)
+    _confirmar(client, token_admin)
+    nonce = espia.desafios[-1]["nonce"]
+    for _ in range(4):
+        await main._procesar_evento_mqtt(
+            _Mensaje("eventos", _respuesta("token-anterior-filtrado", nonce)), _Broadcaster(), espia
+        )
+    for n in range(3):
+        await main._procesar_lectura_mqtt(_Mensaje("lecturas", _telemetria(f"falsa-{n}")), _Broadcaster(), espia)
+
+    await main._procesar_evento_mqtt(_Mensaje("eventos", _respuesta(token, nonce)), _Broadcaster(), espia)
+
+    cierre = [a for a in await _filas(db_session_factory, AuditLogModel) if a.accion == "RETENCION_INTENTOS_SUPRIMIDOS"]
+    assert len(cierre) == 1
+    assert cierre[0].detalle["suprimidos_sin_auditar"] == {"pop_fallida:firma_invalida": 3, "lectura_retenida": 2}
+
+
+async def test_un_nonce_a_punto_de_caducar_no_se_reenvia(client, token_admin, espia, db_session_factory):
+    _alta(client, token_admin)
+    _rotar_por_compromiso(client, token_admin)
+    _confirmar(client, token_admin)
+    viejo = espia.desafios[-1]["nonce"]
+    async with db_session_factory() as session:
+        dispositivo = await session.get(DeviceModel, DEVICE_ID)
+        dispositivo.pop_nonce_emitido_en = datetime.now(tz=timezone.utc) - timedelta(minutes=9, seconds=30)
+        await session.commit()
+
+    await main._procesar_evento_mqtt(_Mensaje("eventos", _evento("online", {"rssi_dbm": -60})), _Broadcaster(), espia)
+
+    assert espia.desafios[-1]["nonce"] != viejo
+
+
 async def test_reenviar_desafio_expulsa_la_sesion_y_reenvia_el_nonce(client, token_admin, espia, db_session_factory):
     """Caso E: tras corregir la consola, el administrador fuerza la reconexión."""
     _alta(client, token_admin)
@@ -392,6 +440,8 @@ async def test_reenviar_desafio_expulsa_la_sesion_y_reenvia_el_nonce(client, tok
     assert espia.expulsados == [DEVICE_ID]
     assert espia.desafios[-1]["nonce"] == nonce
     assert "DESAFIO_POSESION_REENVIADO" in await _acciones(db_session_factory)
+    dispositivo = (await _filas(db_session_factory, DeviceModel, DeviceModel.id == DEVICE_ID))[0]
+    assert dispositivo.sesion_expulsada_motivo == "reenvio_desafio"
 
 
 async def test_la_excursion_abierta_guarda_la_ultima_lectura(client, token_admin, espia, db_session_factory):

@@ -36,8 +36,10 @@ termine la retención.
 - Un sensor en falla (`null`) nunca dispara la regla.
 - Es **un episodio por ventana**: no se cierra aunque la temperatura vuelva a
   rango, porque no hay forma de saber si el dato viene del nodo. Su `detalle`
-  conserva la lectura que lo abrió y, además, la última recibida
-  (`ultima_temperatura_interna`, `ultima_captura` y `ultima_en_rango`).
+  conserva la lectura que lo abrió y, además, la más reciente por hora de
+  captura (`ultima_temperatura_interna`, `ultima_captura` y `ultima_en_rango`).
+  Una lectura retenida que el nodo reintenta desde su cola es anterior a la
+  muestra vigente y no la reemplaza.
 - El SMS también lo marca como «ORIGEN NO VERIFICADO».
 - El incidente no se persiste como lectura ni entra en la cadena de lecturas.
   Cuando el nodo prueba la posesión, entrega lo retenido con su hora de captura
@@ -66,9 +68,10 @@ demuestra que su sesión usa el token nuevo:
    - Si el nodo no lo recibe porque estaba reconectando, la ingesta lo reenvía
      con el siguiente mensaje retenido (como mucho cada 30 s) o enseguida tras
      el `online` de una sesión nueva.
-   - Mientras no caduque, se reenvía **el mismo** nonce. Así una respuesta al
-     desafío de la API que llegue después del reenvío de la ingesta no se
-     audita como fallo.
+   - Mientras le quede más de 1 min de vigencia, se reenvía **el mismo**
+     nonce. Así una respuesta al desafío de la API que llegue después del
+     reenvío de la ingesta no se audita como fallo. Con menos de 1 min se
+     emite uno nuevo, para que el nodo no responda uno ya caducado.
 3. El nodo responde con el evento `prueba_posesion` y
    `hmac = HMAC-SHA256(pop_clave, nonce + ":" + device_id)`, calculado con el
    token de **su sesión**.
@@ -111,6 +114,13 @@ fila lleva `suprimidos_desde_anterior`, con la cantidad de intentos que solo se
 contaron. El contador vive en memoria: el backend corre con una réplica y un
 worker.
 
+- El aviso en tiempo real (SSE `prueba_posesion`) de un fallo sigue el mismo
+  tope; el de la verificación sale siempre.
+- Al verificar la posesión, lo contado desde la última fila de cada clave queda
+  en una fila de cierre `RETENCION_INTENTOS_SUPRIMIDOS`
+  (`suprimidos_sin_auditar`, p. ej. `{"pop_fallida:firma_invalida": 3}`).
+  Tras un reinicio del backend ese resto se pierde.
+
 Un evento `credencial_rotada origen=relevo` no sirve como prueba: lo puede
 publicar cualquiera que tenga el token viejo en el tópico del dispositivo.
 Quien solo tiene el token filtrado no conoce `pop_clave` y no puede firmar.
@@ -121,10 +131,11 @@ operativo del nodo es `MONITOREO_SUSPENDIDO`.
 
 ## Bitácora de conectividad
 
-Cada expulsión de sesión que hace el backend (al rotar, al confirmar la consola
-o al revocar) queda anotada con su hora y su motivo. Durante los 120 s
-siguientes, el LWT y el `online` que produce esa expulsión se auditan con
-`motivo` = `reconexion_por_rotacion`, `reconexion_por_confirmacion_consola` o
+Cada expulsión de sesión que hace el backend (al rotar, al confirmar la
+consola, al reenviar el desafío o al revocar) queda anotada con su hora y su
+motivo. Durante los 120 s siguientes, el LWT y el `online` que produce esa
+expulsión se auditan con `motivo` = `reconexion_por_rotacion`,
+`reconexion_por_confirmacion_consola`, `reconexion_por_reenvio_desafio` o
 `expulsion_por_revocacion`, y así no se confunden con una caída del nodo.
 
 ## Límites conocidos
