@@ -89,7 +89,7 @@ operativo del nodo es `MONITOREO_SUSPENDIDO`.
   quien lo tenga comparten `client_id` y se expulsan entre sí. Solo lo resuelve
   editar la consola.
 - **Firmware anterior.** Un nodo sin soporte para la prueba de posesión
-  (firmware anterior a `9045d9d`) no puede salir de la retención por
+  (firmware anterior a `1aea6bd`) no puede salir de la retención por
   compromiso. Antes de usar esa causa, actualice el firmware; en su lugar, use
   una revocación seguida de un alta nueva.
 - **Fuga de la base de datos.** Quien lea la base de datos obtiene `pop_clave`.

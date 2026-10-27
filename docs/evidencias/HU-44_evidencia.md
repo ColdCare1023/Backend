@@ -7,18 +7,18 @@ Diseño y criterio: `docs/operacion/HU-44_rotacion_y_revocacion.md`. Firmware: I
 
 ## Entorno de las pruebas A y B (27/10/2026)
 
+Registro completo, con los logs serie, la bitácora y las consultas:
+IoT `docs/evidencias/HU-44_rotacion_relevo_evidencia.md`.
+
 | Elemento | Valor |
 |---|---|
-| Broker | EMQX 5.8.6 local, con la consola simulada por su API (modo `manual` en el backend) |
-| Nodo | ESP32 DevKitC físico |
-| Intervalo de captura | 10 s (de prueba; el valor de fábrica es 30 s) |
-| Versión de firmware | [PENDIENTE: commit de IoT con el que se flasheó] |
-| Versión de backend | [PENDIENTE: commit de Backend en ejecución] |
-| Script y logs | [PENDIENTE: guardar en `docs/evidencias/logs/2026-10-27_hu44_*`] |
+| Broker | EMQX 5.8 local (`infra-local`), autenticación integrada y TLS 8883. La «consola» se simuló con la API de administración del EMQX local (`PUT /authentication/.../users/{id}`) |
+| Backend | `688a0e2` (`develop`), `BROKER_USUARIOS_MODO=manual` |
+| Nodo | ESP32 DevKitC V4 `ESP32_FARMACIA_01`, firmware `esp32dev` en `a220a80`, `intervalo_s = 10` |
 
-> Las pruebas A y B se hicieron **antes** del cambio `252dfc2` (backend) y `9045d9d`/`dc8e179` (firmware).
-> Con esos commits la retención por compromiso ya no termina al confirmar la consola, sino con la prueba de
-> posesión. Hay que repetir la prueba B con el firmware y el backend nuevos.
+> Las pruebas A y B son **anteriores** a los cambios de backend `252dfc2` y de firmware `1aea6bd` y
+> `83d8f78`. Con esos cambios, la retención por compromiso ya no termina al confirmar la consola: termina
+> con la prueba de posesión. Por eso hay que repetir la prueba B (B') con el firmware y el backend nuevos.
 
 ## Prueba A — rotación preventiva (informada por el equipo)
 
@@ -39,7 +39,8 @@ Diseño y criterio: `docs/operacion/HU-44_rotacion_y_revocacion.md`. Firmware: I
    el reintento del nodo va de 5 a 60 s.
 4. **SIN_DATOS** se abrió a los 30 s, que son 3 × 10 s del intervalo de prueba.
    En el piloto, a 30 s, serían 90 s. Con el cambio `252dfc2` ya no se abre
-   SIN_DATOS durante la retención: se abre «monitoreo_suspendido».
+   SIN_DATOS durante la retención: se abre «monitoreo_suspendido», que avisa con su propio texto (era la
+   observación de la sección 7 de la evidencia de IoT).
 5. Cada rotación deja en la conectividad el par `lwt_offline`/`online` del LWT.
    Es lo esperado. Queda pendiente etiquetarlo como «reconexión por rotación» en
    la bitácora.
