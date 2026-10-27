@@ -61,7 +61,7 @@ reemplazan el banco.
 
 | Archivo | Qué verifica | Resultado |
 |---|---|---|
-| `tests/integration/test_hu44_prueba_posesion.py` | Monitoreo suspendido abierto y avisado; SIN_DATOS no se abre en la retención; **C**: excursión en lectura retenida y en `lectura_vigente` (un solo episodio y un solo aviso; un sensor en falla no la dispara); prueba válida termina la retención y el nodo entrega lo retenido; **E**: confirmar sin cambiar la consola (firma con el token viejo) no sale de la retención; **D**: nonce inventado y prueba antes de confirmar se rechazan; nonce caducado; sesión nueva recibe desafío nuevo | 11 pasan |
+| `tests/integration/test_hu44_prueba_posesion.py` | Monitoreo suspendido abierto y avisado; SIN_DATOS no se abre en la retención; **C**: excursión en lectura retenida y en `lectura_vigente` (un solo episodio y un solo aviso; un sensor en falla no la dispara); prueba válida termina la retención y el nodo entrega lo retenido; **E**: confirmar sin cambiar la consola (firma con el token viejo) no sale de la retención; **D**: nonce inventado y prueba antes de confirmar se rechazan; nonce caducado; sesión nueva recibe desafío nuevo | 10 pasan |
 | `tests/integration/test_hu44_rotacion_por_compromiso.py` | Rotación preventiva sin corte; retención sin acuse; eventos retenidos; confirmar expulsa la sesión y **sigue** reteniendo; modo API sin ventana | 6 pasan |
 | `tests/integration/test_hu44_hu10_credenciales_dispositivo.py` | Revocación y rechazo de telemetría | pasan |
 | IoT `test/test_core/test_posesion.cpp` | HMAC-SHA256 (RFC 4231) y la misma firma que verifica el backend | 6 pasan |
