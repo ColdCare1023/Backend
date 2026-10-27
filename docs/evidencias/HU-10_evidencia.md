@@ -26,3 +26,9 @@ tag: AUTHZ, clientid: FARM-01-CDL, msg: authorization_permission_allowed, topic:
 tag: AUTHZ, clientid: FARM-01-CDL, msg: authorization_permission_allowed, topic: farmacias/FARM-01-CDL/ack, action: SUBSCRIBE(Q1), source: file
 ```
 El primero corresponde a un nodo real con un token antiguo en NVS: el broker lo rechazó hasta reaprovisionarlo.
+
+## Pendiente: EMQX Cloud Serverless (27/10/2026)
+
+Los escenarios 2 (token inválido) y 3 (ACL en el tópico de otro nodo) se verificaron arriba contra EMQX
+local con `acl.conf`. En Serverless las reglas se cargan en la consola, así que hay que repetirlos ahí
+(prueba H de `HU-44_evidencia.md`) antes de dar HU-10 por verificada.
