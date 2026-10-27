@@ -224,7 +224,9 @@ class LecturaResponse(BaseModel):
     # HU-01/HU-06: calidad del reloj del nodo al capturar y, para lecturas
     # `unsynced`, la hora reconstruida (None hasta que el arranque sincroniza).
     # Para graficar, usar `timestamp_estimado` cuando exista.
-    time_quality: str | None = None
+    # Valores internos (contrato_v1.TIME_QUALITY_INTERNO): el OpenAPI los publica
+    # como enum para que el frontend los valide en sus pruebas de contrato.
+    time_quality: Literal["synced", "backfilled", "unsynced"] | None = None
     timestamp_estimado: datetime | None = None
     # BE-001: "dispositivo" (telemetría del nodo) o "manual" (registrada por
     # `registrado_por`). Un reporte o una pantalla no deben mezclarlas.
