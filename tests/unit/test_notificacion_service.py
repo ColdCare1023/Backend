@@ -167,6 +167,19 @@ async def test_sms_sin_datos_comparte_el_cooldown_con_la_excursion():
     assert len(servicio.sms) == 1
 
 
+@pytest.mark.asyncio
+async def test_el_sms_de_la_excursion_no_verificada_lo_dice():
+    """HU-44: la lectura llegó durante una rotación por compromiso."""
+    servicio = _ServicioEspia(
+        _settings(sms_enabled=True, sms_account_sid="AC", sms_auth_token="tok", sms_from="+10000000000")
+    )
+    resultado = await servicio.notificar_excursion_critica(
+        "ESP32-01", 11.5, "2026-10-27T15:00:00+00:00", "+51999999999", origen_no_verificado=True
+    )
+    assert resultado == "enviado"
+    assert "ORIGEN NO VERIFICADO" in servicio.sms[0][1]
+
+
 def test_el_correo_sin_datos_dice_desde_cuando_calla_el_nodo():
     from src.application.use_cases.vigilar_sin_datos import AvisoSinDatos
     from src.infrastructure.notifications.notificacion_service import componer_correo_sin_datos

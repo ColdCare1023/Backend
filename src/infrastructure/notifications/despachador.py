@@ -400,6 +400,7 @@ class DespachadorNotificaciones:
                     temperatura=detalle.get("temperatura_interna"),
                     timestamp=detalle.get("captured_at") or aviso.abierto_en.isoformat(),
                     telefono_destino=telefono,
+                    origen_no_verificado=True,
                 )
             elif aviso.tipo == "monitoreo_suspendido":
                 return  # solo correo: no es una excursión ni un silencio del nodo

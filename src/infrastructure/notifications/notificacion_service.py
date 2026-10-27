@@ -197,9 +197,13 @@ class NotificacionService:
         temperatura: float | None,
         timestamp: str,
         telefono_destino: str | None = None,
+        origen_no_verificado: bool = False,
     ) -> str | None:
         """El SMS, al ser un canal explícitamente opcional (HU-54) y personal,
-        no tiene destinatario global: sin número registrado, no se envía."""
+        no tiene destinatario global: sin número registrado, no se envía.
+
+        HU-44: `origen_no_verificado` marca una lectura recibida durante una
+        rotación por compromiso (puede venir de quien tiene el token filtrado)."""
         if not self.habilitado:
             return None
         if not self._debe_notificar(device_id):
@@ -212,10 +216,17 @@ class NotificacionService:
             return None
         if not telefono_destino:
             return "sin_telefono"
-        texto = (
-            f"[ColdCare] EXCURSION CRITICA {device_id}: {temp_texto} a las {timestamp}. "
-            "Verifique el refrigerador de inmediato."
-        )
+        if origen_no_verificado:
+            texto = (
+                f"[ColdCare] EXCURSION CRITICA (ORIGEN NO VERIFICADO) {device_id}: {temp_texto} a las "
+                f"{timestamp}. Llego durante una rotacion de credencial: compruebe el refrigerador con "
+                "el termometro de respaldo."
+            )
+        else:
+            texto = (
+                f"[ColdCare] EXCURSION CRITICA {device_id}: {temp_texto} a las {timestamp}. "
+                "Verifique el refrigerador de inmediato."
+            )
         return "enviado" if await self._enviar_sms(device_id, texto, telefono_destino) else "fallido"
 
     async def notificar_sin_datos(
