@@ -121,6 +121,7 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
         device_id: str | None = None,
         nivel_riesgo: str | None = None,
         estado_conectividad: str | None = None,
+        riesgo_efectivo: str | None = None,
         desde: datetime | None = None,
         hasta: datetime | None = None,
         limite: int = 100,
@@ -133,6 +134,9 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
             stmt = stmt.where(ThermalReadingModel.nivel_riesgo == nivel_riesgo)
         if estado_conectividad:
             stmt = stmt.where(ThermalReadingModel.estado_conectividad == estado_conectividad)
+        if riesgo_efectivo:
+            # HU-36: el filtro debe coincidir con lo que muestra la tabla (riesgo efectivo).
+            stmt = stmt.where(ThermalReadingModel.riesgo_efectivo == riesgo_efectivo)
         if desde:
             stmt = stmt.where(ThermalReadingModel.timestamp >= desde)
         if hasta:

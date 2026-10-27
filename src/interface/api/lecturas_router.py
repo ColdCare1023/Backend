@@ -10,6 +10,7 @@ from src.application.use_cases.registrar_lectura_termica import RegistrarLectura
 from src.domain.entities.lectura_termica import ORIGEN_MANUAL, LecturaTermica
 from src.domain.exceptions import DispositivoNoAutorizadoError, LecturaInvalidaError
 from src.domain.value_objects.device_id import PATRON_DEVICE_ID
+from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.ai.random_forest_service import get_random_forest_service
 from src.infrastructure.database.repositories.alerta_repository import SQLAlchemyAlertaRepository
@@ -164,8 +165,11 @@ async def listar_historial(
     session: DbSessionDep,
     _usuario=Depends(require_roles(Rol.TECNICO, Rol.FARMACEUTICO, Rol.AUDITOR)),
     device_id: str | None = Query(default=None, pattern=PATRON_DEVICE_ID),
-    nivel_riesgo: str | None = None,
+    nivel_riesgo: str | None = Query(default=None, description="Clase cruda del modelo (model_class)"),
     estado_conectividad: str | None = None,
+    # HU-36 / B-14: el filtro que usa el historial; coincide con lo que la
+    # tabla muestra (riesgo efectivo), no con la clase cruda del modelo.
+    riesgo_efectivo: NivelRiesgo | None = None,
     desde: datetime | None = None,
     hasta: datetime | None = None,
     # 5000 = MAX_LECTURAS_EN_MEMORIA del frontend (HU-31): la ventana de 24 h
@@ -186,6 +190,7 @@ async def listar_historial(
         device_id=device_id,
         nivel_riesgo=nivel_riesgo,
         estado_conectividad=estado_conectividad,
+        riesgo_efectivo=riesgo_efectivo.value if riesgo_efectivo else None,
         desde=desde,
         hasta=hasta,
         limite=limite,

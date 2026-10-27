@@ -101,3 +101,26 @@ async def test_tecnico_no_puede_administrar_usuarios(client, token_tecnico):
     """Confirma que la jerarquía RBAC no opera en sentido inverso (mínimo privilegio)."""
     response = client.get("/api/usuarios", headers=auth_header(token_tecnico))
     assert response.status_code == 403
+
+
+def test_filtro_por_riesgo_efectivo_coincide_con_lo_que_muestra_la_tabla(client, token_tecnico):
+    """HU-36 / B-14: una excursión no clasificable por la IA (nivel_riesgo None)
+    sí aparece al filtrar por riesgo efectivo excursion_critica."""
+    from datetime import datetime, timedelta, timezone
+
+    ahora = datetime.now(timezone.utc).replace(microsecond=0)
+    client.post("/api/lecturas", json={
+        "device_id": "FARM-B14-01", "timestamp": (ahora - timedelta(minutes=2)).isoformat(),
+        "temperatura_interna": 10.5, "temperatura_ambiental": 22.0, "humedad_ambiental": 50.0,
+        "apertura_refrigerador": False, "estado_conectividad": "online",
+    }, headers=auth_header(token_tecnico))
+
+    filtradas = client.get(
+        "/api/lecturas", params={"device_id": "FARM-B14-01", "riesgo_efectivo": "excursion_critica"},
+        headers=auth_header(token_tecnico),
+    ).json()
+    assert len(filtradas) == 1 and filtradas[0]["riesgo_efectivo"] == "excursion_critica"
+    assert client.get(
+        "/api/lecturas", params={"device_id": "FARM-B14-01", "riesgo_efectivo": "normal"},
+        headers=auth_header(token_tecnico),
+    ).json() == []

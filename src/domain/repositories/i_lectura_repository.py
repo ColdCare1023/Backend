@@ -23,6 +23,7 @@ class ILecturaRepository(ABC):
         device_id: str | None = None,
         nivel_riesgo: str | None = None,
         estado_conectividad: str | None = None,
+        riesgo_efectivo: str | None = None,
         desde: datetime | None = None,
         hasta: datetime | None = None,
         limite: int = 100,
