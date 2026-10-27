@@ -179,7 +179,9 @@ class RotarCredencialDispositivoUseCase:
         self._device_repository = device_repository
         self._registrar_hash = registrar_hash
 
-    async def execute(self, device_id: str, admin_id: UUID, motivo: str) -> str:
+    async def execute(
+        self, device_id: str, admin_id: UUID, motivo: str, tipo_evento: str = "ROTACION_CREDENCIAL_DISPOSITIVO"
+    ) -> str:
         dispositivo = await self._device_repository.obtener(device_id)
         if dispositivo is None:
             raise RecursoNoEncontradoError(f"Dispositivo {device_id} no encontrado")
@@ -191,7 +193,7 @@ class RotarCredencialDispositivoUseCase:
         await self._device_repository.guardar_credencial(device_id, hash_password(token), cuando)
 
         await self._registrar_hash.execute(
-            tipo_evento="ROTACION_CREDENCIAL_DISPOSITIVO",
+            tipo_evento=tipo_evento,
             payload={"device_id": device_id, "admin_id": str(admin_id), "motivo": motivo},
             device_id=device_id,
             usuario_id=admin_id,
@@ -375,6 +377,120 @@ class ActualizarResponsableDispositivoUseCase:
             },
             device_id=device_id,
             usuario_id=actor_id,
+        )
+        return actualizado
+
+
+# HU-43/HU-44: operaciones sobre el usuario del nodo en el broker.
+OPERACION_BROKER_APROVISIONAR = "aprovisionar"
+OPERACION_BROKER_RETIRAR = "retirar"
+
+
+class RegistrarResultadoBrokerUseCase:
+    """HU-44 Escenario 3: el backend no informa éxito en silencio. Si el broker
+    no confirmó la operación (modo manual de EMQX Serverless, API sin
+    configurar o con error), el dispositivo queda con la operación pendiente
+    hasta que un administrador confirme que la hizo en la consola."""
+
+    def __init__(
+        self, device_repository: IDeviceRepository, registrar_hash: RegistrarHashEncadenadoUseCase
+    ) -> None:
+        self._device_repository = device_repository
+        self._registrar_hash = registrar_hash
+
+    async def execute(
+        self, device_id: str, operacion: str, resultado: bool | None, motivo: str, actor_id: UUID | None
+    ) -> bool:
+        """Devuelve True si la operación quedó pendiente."""
+        if resultado is True:
+            dispositivo = await self._device_repository.obtener(device_id)
+            if dispositivo is not None and dispositivo.get("broker_pendiente") == operacion:
+                await self._device_repository.limpiar_pendiente_broker(device_id)
+            return False
+        cuando = datetime.now(tz=timezone.utc)
+        await self._device_repository.marcar_pendiente_broker(device_id, operacion, motivo, actor_id, cuando)
+        await self._registrar_hash.execute(
+            tipo_evento="BROKER_OPERACION_PENDIENTE",
+            payload={
+                "device_id": device_id,
+                "operacion": operacion,
+                "motivo": motivo,
+                "actor_id": str(actor_id) if actor_id else None,
+            },
+            device_id=device_id,
+            usuario_id=actor_id,
+            timestamp=cuando,
+        )
+        return True
+
+
+class ConfirmarOperacionBrokerUseCase:
+    """HU-43/HU-44: el administrador declara que ya creó, actualizó o retiró el
+    usuario del nodo en la consola del broker. Queda en la cadena quién, cuándo
+    y qué operación cerró; sin operación pendiente no hay nada que confirmar."""
+
+    def __init__(
+        self, device_repository: IDeviceRepository, registrar_hash: RegistrarHashEncadenadoUseCase
+    ) -> None:
+        self._device_repository = device_repository
+        self._registrar_hash = registrar_hash
+
+    async def execute(self, device_id: str, admin_id: UUID, nota: str | None) -> tuple[dict, str]:
+        dispositivo = await self._device_repository.obtener(device_id)
+        if dispositivo is None:
+            raise RecursoNoEncontradoError(f"Dispositivo {device_id} no encontrado")
+        operacion = dispositivo.get("broker_pendiente")
+        if not operacion:
+            raise DomainError("El dispositivo no tiene ninguna operación pendiente en el broker")
+        pendiente_desde = dispositivo.get("broker_pendiente_desde")
+        cuando = datetime.now(tz=timezone.utc)
+        actualizado = await self._device_repository.confirmar_broker(device_id, admin_id, cuando)
+        await self._registrar_hash.execute(
+            tipo_evento="BROKER_CONSOLA_CONFIRMADA",
+            payload={
+                "device_id": device_id,
+                "operacion": operacion,
+                "pendiente_desde": pendiente_desde.isoformat() if pendiente_desde else None,
+                "admin_id": str(admin_id),
+                "nota": nota,
+            },
+            device_id=device_id,
+            usuario_id=admin_id,
+            timestamp=cuando,
+        )
+        return actualizado, operacion
+
+
+class ActualizarIntervaloReporteUseCase:
+    """HU-54: intervalo de captura del nodo. El umbral SIN_DATOS es N veces
+    este valor, así que no puede quedar escrito en el código. Un cambio queda
+    en el historial de configuración (HU-49)."""
+
+    MINIMO_SEGUNDOS = 5
+    MAXIMO_SEGUNDOS = 3600
+
+    def __init__(self, device_repository: IDeviceRepository) -> None:
+        self._device_repository = device_repository
+
+    async def execute(self, device_id: str, segundos: int, actor_id: UUID | None, origen: str) -> dict | None:
+        """Devuelve el dispositivo actualizado, o None si el valor no cambió."""
+        if not self.MINIMO_SEGUNDOS <= segundos <= self.MAXIMO_SEGUNDOS:
+            raise DomainError(
+                f"El intervalo debe estar entre {self.MINIMO_SEGUNDOS} y {self.MAXIMO_SEGUNDOS} segundos"
+            )
+        dispositivo = await self._device_repository.obtener(device_id)
+        if dispositivo is None:
+            raise RecursoNoEncontradoError(f"Dispositivo {device_id} no encontrado")
+        anterior = dispositivo.get("intervalo_reporte_segundos")
+        if anterior == segundos:
+            return None
+        actualizado = await self._device_repository.actualizar_intervalo_reporte(device_id, segundos)
+        await self._device_repository.registrar_evento_config(
+            device_id,
+            campo=f"intervalo_reporte_segundos ({origen})",
+            valor_anterior=str(anterior) if anterior is not None else None,
+            valor_nuevo=str(segundos),
+            actor_id=actor_id,
         )
         return actualizado
 

@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 from src.application.use_cases.generar_alerta import AvisoExcursion
+from src.application.use_cases.vigilar_sin_datos import AvisoSinDatos
 from src.infrastructure.config import Settings
 from src.infrastructure.notifications.transporte_email import MensajeCorreo
 
@@ -86,8 +87,46 @@ def componer_correo_excursion(
     )
 
 
+def componer_correo_sin_datos(
+    aviso: AvisoSinDatos,
+    remitente: str,
+    destinatario: str,
+    frontend_url: str = "",
+    dispositivo: dict | None = None,
+) -> MensajeCorreo:
+    """HU-54: el nodo dejó de reportar. No es una excursión: es no saber qué
+    temperatura hay dentro del refrigerador."""
+    dispositivo = dispositivo or {}
+    lineas = ["SIN DATOS — Cadena de frío", "", f"Dispositivo: {aviso.device_id}"]
+    if dispositivo.get("nombre"):
+        lineas.append(f"Equipo: {dispositivo['nombre']}")
+    if dispositivo.get("ubicacion"):
+        lineas.append(f"Ubicación: {dispositivo['ubicacion']}")
+    ultimo = _formatear(aviso.ultimo_reporte_en) if aviso.ultimo_reporte_en else "—"
+    lineas += [
+        f"Último reporte recibido: {ultimo}",
+        f"Silencio tolerado: {aviso.umbral_segundos} s",
+        "",
+        "El nodo no envía lecturas. Mientras siga así no hay registro de la temperatura del "
+        "refrigerador: revise la alimentación y la red del nodo y, si hace falta, registre "
+        "lecturas manuales con el termómetro de respaldo.",
+    ]
+    if frontend_url:
+        lineas += ["", f"Ver el estado del nodo: {frontend_url.rstrip('/')}/dispositivos?id={aviso.device_id}"]
+    return MensajeCorreo(
+        remitente=remitente,
+        destinatario=destinatario,
+        asunto=f"[ColdCare] SIN DATOS — {aviso.device_id}",
+        cuerpo="\n".join(lineas),
+    )
+
+
 class NotificacionService:
-    """HU-54: canales opcionales (Telegram y SMS). El correo NO pasa por aquí."""
+    """HU-54: canales opcionales (Telegram y SMS). El correo NO pasa por aquí.
+
+    Devuelven el resultado del SMS para que el despachador lo audite:
+    "enviado", "fallido", "sin_telefono", "cooldown", o None si el canal SMS
+    está deshabilitado."""
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
@@ -113,17 +152,44 @@ class NotificacionService:
         temperatura: float | None,
         timestamp: str,
         telefono_destino: str | None = None,
-    ) -> None:
+    ) -> str | None:
         """El SMS, al ser un canal explícitamente opcional (HU-54) y personal,
         no tiene destinatario global: sin número registrado, no se envía."""
-        if not self.habilitado or not self._debe_notificar(device_id):
-            return
+        if not self.habilitado:
+            return None
+        if not self._debe_notificar(device_id):
+            return "cooldown" if self._settings.sms_enabled else None
 
         temp_texto = f"{temperatura:.1f} °C" if temperatura is not None else "sin dato de sensor"
         if self._settings.telegram_enabled:
             await self._enviar_telegram(device_id, temp_texto, timestamp)
-        if self._settings.sms_enabled and telefono_destino:
-            await self._enviar_sms(device_id, temp_texto, timestamp, telefono_destino)
+        if not self._settings.sms_enabled:
+            return None
+        if not telefono_destino:
+            return "sin_telefono"
+        texto = (
+            f"[ColdCare] EXCURSION CRITICA {device_id}: {temp_texto} a las {timestamp}. "
+            "Verifique el refrigerador de inmediato."
+        )
+        return "enviado" if await self._enviar_sms(device_id, texto, telefono_destino) else "fallido"
+
+    async def notificar_sin_datos(
+        self, device_id: str, ultimo_reporte: str | None, telefono_destino: str | None = None
+    ) -> str | None:
+        """HU-54: mismo canal y mismo cooldown por dispositivo que la excursión:
+        un nodo que se apaga y además registra una excursión no manda dos SMS
+        seguidos."""
+        if not self._settings.sms_enabled:
+            return None
+        if not telefono_destino:
+            return "sin_telefono"
+        if not self._debe_notificar(device_id):
+            return "cooldown"
+        texto = (
+            f"[ColdCare] SIN DATOS {device_id}: el nodo no reporta desde {ultimo_reporte or 'hace rato'}. "
+            "Revise alimentacion y red del nodo."
+        )
+        return "enviado" if await self._enviar_sms(device_id, texto, telefono_destino) else "fallido"
 
     # ── Canales ───────────────────────────────────────────────────────────
     async def _enviar_telegram(self, device_id: str, temp_texto: str, timestamp: str) -> None:
@@ -149,19 +215,13 @@ class NotificacionService:
         except Exception:
             logger.exception("No se pudo enviar el aviso por Telegram para %s", device_id)
 
-    async def _enviar_sms(
-        self, device_id: str, temp_texto: str, timestamp: str, telefono_destino: str
-    ) -> None:
+    async def _enviar_sms(self, device_id: str, texto: str, telefono_destino: str) -> bool:
         """HU-54: pasarela compatible con la API REST de Twilio (Account SID
         + Auth Token vía HTTP Basic, cuerpo form-encoded) — el proveedor
         concreto es responsabilidad de configuración/despliegue (Settings),
         no de este servicio. No declara envío exitoso salvo que el proveedor
         confirme con 2xx (HU-54 criterio 2: "sin declarar entrega exitosa si
         ningún proveedor la confirma")."""
-        texto = (
-            f"[ColdCare] EXCURSION CRITICA {device_id}: {temp_texto} a las {timestamp}. "
-            "Verifique el refrigerador de inmediato."
-        )
         url = self._settings.sms_api_url.format(account_sid=self._settings.sms_account_sid)
         try:
             async with httpx.AsyncClient(timeout=10) as cliente:
@@ -172,8 +232,10 @@ class NotificacionService:
                 )
                 respuesta.raise_for_status()
             logger.info("Aviso por SMS enviado para %s", device_id)
+            return True
         except Exception:
             logger.exception("No se pudo enviar el aviso por SMS para %s", device_id)
+            return False
 
 
 _instancia: NotificacionService | None = None

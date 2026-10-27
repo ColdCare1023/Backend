@@ -37,6 +37,14 @@ def _to_dict(model: DeviceModel) -> dict:
         "responsable_nombre": model.responsable_nombre,
         "responsable_email": model.responsable_email,
         "responsable_telefono": model.responsable_telefono,
+        "broker_pendiente": model.broker_pendiente,
+        "broker_pendiente_motivo": model.broker_pendiente_motivo,
+        "broker_pendiente_desde": model.broker_pendiente_desde,
+        "broker_pendiente_por": model.broker_pendiente_por,
+        "broker_confirmado_en": model.broker_confirmado_en,
+        "broker_confirmado_por": model.broker_confirmado_por,
+        "intervalo_reporte_segundos": model.intervalo_reporte_segundos or 30,
+        "ultimo_latido_en": model.ultimo_latido_en,
     }
 
 
@@ -294,3 +302,51 @@ class SQLAlchemyDeviceRepository(IDeviceRepository):
             }
             for m in resultado.scalars().all()
         ]
+
+    # ── HU-43/HU-44: operación pendiente en el broker ─────────────────────
+    async def _requerir(self, device_id: str) -> DeviceModel:
+        model = await self._session.get(DeviceModel, device_id)
+        if model is None:
+            raise ValueError(f"Dispositivo {device_id} no encontrado")
+        return model
+
+    async def marcar_pendiente_broker(
+        self, device_id: str, operacion: str, motivo: str, actor_id: UUID | None, cuando: datetime
+    ) -> None:
+        model = await self._requerir(device_id)
+        model.broker_pendiente = operacion
+        model.broker_pendiente_motivo = motivo
+        model.broker_pendiente_desde = cuando
+        model.broker_pendiente_por = actor_id
+        await self._session.flush()
+
+    async def limpiar_pendiente_broker(self, device_id: str) -> None:
+        model = await self._requerir(device_id)
+        model.broker_pendiente = None
+        model.broker_pendiente_motivo = None
+        model.broker_pendiente_desde = None
+        model.broker_pendiente_por = None
+        await self._session.flush()
+
+    async def confirmar_broker(self, device_id: str, actor_id: UUID, cuando: datetime) -> dict:
+        model = await self._requerir(device_id)
+        model.broker_pendiente = None
+        model.broker_pendiente_motivo = None
+        model.broker_pendiente_desde = None
+        model.broker_pendiente_por = None
+        model.broker_confirmado_en = cuando
+        model.broker_confirmado_por = actor_id
+        await self._session.flush()
+        return _to_dict(model)
+
+    # ── HU-54: intervalo de captura y latido del nodo ──────────────────────
+    async def actualizar_intervalo_reporte(self, device_id: str, segundos: int) -> dict:
+        model = await self._requerir(device_id)
+        model.intervalo_reporte_segundos = segundos
+        await self._session.flush()
+        return _to_dict(model)
+
+    async def registrar_latido(self, device_id: str, cuando: datetime) -> None:
+        model = await self._requerir(device_id)
+        model.ultimo_latido_en = cuando
+        await self._session.flush()

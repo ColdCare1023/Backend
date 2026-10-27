@@ -217,6 +217,12 @@ class Settings(BaseSettings):
     # `timestamp_demasiado_antiguo`. 168 h = 7 días.
     lectura_antiguedad_max_horas: int = Field(default=168, ge=1, le=24 * 90)
 
+    # HU-54: un nodo está SIN_DATOS cuando calla N veces su intervalo de captura
+    # (devices.intervalo_reporte_segundos, 30 s de fábrica). La tarea periódica
+    # revisa a todos los nodos cada SIN_DATOS_PERIODO_SEGUNDOS.
+    sin_datos_n_intervalos: int = Field(default=3, ge=2, le=20)
+    sin_datos_periodo_segundos: int = Field(default=30, ge=5, le=600)
+
     # HU-35 / HU-04 esc. 3: segundos de apertura continua a partir de los
     # cuales el dashboard destaca la puerta abierta como prolongada.
     puerta_umbral_prolongada_segundos: int = 60

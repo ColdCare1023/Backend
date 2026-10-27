@@ -109,6 +109,27 @@ class DeviceModel(Base):
     responsable_email: Mapped[str | None] = mapped_column(String(150), nullable=True)
     responsable_telefono: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
+    # HU-43/HU-44: operación sobre el usuario del nodo en el broker que quedó
+    # pendiente («aprovisionar» o «retirar»), p. ej. con EMQX Serverless, donde
+    # se hace a mano en la consola. Se limpia cuando el administrador confirma.
+    broker_pendiente: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    broker_pendiente_motivo: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    broker_pendiente_desde: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    broker_pendiente_por: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    broker_confirmado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    broker_confirmado_por: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+
+    # HU-54: intervalo de captura del nodo (el umbral SIN_DATOS es N veces este
+    # valor) y último `estado_nodo` recibido (latido).
+    intervalo_reporte_segundos: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=30, server_default="30"
+    )
+    ultimo_latido_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     lecturas: Mapped[list["ThermalReadingModel"]] = relationship(back_populates="device")
 
 
@@ -566,4 +587,32 @@ class DeviceConfigHistoryModel(Base):
     valor_anterior: Mapped[str | None] = mapped_column(Text, nullable=True)
     valor_nuevo: Mapped[str | None] = mapped_column(Text, nullable=True)
     actor_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = _created_at_column()
+
+
+class IncidenteOperativoModel(Base):
+    """HU-54: episodio de silencio del nodo (SIN_DATOS), separado de las
+    alertas térmicas. Un solo incidente abierto por dispositivo y tipo."""
+
+    __tablename__ = "incidentes_operativos"
+    __table_args__ = (
+        Index(
+            "uq_incidentes_operativos_abierto",
+            "device_id",
+            "tipo",
+            unique=True,
+            postgresql_where=sa_text("resuelto_en IS NULL"),
+            sqlite_where=sa_text("resuelto_en IS NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    device_id: Mapped[str] = mapped_column(String(50), ForeignKey("devices.id"), nullable=False, index=True)
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)
+    abierto_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ultimo_reporte_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    umbral_segundos: Mapped[int] = mapped_column(Integer, nullable=False)
+    resuelto_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notificado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notificacion_intentos: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = _created_at_column()

@@ -127,3 +127,26 @@ class IDeviceRepository(ABC):
 
     @abstractmethod
     async def listar_historial_configuracion(self, device_id: str) -> list[dict]: ...
+
+    # ── HU-43/HU-44: operación pendiente en el broker ─────────────────────
+    @abstractmethod
+    async def marcar_pendiente_broker(
+        self, device_id: str, operacion: str, motivo: str, actor_id: UUID | None, cuando: datetime
+    ) -> None:
+        """Deja constancia de que el usuario del nodo en el broker falta por
+        `aprovisionar` o `retirar` (consola de EMQX o fallo de su API)."""
+
+    @abstractmethod
+    async def limpiar_pendiente_broker(self, device_id: str) -> None:
+        """La API del broker completó la operación: ya no hay nada pendiente."""
+
+    @abstractmethod
+    async def confirmar_broker(self, device_id: str, actor_id: UUID, cuando: datetime) -> dict:
+        """El administrador confirma que hizo en la consola la operación pendiente."""
+
+    # ── HU-54: intervalo de captura y latido del nodo ──────────────────────
+    @abstractmethod
+    async def actualizar_intervalo_reporte(self, device_id: str, segundos: int) -> dict: ...
+
+    @abstractmethod
+    async def registrar_latido(self, device_id: str, cuando: datetime) -> None: ...

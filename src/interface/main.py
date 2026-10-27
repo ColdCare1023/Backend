@@ -19,6 +19,7 @@ from src.application.use_cases.actualizar_conectividad import (
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.clasificar_riesgo_termico import ClasificarRiesgoTermicoUseCase
 from src.application.use_cases.detectar_anomalia_reloj import anomalias_de_reloj
+from src.application.use_cases.gestionar_dispositivos import ActualizarIntervaloReporteUseCase
 from src.application.use_cases.gestionar_firmware import RegistrarResultadoOtaUseCase, normalizar_version
 from src.application.use_cases.predecir_riesgo_preventivo import PredecirRiesgoPreventivoUseCase
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
@@ -26,8 +27,14 @@ from src.application.use_cases.registrar_lectura_termica import (
     RegistrarLecturaTermicaUseCase,
     credencial_revocada,
 )
+from src.application.use_cases.vigilar_sin_datos import CambioIncidente, resolver_sin_datos_por_lectura
 from src.domain.entities.lectura_termica import LecturaTermica
-from src.domain.exceptions import CredencialRevocadaError, DispositivoNoAutorizadoError, LecturaInvalidaError
+from src.domain.exceptions import (
+    CredencialRevocadaError,
+    DispositivoNoAutorizadoError,
+    DomainError,
+    LecturaInvalidaError,
+)
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.ai.prediccion_preventiva.servicio import obtener_servicio_preventivo
 from src.infrastructure.ai.random_forest_service import get_random_forest_service
@@ -38,6 +45,7 @@ from src.infrastructure.database.repositories.audit_log_repository import (
 )
 from src.infrastructure.database.repositories.device_repository import SQLAlchemyDeviceRepository
 from src.infrastructure.database.repositories.firmware_repository import SQLAlchemyFirmwareRepository
+from src.infrastructure.database.repositories.incidente_repository import SQLAlchemyIncidenteRepository
 from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
 from src.infrastructure.database.repositories.prediccion_preventiva_repository import (
     SQLAlchemyPrediccionPreventivaRepository,
@@ -74,6 +82,7 @@ from src.interface.api.sse_broadcaster import SSEBroadcaster
 from src.interface.api.sse_router import router as sse_router
 from src.interface.api.trazabilidad_router import router as trazabilidad_router
 from src.interface.api.usuarios_router import router as usuarios_router
+from src.interface.tareas import VigilanteSinDatos, tipo_sse
 
 logger = logging.getLogger("interface.main")
 
@@ -227,7 +236,10 @@ async def _procesar_evento_v1(
     }
     # estado_nodo llega cada 5 min: es telemetría de salud, no un hecho auditable.
     # Se emite por SSE para el dashboard pero no se escribe en la cadena de auditoría.
+    # HU-54: sí deja el latido del nodo y, si cambió, su intervalo de captura
+    # (`intervalo_s`), del que sale el umbral SIN_DATOS.
     if evento.event_type == "estado_nodo":
+        await _registrar_estado_nodo(evento)
         await broadcaster.publicar(sse, "estado_nodo")
         return
 
@@ -302,6 +314,25 @@ async def _procesar_evento_v1(
     await broadcaster.publicar(sse, evento.event_type)
     if cambio is not None:
         await broadcaster.publicar(cambio.como_evento_sse(), "conectividad")
+
+
+async def _registrar_estado_nodo(evento: contrato_v1.EventoV1) -> None:
+    intervalo = (evento.detail or {}).get("intervalo_s")
+    async with _session_factory() as session:
+        dispositivos = SQLAlchemyDeviceRepository(session)
+        if not await dispositivos.esta_activo(evento.device_id) or await credencial_revocada(
+            dispositivos, evento.device_id
+        ):
+            return
+        await dispositivos.registrar_latido(evento.device_id, datetime.now(timezone.utc))
+        if isinstance(intervalo, int) and not isinstance(intervalo, bool):
+            try:
+                await ActualizarIntervaloReporteUseCase(dispositivos).execute(
+                    evento.device_id, intervalo, None, "dispositivo"
+                )
+            except DomainError:
+                logger.warning("intervalo_s fuera de rango en estado_nodo de %s: %s", evento.device_id, intervalo)
+        await session.commit()
 
 
 async def _procesar_evento_mqtt(message: aiomqtt.Message, broadcaster: SSEBroadcaster) -> None:
@@ -765,6 +796,16 @@ async def _procesar_lectura_mqtt(
             boot_id=lectura_guardada.boot_id,
             detalle={"seq_no": lectura_guardada.seq_no},
         )
+        # HU-54: la lectura cierra el incidente SIN_DATOS abierto en la misma
+        # transacción, sin esperar a la próxima pasada de la tarea periódica.
+        sin_datos_resuelto: CambioIncidente | None = await resolver_sin_datos_por_lectura(
+            SQLAlchemyIncidenteRepository(session),
+            AuditarAccionCriticaUseCase(
+                SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+            ),
+            lectura_guardada.device_id,
+            lectura_guardada.received_at or datetime.now(timezone.utc),
+        )
         await session.commit()
 
     # HU-53 (D2): el aviso por correo se ENCOLA después del COMMIT; el envío lo
@@ -809,6 +850,8 @@ async def _procesar_lectura_mqtt(
 
     if cambio_conectividad is not None:
         await broadcaster.publicar(cambio_conectividad.como_evento_sse(), "conectividad")
+    if sin_datos_resuelto is not None:
+        await broadcaster.publicar(sin_datos_resuelto.como_evento_sse(), tipo_sse(sin_datos_resuelto))
 
 
 @contextlib.asynccontextmanager
@@ -831,12 +874,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # HU-53: UNA instancia por proceso (D1) — la cola, el worker y los
     # reintentos de los avisos por correo viven aquí, no en cada lectura.
     app.state.notificaciones = DespachadorNotificaciones(settings, _session_factory)
+    # HU-54: vigilancia periódica de nodos sin datos (una por proceso).
+    app.state.vigilante_sin_datos = VigilanteSinDatos(
+        _session_factory, app.state.sse_broadcaster, app.state.notificaciones,
+        settings.sin_datos_periodo_segundos, settings.sin_datos_n_intervalos,
+    )
     if settings.environment != "test":
         await app.state.notificaciones.iniciar()
+        app.state.vigilante_sin_datos.iniciar()
     try:
         async with _ingesta_mqtt(app, settings):
             yield
     finally:
+        await app.state.vigilante_sin_datos.detener()
         await app.state.notificaciones.detener()
 
 
@@ -965,6 +1015,7 @@ def create_app() -> FastAPI:
             revision = None
         tarea_mqtt = getattr(request.app.state, "mqtt", None)
         despachador = getattr(request.app.state, "notificaciones", None)
+        vigilante = getattr(request.app.state, "vigilante_sin_datos", None)
         return {
             "status": "ok" if db == "ok" else "degradado",
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),
@@ -979,6 +1030,10 @@ def create_app() -> FastAPI:
             "notificaciones": {
                 "worker_activo": despachador is not None and despachador.activo,
                 "cola_pendiente": despachador.pendientes if despachador is not None else 0,
+            },
+            "vigilancia_sin_datos": {
+                "activa": vigilante is not None and vigilante.activo,
+                "ultima_pasada": vigilante.ultima_pasada.isoformat() if vigilante and vigilante.ultima_pasada else None,
             },
         }
 

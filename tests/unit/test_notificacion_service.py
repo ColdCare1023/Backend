@@ -46,8 +46,9 @@ class _ServicioEspia(NotificacionService):
     async def _enviar_telegram(self, device_id, temp_texto, timestamp):
         self.telegrams.append((device_id, temp_texto))
 
-    async def _enviar_sms(self, device_id, temp_texto, timestamp, telefono_destino):
-        self.sms.append((device_id, temp_texto))
+    async def _enviar_sms(self, device_id, texto, telefono_destino):
+        self.sms.append((device_id, texto))
+        return True
 
 
 # ── Armado del correo (HU-53 criterio 6) ─────────────────────────────────
@@ -135,10 +136,11 @@ async def test_sms_se_envia_al_responsable_registrado_del_dispositivo():
     servicio = _ServicioEspia(
         _settings(sms_enabled=True, sms_account_sid="AC", sms_auth_token="tok", sms_from="+10000000000")
     )
-    await servicio.notificar_excursion_critica(
+    resultado = await servicio.notificar_excursion_critica(
         "ESP32-01", 14.2, "2026-07-25T10:00:00+00:00", telefono_destino="+51999999999"
     )
-    assert servicio.sms == [("ESP32-01", "14.2 °C")]
+    assert resultado == "enviado"
+    assert [(device, "14.2 °C" in texto) for device, texto in servicio.sms] == [("ESP32-01", True)]
 
 
 @pytest.mark.asyncio
@@ -146,8 +148,40 @@ async def test_sms_no_se_envia_sin_telefono_del_responsable():
     servicio = _ServicioEspia(
         _settings(sms_enabled=True, sms_account_sid="AC", sms_auth_token="tok", sms_from="+10000000000")
     )
-    await servicio.notificar_excursion_critica("ESP32-01", 14.2, "2026-07-25T10:00:00+00:00")
+    resultado = await servicio.notificar_excursion_critica("ESP32-01", 14.2, "2026-07-25T10:00:00+00:00")
+    assert resultado == "sin_telefono"
     assert servicio.sms == []
+
+
+@pytest.mark.asyncio
+async def test_sms_sin_datos_comparte_el_cooldown_con_la_excursion():
+    """HU-53/HU-54: un nodo que registra una excursión y luego deja de reportar
+    no manda dos SMS seguidos al responsable."""
+    servicio = _ServicioEspia(
+        _settings(sms_enabled=True, sms_account_sid="AC", sms_auth_token="tok", sms_from="+10000000000")
+    )
+    assert await servicio.notificar_excursion_critica(
+        "ESP32-01", 14.2, "2026-07-25T10:00:00+00:00", telefono_destino="+51999999999"
+    ) == "enviado"
+    assert await servicio.notificar_sin_datos("ESP32-01", "2026-07-25T10:01:00+00:00", "+51999999999") == "cooldown"
+    assert len(servicio.sms) == 1
+
+
+def test_el_correo_sin_datos_dice_desde_cuando_calla_el_nodo():
+    from src.application.use_cases.vigilar_sin_datos import AvisoSinDatos
+    from src.infrastructure.notifications.notificacion_service import componer_correo_sin_datos
+
+    aviso = AvisoSinDatos(
+        incidente_id=uuid4(), device_id="ESP32-01", abierto_en=CAPTURA + timedelta(seconds=90),
+        ultimo_reporte_en=CAPTURA, umbral_segundos=90,
+    )
+    correo = componer_correo_sin_datos(
+        aviso, "de@x.pe", "para@x.pe", "https://coldcare.example.org", {"nombre": "Refrigerador 1"}
+    )
+    assert correo.asunto == "[ColdCare] SIN DATOS — ESP32-01"
+    assert "25/07/2026 10:00:00 (hora de Perú)" in correo.cuerpo
+    assert "Refrigerador 1" in correo.cuerpo
+    assert "/dispositivos?id=ESP32-01" in correo.cuerpo
 
 
 # ── Configuración de producción ──────────────────────────────────────────

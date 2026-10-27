@@ -1,5 +1,10 @@
 """HU-53: entrega del aviso por correo fuera de la ingesta y después del COMMIT.
 
+HU-54: el mismo despachador entrega el aviso de un incidente SIN_DATOS
+(`AvisoSinDatos`), con las mismas garantías: después del COMMIT, una vez por
+incidente (`notificado_en`), reintentos auditados y SMS solo en el primer
+intento, con el cooldown por dispositivo compartido con las excursiones.
+
 Flujo (D2 de la especificación):
 
     lectura ─> RegistrarLecturaTermicaUseCase ─> avisos_pendientes
@@ -37,10 +42,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.generar_alerta import AvisoExcursion
+from src.application.use_cases.vigilar_sin_datos import AvisoSinDatos
 from src.infrastructure.config import Settings
 from src.infrastructure.database.repositories.alerta_repository import SQLAlchemyAlertaRepository
 from src.infrastructure.database.repositories.audit_log_repository import SQLAlchemyAuditLogRepository
 from src.infrastructure.database.repositories.device_repository import SQLAlchemyDeviceRepository
+from src.infrastructure.database.repositories.incidente_repository import SQLAlchemyIncidenteRepository
 from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
 from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
@@ -48,6 +55,7 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
 from src.infrastructure.notifications.notificacion_service import (
     NotificacionService,
     componer_correo_excursion,
+    componer_correo_sin_datos,
 )
 from src.infrastructure.notifications.transporte_email import (
     ErrorEnvioCorreo,
@@ -86,7 +94,7 @@ class DespachadorNotificaciones:
         self._canales_opcionales = canales_opcionales or NotificacionService(settings)
         self._esperas = tuple(esperas_reintento)
         self._max_intentos = settings.notificacion_max_intentos
-        self._cola: asyncio.Queue[AvisoExcursion] = asyncio.Queue(maxsize=CAPACIDAD_COLA)
+        self._cola: asyncio.Queue[AvisoExcursion | AvisoSinDatos] = asyncio.Queue(maxsize=CAPACIDAD_COLA)
         self._worker: asyncio.Task | None = None
         self._reintentos: set[asyncio.Task] = set()
 
@@ -99,7 +107,7 @@ class DespachadorNotificaciones:
         return self._worker is not None and not self._worker.done()
 
     # ── Entrada ───────────────────────────────────────────────────────────
-    def encolar(self, aviso: AvisoExcursion) -> bool:
+    def encolar(self, aviso: AvisoExcursion | AvisoSinDatos) -> bool:
         """Nunca bloquea ni lanza: lo llama el consumidor MQTT tras el COMMIT."""
         try:
             self._cola.put_nowait(aviso)
@@ -109,7 +117,7 @@ class DespachadorNotificaciones:
             logger.error("Cola de notificaciones llena; aviso de %s no encolado.", aviso.device_id)
             return False
 
-    def encolar_todos(self, avisos: Sequence[AvisoExcursion]) -> None:
+    def encolar_todos(self, avisos: Sequence[AvisoExcursion | AvisoSinDatos]) -> None:
         for aviso in avisos:
             self.encolar(aviso)
 
@@ -161,6 +169,15 @@ class DespachadorNotificaciones:
                         time_quality=lectura.time_quality if lectura else None,
                     )
                 )
+            for incidente in await SQLAlchemyIncidenteRepository(session).listar_pendientes_de_notificar(
+                desde, self._max_intentos
+            ):
+                avisos.append(
+                    AvisoSinDatos(
+                        incidente_id=incidente.id, device_id=incidente.device_id, abierto_en=incidente.abierto_en,
+                        ultimo_reporte_en=incidente.ultimo_reporte_en, umbral_segundos=incidente.umbral_segundos,
+                    )
+                )
         self.encolar_todos(avisos)
         if avisos:
             logger.info("Recuperados %d avisos de excursión sin enviar.", len(avisos))
@@ -177,9 +194,11 @@ class DespachadorNotificaciones:
                 self._cola.task_done()
 
     # ── Un intento ────────────────────────────────────────────────────────
-    async def procesar(self, aviso: AvisoExcursion) -> ResultadoEnvio:
+    async def procesar(self, aviso: AvisoExcursion | AvisoSinDatos) -> ResultadoEnvio:
         """Un intento de envío del correo, con su auditoría. Público para que
         las pruebas lo ejerciten sin depender de la cola."""
+        if isinstance(aviso, AvisoSinDatos):
+            return await self._procesar_sin_datos(aviso)
         async with self._session_factory() as session:
             alertas = SQLAlchemyAlertaRepository(session)
             alerta = await alertas.obtener_por_id(aviso.alerta_id)
@@ -191,16 +210,17 @@ class DespachadorNotificaciones:
                 return ResultadoEnvio("fallido", alerta.notificacion_intentos)
 
             dispositivo = await SQLAlchemyDeviceRepository(session).obtener(aviso.device_id) or {}
-            primer_intento = alerta.notificacion_intentos == 0
-            if primer_intento:
-                await self._avisar_por_canales_opcionales(aviso, dispositivo)
-
-            if self._transporte is None:
-                return ResultadoEnvio("deshabilitado")
-
             auditoria = AuditarAccionCriticaUseCase(
                 SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
             )
+            primer_intento = alerta.notificacion_intentos == 0
+            if primer_intento:
+                await self._avisar_por_canales_opcionales(aviso, dispositivo, auditoria)
+
+            if self._transporte is None:
+                await session.commit()
+                return ResultadoEnvio("deshabilitado")
+
             destinatario = dispositivo.get("responsable_email") or self._settings.correo_destino_respaldo
             if not destinatario:
                 await self._auditar(auditoria, "NOTIFICACION_SIN_DESTINATARIO", aviso, {})
@@ -257,35 +277,147 @@ class DespachadorNotificaciones:
             logger.info("Aviso por correo enviado para %s (alerta %s)", aviso.device_id, aviso.alerta_id)
             return ResultadoEnvio("enviado", alerta.notificacion_intentos + 1)
 
+    async def _procesar_sin_datos(self, aviso: AvisoSinDatos) -> ResultadoEnvio:
+        """HU-54: mismo flujo que una excursión, sobre `incidentes_operativos`."""
+        async with self._session_factory() as session:
+            incidentes = SQLAlchemyIncidenteRepository(session)
+            incidente = await incidentes.obtener(aviso.incidente_id)
+            if incidente is None:
+                return ResultadoEnvio("alerta_inexistente")
+            if incidente.notificado_en is not None:
+                return ResultadoEnvio("ya_notificado", incidente.notificacion_intentos)
+            if incidente.notificacion_intentos >= self._max_intentos:
+                return ResultadoEnvio("fallido", incidente.notificacion_intentos)
+
+            dispositivo = await SQLAlchemyDeviceRepository(session).obtener(aviso.device_id) or {}
+            auditoria = AuditarAccionCriticaUseCase(
+                SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+            )
+            if incidente.notificacion_intentos == 0:
+                await self._avisar_sin_datos_por_canales_opcionales(aviso, dispositivo, auditoria)
+
+            if self._transporte is None:
+                await session.commit()
+                return ResultadoEnvio("deshabilitado")
+
+            destinatario = dispositivo.get("responsable_email") or self._settings.correo_destino_respaldo
+            if not destinatario:
+                await self._auditar(auditoria, "NOTIFICACION_SIN_DESTINATARIO", aviso, {})
+                await session.commit()
+                return ResultadoEnvio("sin_destinatario")
+
+            mensaje = componer_correo_sin_datos(
+                aviso,
+                remitente=self._settings.correo_remitente,
+                destinatario=destinatario,
+                frontend_url=self._settings.frontend_url,
+                dispositivo=dispositivo,
+            )
+            try:
+                await self._transporte.enviar(mensaje)
+            except Exception as exc:
+                intentos = await incidentes.registrar_intento_fallido(aviso.incidente_id)
+                await self._auditar(
+                    auditoria,
+                    "NOTIFICACION_FALLIDA",
+                    aviso,
+                    {
+                        "destinatario": enmascarar_email(destinatario),
+                        "intento": intentos,
+                        "error": str(exc)[:200] if isinstance(exc, ErrorEnvioCorreo) else type(exc).__name__,
+                    },
+                )
+                await session.commit()
+                logger.warning("Aviso SIN_DATOS de %s no enviado (intento %d): %s", aviso.device_id, intentos, exc)
+                if intentos < self._max_intentos:
+                    self._programar_reintento(aviso, intentos)
+                return ResultadoEnvio("fallido", intentos)
+
+            await incidentes.marcar_notificado(aviso.incidente_id, datetime.now(tz=timezone.utc))
+            await self._auditar(
+                auditoria,
+                "NOTIFICACION_ENVIADA",
+                aviso,
+                {"destinatario": enmascarar_email(destinatario), "intento": incidente.notificacion_intentos + 1},
+            )
+            await session.commit()
+            logger.info("Aviso SIN_DATOS enviado para %s (incidente %s)", aviso.device_id, aviso.incidente_id)
+            return ResultadoEnvio("enviado", incidente.notificacion_intentos + 1)
+
     async def _auditar(
-        self, auditoria: AuditarAccionCriticaUseCase, accion: str, aviso: AvisoExcursion, extra: dict
+        self,
+        auditoria: AuditarAccionCriticaUseCase,
+        accion: str,
+        aviso: AvisoExcursion | AvisoSinDatos,
+        extra: dict,
+        canal: str = "email",
     ) -> None:
+        if isinstance(aviso, AvisoSinDatos):
+            recurso, referencia = f"incidentes/{aviso.incidente_id}", {"incidente_id": str(aviso.incidente_id)}
+        else:
+            recurso, referencia = f"alertas/{aviso.alerta_id}", {"alerta_id": str(aviso.alerta_id)}
         await auditoria.execute(
             usuario_id=None,
             accion=accion,
-            recurso=f"alertas/{aviso.alerta_id}",
+            recurso=recurso,
             detalle={
-                "alerta_id": str(aviso.alerta_id),
-                "canal": "email",
-                "transporte": getattr(self._transporte, "nombre", None),
+                **referencia,
+                "canal": canal,
+                "transporte": getattr(self._transporte, "nombre", None) if canal == "email" else None,
                 **extra,
             },
             ip_origen=None,
             device_id=aviso.device_id,
         )
 
-    async def _avisar_por_canales_opcionales(self, aviso: AvisoExcursion, dispositivo: dict) -> None:
+    async def _auditar_sms(
+        self, auditoria: AuditarAccionCriticaUseCase, aviso: AvisoExcursion | AvisoSinDatos, resultado: str | None,
+        telefono: str | None,
+    ) -> None:
+        """HU-53: el SMS deja la misma huella que el correo; sin confirmación del
+        proveedor no figura como enviado."""
+        if resultado is None:
+            return
+        accion = {"enviado": "NOTIFICACION_ENVIADA", "fallido": "NOTIFICACION_FALLIDA"}.get(
+            resultado, "NOTIFICACION_OMITIDA"
+        )
+        extra = {"resultado": resultado}
+        if telefono:
+            extra["destinatario"] = f"***{telefono[-3:]}"
+        await self._auditar(auditoria, accion, aviso, extra, canal="sms")
+
+    async def _avisar_sin_datos_por_canales_opcionales(
+        self, aviso: AvisoSinDatos, dispositivo: dict, auditoria: AuditarAccionCriticaUseCase
+    ) -> None:
+        telefono = dispositivo.get("responsable_telefono")
         try:
-            await self._canales_opcionales.notificar_excursion_critica(
+            resultado = await self._canales_opcionales.notificar_sin_datos(
+                device_id=aviso.device_id,
+                ultimo_reporte=aviso.ultimo_reporte_en.isoformat() if aviso.ultimo_reporte_en else None,
+                telefono_destino=telefono,
+            )
+        except Exception:  # pragma: no cover - los canales ya tragan sus fallos
+            logger.exception("Fallo en canales opcionales (SIN_DATOS) para %s", aviso.device_id)
+            return
+        await self._auditar_sms(auditoria, aviso, resultado, telefono)
+
+    async def _avisar_por_canales_opcionales(
+        self, aviso: AvisoExcursion, dispositivo: dict, auditoria: AuditarAccionCriticaUseCase
+    ) -> None:
+        telefono = dispositivo.get("responsable_telefono")
+        try:
+            resultado = await self._canales_opcionales.notificar_excursion_critica(
                 device_id=aviso.device_id,
                 temperatura=aviso.temperatura,
                 timestamp=aviso.captured_at.isoformat(),
-                telefono_destino=dispositivo.get("responsable_telefono"),
+                telefono_destino=telefono,
             )
         except Exception:  # pragma: no cover - los canales ya tragan sus fallos
             logger.exception("Fallo en canales opcionales para %s", aviso.device_id)
+            return
+        await self._auditar_sms(auditoria, aviso, resultado, telefono)
 
-    def _programar_reintento(self, aviso: AvisoExcursion, intentos: int) -> None:
+    def _programar_reintento(self, aviso: AvisoExcursion | AvisoSinDatos, intentos: int) -> None:
         espera = self._esperas[min(intentos - 1, len(self._esperas) - 1)] if self._esperas else 0
 
         async def reencolar() -> None:

@@ -17,6 +17,8 @@ DEVICE_ID = "FARM-HU44-01"
 class _BrokerEspia:
     """Sustituye a BrokerAdmin: registra lo que el backend pide al broker."""
 
+    configurado = True
+
     def __init__(self) -> None:
         self.aprovisionados: dict[str, str] = {}
         self.eliminados: list[str] = []

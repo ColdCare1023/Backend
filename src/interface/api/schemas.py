@@ -401,6 +401,18 @@ class DispositivoResponse(BaseModel):
     responsable_nombre: str | None = None
     responsable_email: str | None = None
     responsable_telefono: str | None = None
+    # HU-43/HU-44: operación en el broker sin confirmar («aprovisionar» o
+    # «retirar»). Mientras no sea None, la consola de EMQX no refleja el estado
+    # de la credencial que muestra el sistema.
+    broker_pendiente: Literal["aprovisionar", "retirar"] | None = None
+    broker_pendiente_motivo: str | None = None
+    broker_pendiente_desde: datetime | None = None
+    broker_pendiente_por: UUID | None = None
+    broker_confirmado_en: datetime | None = None
+    broker_confirmado_por: UUID | None = None
+    # HU-54: intervalo de captura del nodo y último latido (`estado_nodo`).
+    intervalo_reporte_segundos: int = 30
+    ultimo_latido_en: datetime | None = None
 
 
 class DispositivoResumenResponse(BaseModel):
@@ -442,6 +454,8 @@ class IncidenteOperativoResponse(BaseModel):
     ultimo_reporte_en: datetime | None
     umbral_silencio_segundos: int
     recuperado_en: datetime | None = None
+    # HU-54: cuándo salió el aviso (correo) del incidente persistente.
+    notificado_en: datetime | None = None
 
 
 class EstadoOperativoResponse(DispositivoResumenResponse):
@@ -529,6 +543,26 @@ class CredencialDispositivoResponse(BaseModel):
     # BE-002: True si el broker cerró la sesión anterior; None si la API del
     # broker no está configurada.
     sesion_broker_cerrada: bool | None = None
+
+
+class DispositivoAltaResponse(DispositivoResponse):
+    """HU-43: el alta emite la credencial MQTT del nodo. El token en claro
+    solo aparece en esta respuesta (igual que en la rotación)."""
+
+    credencial: CredencialDispositivoResponse
+
+
+class ConfirmarBrokerRequest(_PeticionEstricta):
+    """HU-43/HU-44: el administrador confirma que hizo la operación pendiente
+    en la consola del broker."""
+
+    nota: str | None = Field(default=None, max_length=500)
+
+
+class IntervaloReporteRequest(_PeticionEstricta):
+    """HU-54: intervalo de captura del nodo, en segundos."""
+
+    segundos: int = Field(ge=5, le=3600)
 
 
 class RegistrarVersionModeloRequest(_PeticionEstricta):

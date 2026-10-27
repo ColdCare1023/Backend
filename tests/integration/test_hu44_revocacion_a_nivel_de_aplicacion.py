@@ -22,6 +22,8 @@ DEVICE_ID = "FARM-HU44APP"
 
 
 class _Espia:
+    configurado = True
+
     def __init__(self) -> None:
         self.acuses: list[dict] = []
         self.expulsados: list[str] = []
