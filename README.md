@@ -49,7 +49,10 @@ pip-audit --require-hashes --disable-pip -r requirements-dev.txt
 Para actualizar un paquete concreto: añadir `--upgrade-package <nombre>` a los
 dos comandos de compilación.
 
-## Despliegue en Railway (HU-56)
+## Despliegue en Railway (HU-55; «HU-56» en la numeración antigua del código)
+
+Guía completa y evidencia: [docs/operacion/HU-55_despliegue_railway.md](docs/operacion/HU-55_despliegue_railway.md).
+Equivalencias de numeración: [docs/EQUIVALENCIA_HU_v3.3.md](docs/EQUIVALENCIA_HU_v3.3.md).
 
 La imagen es [`infra-local/backend/Dockerfile`](infra-local/backend/Dockerfile) (la misma que usa
 `infra-local/`: dependencias con hash, usuario sin privilegios) y la configuración del servicio está en
