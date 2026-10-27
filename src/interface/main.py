@@ -325,12 +325,27 @@ async def _procesar_prueba_posesion(evento: contrato_v1.EventoV1, broadcaster: S
             )
         if verificada:
             cambios = await cerrar_retencion(SQLAlchemyIncidenteRepository(session), auditoria, evento.device_id, ahora)
+            # Lo que el limitador solo contó desde la última fila de cada clave
+            # se perdería al terminar la retención: queda en una fila de cierre.
+            pendientes = _LIMITE_AUDITORIA.vaciar(evento.device_id)
+            if pendientes:
+                await auditoria.execute(
+                    usuario_id=None,
+                    accion="RETENCION_INTENTOS_SUPRIMIDOS",
+                    recurso=f"dispositivos/{evento.device_id}/credenciales",
+                    detalle={"suprimidos_sin_auditar": pendientes},
+                    ip_origen=None,
+                    device_id=evento.device_id,
+                )
         await session.commit()
     if not verificada:
         logger.warning("Prueba de posesión fallida para %s: %s", evento.device_id, motivo)
-    await broadcaster.publicar(
-        {"device_id": evento.device_id, "verificada": verificada, "motivo": motivo}, "prueba_posesion"
-    )
+    # El aviso en tiempo real de un fallo pasa por el mismo tope que la
+    # bitácora: respuestas falsas en bucle no deben inundar el SSE.
+    if verificada or suprimidos is not None:
+        await broadcaster.publicar(
+            {"device_id": evento.device_id, "verificada": verificada, "motivo": motivo}, "prueba_posesion"
+        )
     for cambio in cambios:
         await broadcaster.publicar(cambio.como_evento_sse(), tipo_sse(cambio))
 

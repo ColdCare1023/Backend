@@ -29,5 +29,16 @@ class LimitadorAuditoria:
         previo[1] += 1
         return None
 
+    def vaciar(self, device_id: str) -> dict[str, int]:
+        """Al terminar la retención de `device_id`: intentos contados y aún no
+        auditados por cada clave (p. ej. `pop_fallida:firma_invalida`), y olvida
+        sus claves. Las claves son (tipo, device_id, *motivo)."""
+        pendientes = {}
+        for clave in [c for c in self._estado if len(c) > 1 and c[1] == device_id]:
+            contados = self._estado.pop(clave)[1]
+            if contados:
+                pendientes[":".join(str(p) for p in (clave[0], *clave[2:]))] = contados
+        return pendientes
+
     def reiniciar(self) -> None:
         self._estado.clear()
