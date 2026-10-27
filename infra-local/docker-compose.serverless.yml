@@ -1,0 +1,32 @@
+# HU-44/HU-10, prueba H: el backend de esta pila contra EMQX Cloud Serverless.
+#
+# La base, las migraciones y el frontend siguen siendo los locales; solo cambia
+# el broker del backend. Las credenciales van en `serverless.env` (no
+# versionado, ver serverless.env.example) y NO pisan el `.env` de la pila local:
+#
+#   docker compose --env-file .env --env-file serverless.env \
+#     -f docker-compose.yml -f docker-compose.serverless.yml \
+#     --profile backend up -d --build backend
+#
+# Guía completa: docs/operacion/HU-44_banco_serverless.md
+services:
+  backend:
+    environment:
+      MQTT_HOST: ${SERVERLESS_MQTT_HOST:?falta SERVERLESS_MQTT_HOST en serverless.env}
+      MQTT_PORT: "8883"
+      MQTT_USERNAME: ${SERVERLESS_MQTT_USERNAME:-backend_service}
+      MQTT_PASSWORD: ${SERVERLESS_MQTT_PASSWORD:?falta SERVERLESS_MQTT_PASSWORD en serverless.env}
+      # Otro client_id que el de la pila local: dos backends con el mismo se
+      # expulsarían entre sí.
+      MQTT_CLIENT_ID: ${SERVERLESS_MQTT_CLIENT_ID:-backend-banco-serverless}
+      MQTT_TLS_ENABLED: "true"
+      MQTT_CA_FILE: /certs/emqxsl-ca.crt
+      # Serverless no tiene API de usuarios ni de ACL: se cambian en la consola.
+      BROKER_USUARIOS_MODO: manual
+      # La API de Serverless sí permite expulsar clientes (rotar, confirmar,
+      # reenviar el desafío y revocar expulsan la sesión del nodo).
+      BROKER_API_URL: ${SERVERLESS_API_URL:?falta SERVERLESS_API_URL en serverless.env}
+      BROKER_API_KEY: ${SERVERLESS_API_KEY:?falta SERVERLESS_API_KEY en serverless.env}
+      BROKER_API_SECRET: ${SERVERLESS_API_SECRET:?falta SERVERLESS_API_SECRET en serverless.env}
+    volumes:
+      - ./certs/emqxsl-ca.crt:/certs/emqxsl-ca.crt:ro
