@@ -25,7 +25,7 @@ despliegue y la evidencia se hacen en la cuenta de Railway del equipo.
 | `CORS_ORIGINS` | `["https://<frontend>.vercel.app"]` |
 | `ALLOWED_HOSTS` | `["<servicio>.up.railway.app"]` |
 | `MQTT_HOST`, `MQTT_PORT=8883`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_TLS_ENABLED=true` | instancia EMQX Cloud Serverless |
-| `BROKER_API_URL`, `BROKER_API_KEY`, `BROKER_API_SECRET` | API key de la instancia (expulsión de sesiones) |
+| `BROKER_API_URL`, `BROKER_API_KEY`, `BROKER_API_SECRET` | API key de la instancia (expulsión de sesiones). La URL incluye la ruta de la API; el backend la comprueba al arrancar (`GET /clients`) y lo muestra como `broker_api` en `/health/detalle` |
 | `BROKER_USUARIOS_MODO` | `manual` (Serverless no tiene API de usuarios) |
 | `IA_LEGADO_MODO` | `experimental` (o `desactivado`, decisión D-2) |
 | `FORWARDED_ALLOW_IPS` | ver «Proxy» |

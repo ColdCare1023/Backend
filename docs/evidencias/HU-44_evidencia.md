@@ -58,20 +58,23 @@ ORDER BY seq_no;
 -- Sin huecos: COUNT(*) = 28 y MAX(seq_no) - MIN(seq_no) + 1 = 28.
 ```
 
-## Pruebas automáticas del backend (27/10/2026, commit `4f52f72`)
+## Pruebas automáticas del backend (28/10/2026, commit `5926ed1`)
 
 Corren en el CI del backend contra PostgreSQL. Ejercitan la lógica; no
 reemplazan el banco.
 
 | Archivo | Qué verifica | Resultado |
 |---|---|---|
-| `tests/integration/test_hu44_prueba_posesion.py` | Monitoreo suspendido abierto y avisado; SIN_DATOS no se abre en la retención; **C**: excursión en lectura retenida y en `lectura_vigente` (un solo episodio y un solo aviso; un sensor en falla no la dispara); prueba válida termina la retención y el nodo entrega lo retenido; **E**: confirmar sin cambiar la consola (firma con el token viejo) no sale de la retención; **D**: nonce inventado y prueba antes de confirmar se rechazan; nonce caducado; sesión nueva recibe **el mismo** nonce y uno a menos de 1 min de caducar se renueva; la respuesta al primer desafío sirve tras un reenvío; respuestas falsas en bucle dejan una fila por minuto y un solo aviso SSE, y al verificar se audita lo suprimido (`RETENCION_INTENTOS_SUPRIMIDOS`); «Reenviar desafío» expulsa la sesión con su motivo; la excursión guarda la lectura más reciente por hora de captura; el par LWT/online de una rotación se etiqueta | 19 pasan |
+| `tests/integration/test_hu44_prueba_posesion.py` | Monitoreo suspendido abierto y avisado; SIN_DATOS no se abre en la retención; **C**: excursión en lectura retenida y en `lectura_vigente` (un solo episodio y un solo aviso; un sensor en falla no la dispara); prueba válida termina la retención y el nodo entrega lo retenido; **E**: confirmar sin cambiar la consola (firma con el token viejo) no sale de la retención; **D**: nonce inventado y prueba antes de confirmar se rechazan; nonce caducado; sesión nueva recibe **el mismo** nonce y uno a menos de 1 min de caducar se renueva; la respuesta al primer desafío sirve tras un reenvío; respuestas falsas en bucle dejan una fila por minuto y un solo aviso SSE, y lo suprimido se audita (`RETENCION_INTENTOS_SUPRIMIDOS`) al verificar, al revocar, al rotar de nuevo y, si el atacante deja de publicar, cuando vence su ventana (vigilante); «Reenviar desafío» expulsa la sesión con su motivo; la excursión guarda la lectura más reciente por hora de captura; el par LWT/online de una rotación se etiqueta | 22 pasan |
+| `tests/unit/test_broker_admin.py` | Expulsión: un 404 solo cuenta como «no había sesión» con `CLIENTID_NOT_FOUND` (una ruta equivocada daba B', E y F por buenas); `GET /clients` al arrancar comprueba `BROKER_API_URL` | 19 pasan |
+| `tests/integration/test_banco_dispositivo_script.py` | Script de banco (ADR-18): alta demo con el token en un archivo 0600 que no se imprime; `token` y `baja` no tocan un equipo real | 3 pasan |
 | `tests/integration/test_hu44_rotacion_por_compromiso.py` | Rotación preventiva sin corte; retención sin acuse; eventos retenidos; confirmar expulsa la sesión y **sigue** reteniendo; modo API sin ventana | 6 pasan |
 | `tests/integration/test_hu44_hu10_credenciales_dispositivo.py` | Revocación y rechazo de telemetría | pasan |
 | IoT `test/test_core/test_posesion.cpp` | HMAC-SHA256 (RFC 4231) y la misma firma que verifica el backend | 6 pasan |
-| IoT `test/test_core/test_llenado_banco.cpp` | Llenado rápido del buffer (ADR-18): tandas sin pasar de la capacidad; sintéticos marcados `simulated` y a 5,00 °C | 4 pasan |
+| IoT `test/test_core/test_llenado_banco.cpp` | Llenado rápido del buffer (ADR-18): tandas sin pasar de la capacidad; sintéticos marcados `simulated` y a 5,00 °C; `buffer cancelar` a mitad de una tanda deja el contador en 0 | 8 pasan |
+| IoT `test/test_core/test_cola.cpp` (descarte) | `buffer descartar`: por tandas, sin tocar lo capturado después ni la cuarentena | 2 pasan |
 
-Suite completa: **1025** pruebas del backend y **125** nativas del firmware.
+Suite completa: **1041** pruebas del backend y **131** nativas del firmware.
 
 ## Pruebas de banco que faltan (pila local)
 

@@ -49,6 +49,10 @@ Por eso en producción se usa `BROKER_USUARIOS_MODO=manual`:
    debe **retirarse a mano de la consola**. Hasta entonces el broker aceptaría una reconexión con el token
    anterior, pero el backend rechaza y audita su telemetría y vuelve a expulsar la sesión en cada intento.
 3. `BROKER_API_URL`, `BROKER_API_KEY` y `BROKER_API_SECRET` siguen siendo necesarios para expulsar sesiones.
+   Con una URL equivocada (por ejemplo sin `/api/v5`) cada expulsión respondía 404 y el backend la daba por
+   hecha. Ahora un 404 solo cuenta como «no había sesión» si trae `CLIENTID_NOT_FOUND`, y al arrancar el
+   backend hace `GET /clients`: el resultado aparece como `broker_api` en `/health/detalle`. Antes de las
+   pruebas B', E y F hay que ver ahí `broker_api: "ok"`.
 
 Con `BROKER_USUARIOS_MODO=api` (EMQX 5 completo, como el de esta pila local, o un plan Dedicated) el
 backend crea, reemplaza y elimina los usuarios solo. Antes de desplegar hay que probar con la API key de la
