@@ -176,6 +176,7 @@ async def dar_de_alta(
     body: DispositivoAltaRequest,
     session: DbSessionDep,
     request: Request,
+    settings: SettingsDep,
     admin=Depends(router_dep),
     broker: BrokerAdmin = Depends(get_broker_admin),
 ) -> DispositivoAltaResponse:
@@ -185,6 +186,13 @@ async def dar_de_alta(
     El alta emite la credencial MQTT del nodo (criterio de HU-43): la consola
     del broker se configura una sola vez con un token ya conocido, sin pasar
     por una primera «rotación». El token en claro solo viaja en esta respuesta."""
+    if body.es_demo and settings.environment == "production":
+        # BE-015: un dispositivo demo admite lecturas simuladas; en el piloto
+        # ni la API puede crearlo.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Los dispositivos de demostración (es_demo) no se admiten en producción.",
+        )
     repositorio = SQLAlchemyDeviceRepository(session)
     registrar_hash = RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session))
     use_case = RegistrarAltaDispositivoUseCase(repositorio, registrar_hash)
