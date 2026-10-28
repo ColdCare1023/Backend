@@ -22,6 +22,7 @@ from src.infrastructure.database.repositories.usuario_repository import SQLAlche
 from src.infrastructure.security.password_hasher import hash_password
 from src.interface import main as interfaz_main
 from src.interface.api import deps
+from src.interface.limitador_auditoria import LIMITE_AUDITORIA
 from src.interface.main import create_app
 
 
@@ -51,7 +52,7 @@ async def db_session(db_session_factory) -> AsyncSession:
 def _estado_en_memoria_hu44():
     """HU-44: el tope de auditoría y el registro de desafíos enviados viven en
     memoria del proceso; cada prueba empieza sin ellos."""
-    interfaz_main._LIMITE_AUDITORIA.reiniciar()
+    LIMITE_AUDITORIA.reiniciar()
     interfaz_main._DESAFIOS_ENVIADOS.clear()
     yield
 

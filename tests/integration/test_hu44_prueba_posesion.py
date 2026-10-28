@@ -22,6 +22,7 @@ from src.infrastructure.database.models import (
 )
 from src.interface import main
 from src.interface.api.dispositivos_router import get_broker_admin, get_publicador_desafios
+from src.interface.limitador_auditoria import LIMITE_AUDITORIA
 from src.interface.tareas import VigilanteSinDatos
 from tests.conftest import auth_header
 
@@ -403,6 +404,75 @@ async def test_al_verificar_se_auditan_los_intentos_que_solo_se_contaron(
     cierre = [a for a in await _filas(db_session_factory, AuditLogModel) if a.accion == "RETENCION_INTENTOS_SUPRIMIDOS"]
     assert len(cierre) == 1
     assert cierre[0].detalle["suprimidos_sin_auditar"] == {"pop_fallida:firma_invalida": 3, "lectura_retenida": 2}
+
+
+async def _respuestas_falsas(espia, n: int) -> None:
+    nonce = espia.desafios[-1]["nonce"]
+    for _ in range(n):
+        await main._procesar_evento_mqtt(
+            _Mensaje("eventos", _respuesta("token-anterior-filtrado", nonce)), _Broadcaster(), espia
+        )
+
+
+async def _filas_suprimidos(db_session_factory) -> list:
+    return [a for a in await _filas(db_session_factory, AuditLogModel) if a.accion == "RETENCION_INTENTOS_SUPRIMIDOS"]
+
+
+async def test_si_el_atacante_deja_de_publicar_el_vigilante_audita_lo_contado(
+    client, token_admin, espia, db_session_factory, monkeypatch
+):
+    """5 respuestas falsas y nada más: sin el vigilante, las 4 que solo se
+    contaron no saldrían nunca en la bitácora."""
+    reloj = [1000.0]
+    monkeypatch.setattr(LIMITE_AUDITORIA, "_reloj", lambda: reloj[0])
+    _alta(client, token_admin)
+    _rotar_por_compromiso(client, token_admin)
+    _confirmar(client, token_admin)
+    await _respuestas_falsas(espia, 5)
+    vigilante = VigilanteSinDatos(db_session_factory, _Broadcaster(), None, 30, 3)
+
+    await vigilante.ejecutar_una_vez()
+    assert await _filas_suprimidos(db_session_factory) == []  # la ventana sigue abierta
+
+    reloj[0] += 61
+    await vigilante.ejecutar_una_vez()
+    volcado = await _filas_suprimidos(db_session_factory)
+    assert len(volcado) == 1
+    assert volcado[0].detalle == {
+        "suprimidos_sin_auditar": {"pop_fallida:firma_invalida": 4}, "cierre": "ventana_vencida",
+    }
+
+
+async def test_revocar_durante_la_retencion_audita_lo_contado(client, token_admin, espia, db_session_factory):
+    _alta(client, token_admin)
+    _rotar_por_compromiso(client, token_admin)
+    _confirmar(client, token_admin)
+    await _respuestas_falsas(espia, 3)
+
+    respuesta = client.post(
+        f"/api/dispositivos/{DEVICE_ID}/credenciales/revocar", json={"motivo": "token filtrado"},
+        headers=auth_header(token_admin),
+    )
+
+    assert respuesta.status_code == 204
+    cierre = await _filas_suprimidos(db_session_factory)
+    assert len(cierre) == 1
+    assert cierre[0].detalle == {"suprimidos_sin_auditar": {"pop_fallida:firma_invalida": 2}, "cierre": "revocacion"}
+
+
+async def test_una_rotacion_nueva_audita_lo_contado_en_la_retencion_anterior(
+    client, token_admin, espia, db_session_factory
+):
+    _alta(client, token_admin)
+    _rotar_por_compromiso(client, token_admin)
+    _confirmar(client, token_admin)
+    await _respuestas_falsas(espia, 3)
+
+    _rotar_por_compromiso(client, token_admin)
+
+    cierre = await _filas_suprimidos(db_session_factory)
+    assert len(cierre) == 1
+    assert cierre[0].detalle == {"suprimidos_sin_auditar": {"pop_fallida:firma_invalida": 2}, "cierre": "rotacion"}
 
 
 async def test_un_nonce_a_punto_de_caducar_no_se_reenvia(client, token_admin, espia, db_session_factory):

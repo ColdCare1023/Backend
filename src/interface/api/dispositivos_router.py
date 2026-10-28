@@ -62,6 +62,7 @@ from src.interface.api.schemas import (
     RotarCredencialRequest,
     SensorIoTResponse,
 )
+from src.interface.limitador_auditoria import LIMITE_AUDITORIA, auditar_suprimidos
 
 router = APIRouter(prefix="/api/dispositivos", tags=["dispositivos"])
 
@@ -449,15 +450,18 @@ async def dar_de_baja(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     ip = request.client.host if request.client else None
-    await AuditarAccionCriticaUseCase(
+    auditoria = AuditarAccionCriticaUseCase(
         SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
-    ).execute(
+    )
+    await auditoria.execute(
         usuario_id=admin.id,
         accion="BAJA_DISPOSITIVO",
         recurso=f"dispositivos/{device_id}",
         detalle={"motivo": body.motivo, "reemplazo": body.device_id_reemplazo, "credencial_revocada": True},
         ip_origen=ip,
     )
+    # HU-44: lo que el limitador solo contó durante una retención se perdería con la baja.
+    await auditar_suprimidos(auditoria, device_id, LIMITE_AUDITORIA.vaciar(device_id), "baja")
     await session.commit()
     # BE-003: la baja revoca la credencial (se elimina del broker) y cierra la sesión abierta.
     eliminada = await broker.eliminar_credencial(device_id)
@@ -493,15 +497,19 @@ async def rotar_credencial(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     ip = request.client.host if request.client else None
-    await AuditarAccionCriticaUseCase(
+    auditoria = AuditarAccionCriticaUseCase(
         SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
-    ).execute(
+    )
+    await auditoria.execute(
         usuario_id=admin.id,
         accion="ROTAR_CREDENCIAL_DISPOSITIVO",
         recurso=f"dispositivos/{device_id}/credenciales",
         detalle={"motivo": body.motivo, "causa": body.causa},
         ip_origen=ip,
     )
+    # HU-44: una rotación nueva cierra la retención que hubiera en curso; lo
+    # que el limitador solo contó en ella queda en una fila de cierre.
+    await auditar_suprimidos(auditoria, device_id, LIMITE_AUDITORIA.vaciar(device_id), "rotacion")
     await session.commit()
     # BE-002: tras el COMMIT. Primero se aprovisiona el token nuevo en el broker
     # (autenticación integrada de EMQX) y luego se expulsa la sesión anterior,
@@ -580,15 +588,19 @@ async def revocar_credencial(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     ip = request.client.host if request.client else None
-    await AuditarAccionCriticaUseCase(
+    auditoria = AuditarAccionCriticaUseCase(
         SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
-    ).execute(
+    )
+    await auditoria.execute(
         usuario_id=admin.id,
         accion="REVOCAR_CREDENCIAL_DISPOSITIVO",
         recurso=f"dispositivos/{device_id}/credenciales",
         detalle={"motivo": body.motivo},
         ip_origen=ip,
     )
+    # HU-44: la revocación cierra la retención; lo que el limitador solo contó
+    # en ella queda en una fila de cierre.
+    await auditar_suprimidos(auditoria, device_id, LIMITE_AUDITORIA.vaciar(device_id), "revocacion")
     await session.commit()
     # BE-002: se elimina el usuario del broker y se cierra la sesión abierta;
     # sin esto el dispositivo (o quien tuviera su token) seguiría publicando

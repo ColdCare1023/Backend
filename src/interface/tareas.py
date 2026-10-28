@@ -24,6 +24,7 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
 )
 from src.infrastructure.notifications.despachador import DespachadorNotificaciones
 from src.interface.api.sse_broadcaster import SSEBroadcaster
+from src.interface.limitador_auditoria import LIMITE_AUDITORIA, auditar_suprimidos
 
 logger = logging.getLogger("interface.tareas")
 
@@ -57,16 +58,22 @@ class VigilanteSinDatos:
 
     async def ejecutar_una_vez(self, ahora: datetime | None = None) -> list[CambioIncidente]:
         async with self._session_factory() as session:
+            auditoria = AuditarAccionCriticaUseCase(
+                SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+            )
             use_case = VigilarSinDatosUseCase(
                 SQLAlchemyDeviceRepository(session),
                 SQLAlchemyLecturaRepository(session),
                 SQLAlchemyIncidenteRepository(session),
-                AuditarAccionCriticaUseCase(
-                    SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
-                ),
+                auditoria,
                 n_intervalos=self._n,
             )
             cambios = await use_case.execute(ahora)
+            # HU-44: si quien publicaba con el token filtrado deja de hacerlo,
+            # lo contado en su última ventana no lo auditaría ningún intento
+            # nuevo: se vuelca aquí en cuanto la ventana vence.
+            for device_id, suprimidos in LIMITE_AUDITORIA.vencidos().items():
+                await auditar_suprimidos(auditoria, device_id, suprimidos, "ventana_vencida")
             await session.commit()
         if self._notificaciones is not None:
             self._notificaciones.encolar_todos(use_case.avisos_pendientes)

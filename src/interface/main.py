@@ -94,15 +94,15 @@ from src.interface.api.sse_broadcaster import SSEBroadcaster
 from src.interface.api.sse_router import router as sse_router
 from src.interface.api.trazabilidad_router import router as trazabilidad_router
 from src.interface.api.usuarios_router import router as usuarios_router
-from src.interface.limitador_auditoria import LimitadorAuditoria
+from src.interface.limitador_auditoria import LIMITE_AUDITORIA, auditar_suprimidos
 from src.interface.tareas import VigilanteSinDatos, tipo_sse
 
 logger = logging.getLogger("interface.main")
 
-# HU-44: una fila de auditoría por minuto y clave durante la retención (un
-# atacante con el token filtrado puede publicar en bucle) y última vez que se
-# envió el desafío a cada nodo (el reenvío se espacia REEMISION_MINIMA).
-_LIMITE_AUDITORIA = LimitadorAuditoria()
+# HU-44: última vez que se envió el desafío a cada nodo (el reenvío se espacia
+# REEMISION_MINIMA). El tope de una fila de auditoría por minuto y clave
+# durante la retención es LIMITE_AUDITORIA, compartido con el router y el
+# vigilante.
 _DESAFIOS_ENVIADOS: dict[str, float] = {}
 
 
@@ -313,7 +313,7 @@ async def _procesar_prueba_posesion(evento: contrato_v1.EventoV1, broadcaster: S
             return  # respuesta tardía o repetida: no hay nada que probar
         # Un fallo por minuto y motivo: quien tiene el token viejo puede
         # publicar respuestas falsas en bucle.
-        suprimidos = 0 if verificada else _LIMITE_AUDITORIA.permitir("pop_fallida", evento.device_id, motivo)
+        suprimidos = 0 if verificada else LIMITE_AUDITORIA.permitir("pop_fallida", evento.device_id, motivo)
         if suprimidos is not None:
             await auditoria.execute(
                 usuario_id=None,
@@ -327,16 +327,9 @@ async def _procesar_prueba_posesion(evento: contrato_v1.EventoV1, broadcaster: S
             cambios = await cerrar_retencion(SQLAlchemyIncidenteRepository(session), auditoria, evento.device_id, ahora)
             # Lo que el limitador solo contó desde la última fila de cada clave
             # se perdería al terminar la retención: queda en una fila de cierre.
-            pendientes = _LIMITE_AUDITORIA.vaciar(evento.device_id)
-            if pendientes:
-                await auditoria.execute(
-                    usuario_id=None,
-                    accion="RETENCION_INTENTOS_SUPRIMIDOS",
-                    recurso=f"dispositivos/{evento.device_id}/credenciales",
-                    detalle={"suprimidos_sin_auditar": pendientes},
-                    ip_origen=None,
-                    device_id=evento.device_id,
-                )
+            await auditar_suprimidos(
+                auditoria, evento.device_id, LIMITE_AUDITORIA.vaciar(evento.device_id), "verificada"
+            )
         await session.commit()
     if not verificada:
         logger.warning("Prueba de posesión fallida para %s: %s", evento.device_id, motivo)
@@ -461,7 +454,7 @@ async def _procesar_evento_v1(
         if await credencial_en_cuarentena(device_repository, evento.device_id):
             # HU-44: rotación por compromiso en curso: el evento puede venir de
             # quien tiene el token filtrado; no altera el estado del nodo.
-            suprimidos = _LIMITE_AUDITORIA.permitir("evento_retenido", evento.device_id)
+            suprimidos = LIMITE_AUDITORIA.permitir("evento_retenido", evento.device_id)
             if suprimidos is not None:
                 await auditoria.execute(
                     usuario_id=None,
@@ -617,7 +610,7 @@ async def _procesar_evento_mqtt(
             return
         if await credencial_en_cuarentena(device_repository, evento.device_id):
             # HU-44: rotación por compromiso en curso (ver arriba).
-            suprimidos = _LIMITE_AUDITORIA.permitir("evento_retenido", evento.device_id)
+            suprimidos = LIMITE_AUDITORIA.permitir("evento_retenido", evento.device_id)
             if suprimidos is not None:
                 await auditoria.execute(
                     usuario_id=None,
@@ -961,7 +954,7 @@ async def _procesar_lectura_mqtt(
         try:
             lectura_guardada = await use_case.execute(lectura)
         except CredencialEnCuarentenaError:
-            suprimidos = _LIMITE_AUDITORIA.permitir("lectura_retenida", payload.device_id)
+            suprimidos = LIMITE_AUDITORIA.permitir("lectura_retenida", payload.device_id)
             if suprimidos is not None:
                 await AuditarAccionCriticaUseCase(
                     SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
