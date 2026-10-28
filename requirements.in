@@ -26,7 +26,7 @@ bcrypt>=4.2.0
 scikit-learn>=1.5.0
 joblib>=1.4.0
 numpy>=1.26.0
-pandas>=2.2.0
+pandas>=3.1.0
 python-multipart>=0.0.31
 python-dotenv>=1.0.0
 # RF-13 / HU-38: generación del reporte BPA en PDF. ReportLab es Python puro
