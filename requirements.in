@@ -34,7 +34,7 @@ python-dotenv>=1.0.0
 # libpango/libcairo instalados en el host, lo que rompía el despliegue.
 # BE-004: desde 5.0.0, `trustedHosts=None` significa "ningún origen confiable"
 # para <img src> en Paragraph (antes: sin restricción).
-reportlab>=5.0.1
+reportlab>=5.1.0
 # httpx: lo importa notificacion_service (SMS) en producción; solo estaba en dev.
 httpx>=0.27.0
 # greenlet: lo exige SQLAlchemy asyncio; no siempre llega como dependencia transitiva.
