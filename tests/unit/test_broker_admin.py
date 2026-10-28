@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from src.infrastructure.config import Settings
+from src.infrastructure.mqtt import broker_admin
 from src.infrastructure.mqtt.broker_admin import BrokerAdmin
 
 
@@ -15,14 +16,30 @@ def _settings(**valores) -> Settings:
     return Settings(**base)
 
 
+@pytest.fixture
+def errores_registrados(monkeypatch):
+    """Espía de `logger.error` del módulo. No se usa `caplog`: en la suite
+    completa otras pruebas alteran el estado global de logging."""
+    capturados: list[str] = []
+    monkeypatch.setattr(
+        broker_admin.logger, "error", lambda mensaje, *a, **k: capturados.append(mensaje % a if a else mensaje)
+    )
+    return capturados
+
+
+CLIENTE_INEXISTENTE = {"code": "CLIENTID_NOT_FOUND", "message": "Client ID not found"}
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("codigo,esperado", [(204, True), (404, True), (500, False)])
-async def test_expulsa_con_delete_autenticado(codigo, esperado):
+@pytest.mark.parametrize(
+    "codigo,cuerpo,esperado", [(204, None, True), (404, CLIENTE_INEXISTENTE, True), (500, None, False)]
+)
+async def test_expulsa_con_delete_autenticado(codigo, cuerpo, esperado):
     vistas: list[httpx.Request] = []
 
     def manejar(peticion: httpx.Request) -> httpx.Response:
         vistas.append(peticion)
-        return httpx.Response(codigo)
+        return httpx.Response(codigo, json=cuerpo) if cuerpo else httpx.Response(codigo)
 
     resultado = await BrokerAdmin(_settings(), transport=httpx.MockTransport(manejar)).desconectar_cliente("FARM/01")
 
@@ -31,6 +48,25 @@ async def test_expulsa_con_delete_autenticado(codigo, esperado):
     # El client_id va codificado: no puede salirse de /clients/{id}.
     assert vistas[0].url.raw_path == b"/api/v5/clients/FARM%2F01"
     assert vistas[0].headers["authorization"].startswith("Basic ")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "respuesta",
+    [
+        httpx.Response(404, text="<html><body>Not Found</body></html>", headers={"content-type": "text/html"}),
+        httpx.Response(404, json={"code": "NOT_FOUND", "message": "Request Path Not Found"}),
+        httpx.Response(404),
+    ],
+    ids=["html", "otro_codigo", "sin_cuerpo"],
+)
+async def test_404_sin_codigo_de_cliente_no_cuenta_como_expulsado(respuesta, errores_registrados):
+    """Con BROKER_API_URL sin /api/v5 cada expulsión respondía 404 y el backend la
+    daba por hecha: solo CLIENTID_NOT_FOUND significa que no había sesión."""
+    broker = BrokerAdmin(_settings(), transport=httpx.MockTransport(lambda _p: respuesta))
+
+    assert await broker.desconectar_cliente("FARM-01") is False
+    assert any("ruta de la API del broker incorrecta" in m for m in errores_registrados)
 
 
 @pytest.mark.asyncio

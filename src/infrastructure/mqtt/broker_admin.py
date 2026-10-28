@@ -31,6 +31,17 @@ logger = logging.getLogger("infrastructure.mqtt.broker_admin")
 
 # Autenticador integrado de EMQX (mecanismo password_based, backend built_in_database).
 _USUARIOS = "/authentication/password_based:built_in_database/users"
+# Código de error de EMQX 5 para `DELETE /clients/{clientid}` sin sesión abierta.
+_CLIENTE_INEXISTENTE = "CLIENTID_NOT_FOUND"
+
+
+def _codigo_error(respuesta: httpx.Response) -> str | None:
+    """Campo `code` del cuerpo de error de EMQX; None si el cuerpo no es ese JSON."""
+    try:
+        cuerpo = respuesta.json()
+    except ValueError:
+        return None
+    return cuerpo.get("code") if isinstance(cuerpo, dict) else None
 
 
 class BrokerAdmin:
@@ -112,8 +123,9 @@ class BrokerAdmin:
     async def desconectar_cliente(self, client_id: str) -> bool | None:
         """Expulsa la sesión MQTT de `client_id`.
 
-        True: cerrada, o no había sesión abierta (404). False: el broker no la
-        cerró (error o inaccesible). None: no hay API del broker configurada.
+        True: cerrada, o no había sesión abierta (404 con CLIENTID_NOT_FOUND).
+        False: el broker no la cerró (error, inaccesible o ruta equivocada).
+        None: no hay API del broker configurada.
         """
         if not self.configurado:
             logger.warning(
@@ -126,8 +138,21 @@ class BrokerAdmin:
         except httpx.HTTPError:
             logger.exception("No se pudo contactar la API del broker para expulsar a %s.", client_id)
             return False
-        if respuesta.status_code in (204, 404):
+        if respuesta.status_code == 204:
             return True
+        if respuesta.status_code == 404:
+            # Solo el código de EMQX distingue «no había sesión» de una ruta
+            # equivocada: con BROKER_API_URL sin /api/v5 cada expulsión
+            # respondía 404 y se daba por hecha sin haberla hecho.
+            if _codigo_error(respuesta) == _CLIENTE_INEXISTENTE:
+                return True
+            logger.error(
+                "El broker respondió 404 sin %s al expulsar a %s: ruta de la API del broker incorrecta "
+                "(revise BROKER_API_URL).",
+                _CLIENTE_INEXISTENTE,
+                client_id,
+            )
+            return False
         logger.error("El broker no expulsó a %s (HTTP %s).", client_id, respuesta.status_code)
         return False
 
