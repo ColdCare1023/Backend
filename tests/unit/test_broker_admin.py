@@ -70,6 +70,41 @@ async def test_404_sin_codigo_de_cliente_no_cuenta_como_expulsado(respuesta, err
 
 
 @pytest.mark.asyncio
+async def test_verificar_api_consulta_clients_y_acepta_200():
+    vistas: list[httpx.Request] = []
+
+    def manejar(peticion: httpx.Request) -> httpx.Response:
+        vistas.append(peticion)
+        return httpx.Response(200, json={"data": [], "meta": {"count": 0}})
+
+    assert await BrokerAdmin(_settings(), transport=httpx.MockTransport(manejar)).verificar_api() is True
+    assert vistas[0].method == "GET"
+    assert vistas[0].url.raw_path == b"/api/v5/clients"
+    assert vistas[0].headers["authorization"].startswith("Basic ")
+
+
+@pytest.mark.asyncio
+async def test_verificar_api_informa_ruta_o_broker_inaccesible(errores_registrados):
+    ruta_mala = BrokerAdmin(_settings(), transport=httpx.MockTransport(lambda _p: httpx.Response(404)))
+    assert await ruta_mala.verificar_api() is False
+    assert any("BROKER_API_URL" in m for m in errores_registrados)
+
+    def sin_red(peticion):
+        raise httpx.ConnectError("sin red", request=peticion)
+
+    assert await BrokerAdmin(_settings(), transport=httpx.MockTransport(sin_red)).verificar_api() is False
+
+
+@pytest.mark.asyncio
+async def test_verificar_api_sin_configurar_no_sale_a_la_red():
+    def manejar(_peticion):  # pragma: no cover - no debe llamarse
+        raise AssertionError("no debía haber petición")
+
+    broker = BrokerAdmin(_settings(broker_api_url=""), transport=httpx.MockTransport(manejar))
+    assert await broker.verificar_api() is None
+
+
+@pytest.mark.asyncio
 async def test_sin_api_configurada_no_sale_a_la_red():
     def manejar(_peticion):  # pragma: no cover - no debe llamarse
         raise AssertionError("no debía haber petición")

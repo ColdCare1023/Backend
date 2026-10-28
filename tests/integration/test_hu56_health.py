@@ -23,3 +23,16 @@ def test_health_detalle_informa_bd_y_mqtt(client, token_admin):
     # En pruebas la ingesta MQTT no arranca (ENVIRONMENT=test).
     assert cuerpo["mqtt"]["habilitado"] is False
     assert cuerpo["mqtt"]["conectado"] is False
+    # Sin BROKER_API_URL no se comprueba la API del broker al arrancar.
+    assert cuerpo["broker_api"] == "sin_configurar"
+
+
+def test_health_detalle_degradado_si_la_api_del_broker_fallo(client, token_admin, app):
+    app.state.broker_api = False
+    try:
+        cuerpo = client.get("/health/detalle", headers=auth_header(token_admin)).json()
+    finally:
+        app.state.broker_api = None
+
+    assert cuerpo["broker_api"] == "error"
+    assert cuerpo["status"] == "degradado"

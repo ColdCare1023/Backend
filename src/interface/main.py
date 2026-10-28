@@ -1138,6 +1138,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "BROKER_API_URL/BROKER_API_KEY/BROKER_API_SECRET no configurados: las credenciales de "
             "dispositivos no se aprovisionan ni se revocan en el broker."
         )
+    # Una URL de la API mal escrita (por ejemplo sin /api/v5) hacía que cada
+    # expulsión de sesión pareciera hecha; se comprueba una vez al arrancar y el
+    # resultado queda en /health/detalle.
+    app.state.broker_api = await BrokerAdmin(settings).verificar_api()
 
     # HU-53: UNA instancia por proceso (D1) — la cola, el worker y los
     # reintentos de los avisos por correo viven aquí, no en cada lectura.
@@ -1284,11 +1288,15 @@ def create_app() -> FastAPI:
         tarea_mqtt = getattr(request.app.state, "mqtt", None)
         despachador = getattr(request.app.state, "notificaciones", None)
         vigilante = getattr(request.app.state, "vigilante_sin_datos", None)
+        api_broker = getattr(request.app.state, "broker_api", None)
+        broker_api = "sin_configurar" if api_broker is None else ("ok" if api_broker else "error")
         return {
-            "status": "ok" if db == "ok" else "degradado",
+            "status": "ok" if db == "ok" and broker_api != "error" else "degradado",
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             "db": db,
             "alembic_revision": revision,
+            # Resultado de BrokerAdmin.verificar_api() al arrancar.
+            "broker_api": broker_api,
             "mqtt": {
                 "habilitado": tarea_mqtt is not None,
                 "tarea_activa": tarea_mqtt is not None and not tarea_mqtt.done(),

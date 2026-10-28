@@ -156,6 +156,31 @@ class BrokerAdmin:
         logger.error("El broker no expulsó a %s (HTTP %s).", client_id, respuesta.status_code)
         return False
 
+    async def verificar_api(self) -> bool | None:
+        """Comprueba al arrancar que BROKER_API_URL apunta a la API del broker.
+
+        True: `GET /clients` respondió 200. False: otra respuesta o broker
+        inaccesible; las expulsiones de sesión no son confiables. None: no hay
+        API del broker configurada.
+        """
+        if not self.configurado:
+            return None
+        try:
+            async with self._cliente() as cliente:
+                # Sin parámetros: EMQX 5 pagina con `limit` y Serverless con `_limit`.
+                respuesta = await cliente.get(f"{self._url}/clients")
+        except httpx.HTTPError:
+            logger.exception("No se pudo contactar la API del broker en %s.", self._url)
+            return False
+        if respuesta.status_code == 200:
+            return True
+        logger.error(
+            "La API del broker respondió HTTP %s a GET /clients: revise BROKER_API_URL (¿falta /api/v5?) "
+            "y la API key; las expulsiones de sesión no son confiables.",
+            respuesta.status_code,
+        )
+        return False
+
 
 def obtener_broker_admin(settings: Settings) -> BrokerAdmin:
     """Dependencia sustituible en pruebas (no se sale a la red)."""
