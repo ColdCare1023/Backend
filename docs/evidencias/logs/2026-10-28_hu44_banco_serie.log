@@ -1,0 +1,275 @@
+# Log serie de ESP32_FARMACIA_01 (boot 697), pruebas de banco HU-44 B'-G, 28/10/2026, hora UTC del PC.
+# Firmware esp32dev 0fb14e8, backend 62082c9 (modo manual). Tokens sustituidos por <token>; '>>' = comando enviado por la consola serie.
+23:27:22.142 [CAP] boot=697 seq=24 up=230 t=2026-10-28T23:27:21Z tq=sntp ds=26.38 ds_f=- sht=27.59 hr=72.67 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=132424
+23:27:22.142 [Red] 1 lectura(s) con acuse logico; quedan 0.
+23:27:29.479 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:27:29.910 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:27:31.955 [CAP] boot=697 seq=25 up=240 t=2026-10-28T23:27:31Z tq=sntp ds=26.38 ds_f=- sht=27.52 hr=72.65 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=132236
+23:27:34.628 >> nvs set mqtt_relevo @relevo
+23:27:40.046 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=25): se conserva en LittleFS.
+23:27:40.046 nvs set mqtt_relevo -> OK (valor no mostrado). Reiniciar para aplicar; el token se aplica sin reiniciar.
+23:27:40.046 [Evento] Encolado 'config_modificada'.
+23:27:40.046 [Red] Token de relevo pendiente: reconexion ordenada para probarlo (HU-44).
+23:27:40.251 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:27:40.453 [MQTT] ERROR: Conexion rechazada: lastError=-10 returnCode=4.
+23:27:40.454 [MQTT] ERROR:   -> credencial invalida o revocada (HU-10/HU-44).
+23:27:40.454 [Red] Broker rechazo el token de relevo (CONNACK 4): se sigue con el vigente (HU-44).
+23:27:40.454 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:27:40.887 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:27:42.107 [CAP] boot=697 seq=26 up=250 t=2026-10-28T23:27:41Z tq=sntp ds=26.38 ds_f=- sht=27.60 hr=72.79 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=2 ocup=0 heap=131648
+23:27:49.018 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=25): se conserva en LittleFS.
+23:27:52.122 [CAP] boot=697 seq=27 up=260 t=2026-10-28T23:27:51Z tq=sntp ds=26.38 ds_f=- sht=27.56 hr=72.64 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=3 ocup=0 heap=131648
+23:27:57.059 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=25): se conserva en LittleFS.
+23:28:01.978 [CAP] boot=697 seq=28 up=270 t=2026-10-28T23:28:01Z tq=sntp ds=26.38 ds_f=- sht=27.66 hr=72.67 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=4 ocup=0 heap=131648
+23:28:07.131 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=25): se conserva en LittleFS.
+23:28:12.032 [CAP] boot=697 seq=29 up=280 t=2026-10-28T23:28:11Z tq=sntp ds=26.38 ds_f=- sht=27.66 hr=72.69 sht_f=- door=1 door_s=9 pwr=NA sim=0 g=OK q=5 ocup=0 heap=132132
+23:28:22.089 [CAP] boot=697 seq=30 up=290 t=2026-10-28T23:28:21Z tq=sntp ds=26.38 ds_f=- sht=27.64 hr=72.52 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=6 ocup=0 heap=131648
+23:28:27.211 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=25): se conserva en LittleFS.
+23:28:32.147 [CAP] boot=697 seq=31 up=300 t=2026-10-28T23:28:31Z tq=sntp ds=26.38 ds_f=- sht=27.59 hr=72.53 sht_f=- door=1 door_s=9 pwr=NA sim=0 g=OK q=7 ocup=0 heap=131584
+23:28:41.996 [CAP] boot=697 seq=32 up=310 t=2026-10-28T23:28:41Z tq=sntp ds=26.38 ds_f=- sht=27.59 hr=72.56 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=8 ocup=0 heap=132132
+23:28:49.799 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:28:50.205 [MQTT] ERROR: Conexion rechazada: lastError=-10 returnCode=4.
+23:28:50.205 [MQTT] ERROR:   -> credencial invalida o revocada (HU-10/HU-44).
+23:28:50.205 [Red] Broker rechazo el token de relevo (CONNACK 4): se sigue con el vigente (HU-44).
+23:28:50.205 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:28:50.612 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:28:52.069 [CAP] boot=697 seq=33 up=320 t=2026-10-28T23:28:51Z tq=sntp ds=26.38 ds_f=- sht=27.61 hr=72.54 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=9 ocup=0 heap=131656
+23:28:58.614 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=25): se conserva en LittleFS.
+23:29:02.126 [CAP] boot=697 seq=34 up=330 t=2026-10-28T23:29:01Z tq=sntp ds=26.38 ds_f=- sht=27.60 hr=72.54 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=10 ocup=0 heap=131656
+23:29:06.818 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=25): se conserva en LittleFS.
+23:29:11.967 [CAP] boot=697 seq=35 up=340 t=2026-10-28T23:29:11Z tq=sntp ds=26.38 ds_f=- sht=27.67 hr=72.55 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=11 ocup=0 heap=131656
+23:29:16.895 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=25): se conserva en LittleFS.
+23:29:22.021 [CAP] boot=697 seq=36 up=350 t=2026-10-28T23:29:21Z tq=sntp ds=26.38 ds_f=- sht=27.63 hr=72.40 sht_f=- door=1 door_s=9 pwr=NA sim=0 g=OK q=12 ocup=0 heap=132140
+23:29:32.064 [CAP] boot=697 seq=37 up=360 t=2026-10-28T23:29:31Z tq=sntp ds=26.38 ds_f=- sht=27.64 hr=72.50 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=13 ocup=0 heap=131656
+23:29:36.948 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=25): se conserva en LittleFS.
+23:29:42.029 [CAP] boot=697 seq=38 up=370 t=2026-10-28T23:29:41Z tq=sntp ds=26.38 ds_f=- sht=27.69 hr=72.40 sht_f=- door=1 door_s=9 pwr=NA sim=0 g=OK q=14 ocup=0 heap=132140
+23:29:52.104 [CAP] boot=697 seq=39 up=380 t=2026-10-28T23:29:51Z tq=sntp ds=26.38 ds_f=- sht=27.63 hr=72.26 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=15 ocup=0 heap=132140
+23:30:01.937 [CAP] boot=697 seq=40 up=390 t=2026-10-28T23:30:01Z tq=sntp ds=26.38 ds_f=- sht=27.64 hr=72.30 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=16 ocup=0 heap=132140
+23:30:11.961 [CAP] boot=697 seq=41 up=400 t=2026-10-28T23:30:11Z tq=sntp ds=26.38 ds_f=- sht=27.69 hr=72.30 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=17 ocup=0 heap=131656
+23:30:16.873 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=25): se conserva en LittleFS.
+23:30:22.001 [CAP] boot=697 seq=42 up=410 t=2026-10-28T23:30:21Z tq=sntp ds=26.38 ds_f=- sht=27.63 hr=72.24 sht_f=- door=1 door_s=9 pwr=NA sim=0 g=OK q=18 ocup=0 heap=132140
+23:30:22.623 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:30:23.032 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:30:23.032 [Evento] Encolado 'credencial_rotada'.
+23:30:31.241 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=25): se conserva en LittleFS.
+23:30:31.241 [MQTT] Desafio de posesion respondido.
+23:30:32.067 [CAP] boot=697 seq=43 up=420 t=2026-10-28T23:30:31Z tq=sntp ds=26.38 ds_f=- sht=27.70 hr=72.27 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=16 ocup=0 heap=130452
+23:30:34.925 [Red] 19 lectura(s) con acuse logico; quedan 0.
+23:30:42.142 [CAP] boot=697 seq=44 up=430 t=2026-10-28T23:30:41Z tq=sntp ds=26.38 ds_f=- sht=27.71 hr=72.21 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=131244
+23:30:42.142 [Red] 1 lectura(s) con acuse logico; quedan 0.
+23:30:52.147 [CAP] boot=697 seq=45 up=440 t=2026-10-28T23:30:51Z tq=sntp ds=26.31 ds_f=- sht=27.73 hr=72.21 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=131244
+23:30:52.349 [Red] 1 lectura(s) con acuse logico; quedan 0.
+23:31:01.991 [CAP] boot=697 seq=46 up=450 t=2026-10-28T23:31:01Z tq=sntp ds=26.31 ds_f=- sht=27.73 hr=72.49 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=131244
+23:31:02.397 [Red] 1 lectura(s) con acuse logico; quedan 0.
+23:31:12.036 [CAP] boot=697 seq=47 up=460 t=2026-10-28T23:31:11Z tq=sntp ds=26.38 ds_f=- sht=27.71 hr=72.36 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=131244
+23:31:12.240 [Red] 1 lectura(s) con acuse logico; quedan 0.
+23:31:22.066 [CAP] boot=697 seq=48 up=470 t=2026-10-28T23:31:21Z tq=sntp ds=26.38 ds_f=- sht=27.73 hr=72.31 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=131244
+23:31:22.268 [Red] 1 lectura(s) con acuse logico; quedan 0.
+23:31:32.128 [CAP] boot=697 seq=49 up=480 t=2026-10-28T23:31:31Z tq=sntp ds=26.38 ds_f=- sht=27.76 hr=72.15 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=131244
+23:31:32.330 [Red] 1 lectura(s) con acuse logico; quedan 0.
+23:31:41.607 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:31:42.019 [CAP] boot=697 seq=50 up=490 t=2026-10-28T23:31:41Z tq=sntp ds=26.38 ds_f=- sht=27.73 hr=72.11 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=128000
+23:31:42.019 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:31:45.706 >> nvs set mqtt_relevo @relevo
+23:31:50.123 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=50): se conserva en LittleFS.
+23:31:50.124 nvs set mqtt_relevo -> OK (valor no mostrado). Reiniciar para aplicar; el token se aplica sin reiniciar.
+23:31:50.124 [Evento] Encolado 'config_modificada'.
+23:31:50.339 [Red] Token de relevo pendiente: reconexion ordenada para probarlo (HU-44).
+23:31:50.339 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:31:50.544 [MQTT] ERROR: Conexion rechazada: lastError=-10 returnCode=4.
+23:31:50.544 [MQTT] ERROR:   -> credencial invalida o revocada (HU-10/HU-44).
+23:31:50.544 [Red] Broker rechazo el token de relevo (CONNACK 4): se sigue con el vigente (HU-44).
+23:31:50.544 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:31:50.952 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:31:51.979 [CAP] boot=697 seq=51 up=500 t=2026-10-28T23:31:51Z tq=sntp ds=26.38 ds_f=- sht=27.77 hr=72.22 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=2 ocup=0 heap=130440
+23:31:59.143 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=50): se conserva en LittleFS.
+23:32:02.011 [CAP] boot=697 seq=52 up=510 t=2026-10-28T23:32:01Z tq=sntp ds=26.38 ds_f=- sht=27.74 hr=72.20 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=3 ocup=0 heap=130440
+23:32:07.097 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=50): se conserva en LittleFS.
+23:32:11.984 [CAP] boot=697 seq=53 up=520 t=2026-10-28T23:32:11Z tq=sntp ds=26.38 ds_f=- sht=27.76 hr=72.16 sht_f=- door=1 door_s=9 pwr=NA sim=0 g=OK q=4 ocup=0 heap=130440
+23:32:16.904 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=50): se conserva en LittleFS.
+23:32:16.904 [Red] ERROR: El broker no confirmo el evento 'lectura_vigente'.
+23:32:16.904 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:32:17.313 [MQTT] ERROR: Conexion rechazada: lastError=-10 returnCode=4.
+23:32:17.313 [MQTT] ERROR:   -> credencial invalida o revocada (HU-10/HU-44).
+23:32:17.313 [Red] Broker rechazo el token de relevo (CONNACK 4): se sigue con el vigente (HU-44).
+23:32:17.313 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:32:17.720 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:32:22.061 [CAP] boot=697 seq=54 up=530 t=2026-10-28T23:32:21Z tq=sntp ds=26.38 ds_f=- sht=27.81 hr=72.24 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=5 ocup=0 heap=130456
+23:32:25.728 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=50): se conserva en LittleFS.
+23:32:25.930 [MQTT] Desafio de posesion respondido.
+23:32:31.931 [CAP] boot=697 seq=55 up=540 t=2026-10-28T23:32:31Z tq=sntp ds=26.38 ds_f=- sht=27.74 hr=72.08 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=6 ocup=0 heap=130456
+23:32:33.978 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=50): se conserva en LittleFS.
+23:32:41.980 [CAP] boot=697 seq=56 up=550 t=2026-10-28T23:32:41Z tq=sntp ds=26.38 ds_f=- sht=27.70 hr=72.13 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=7 ocup=0 heap=130456
+23:32:44.013 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=50): se conserva en LittleFS.
+23:32:52.036 [CAP] boot=697 seq=57 up=560 t=2026-10-28T23:32:51Z tq=sntp ds=26.38 ds_f=- sht=27.74 hr=72.29 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=8 ocup=0 heap=130940
+23:32:52.036 [MQTT] Desafio de posesion respondido.
+23:33:01.956 [CAP] boot=697 seq=58 up=570 t=2026-10-28T23:33:01Z tq=sntp ds=26.31 ds_f=- sht=27.73 hr=72.26 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=9 ocup=0 heap=130456
+23:33:03.985 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=50): se conserva en LittleFS.
+23:33:11.978 [CAP] boot=697 seq=59 up=580 t=2026-10-28T23:33:11Z tq=sntp ds=26.38 ds_f=- sht=27.76 hr=72.27 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=10 ocup=0 heap=130940
+23:33:22.035 [CAP] boot=697 seq=60 up=590 t=2026-10-28T23:33:21Z tq=sntp ds=26.38 ds_f=- sht=27.76 hr=72.17 sht_f=- door=1 door_s=9 pwr=NA sim=0 g=OK q=11 ocup=0 heap=130940
+23:33:32.084 [CAP] boot=697 seq=61 up=600 t=2026-10-28T23:33:31Z tq=sntp ds=26.38 ds_f=- sht=27.77 hr=72.17 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=12 ocup=0 heap=130392
+23:33:32.084 [MQTT] Desafio de posesion respondido.
+23:33:41.966 [CAP] boot=697 seq=62 up=610 t=2026-10-28T23:33:41Z tq=sntp ds=26.38 ds_f=- sht=27.74 hr=72.21 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=13 ocup=0 heap=130456
+23:33:44.015 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=50): se conserva en LittleFS.
+23:33:45.684 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:33:46.105 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:33:46.105 [Evento] Encolado 'credencial_rotada'.
+23:33:52.090 [CAP] boot=697 seq=63 up=620 t=2026-10-28T23:33:51Z tq=sntp ds=26.38 ds_f=- sht=27.73 hr=72.13 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=14 ocup=0 heap=130716
+23:33:54.135 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=50): se conserva en LittleFS.
+23:33:54.136 [MQTT] Desafio de posesion respondido.
+23:33:56.400 [Red] 14 lectura(s) con acuse logico; quedan 0.
+23:34:02.135 [CAP] boot=697 seq=64 up=630 t=2026-10-28T23:34:01Z tq=sntp ds=26.38 ds_f=- sht=27.74 hr=72.16 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=131200
+23:34:02.341 [Red] 1 lectura(s) con acuse logico; quedan 0.
+23:34:11.987 [CAP] boot=697 seq=65 up=640 t=2026-10-28T23:34:11Z tq=sntp ds=26.38 ds_f=- sht=27.77 hr=72.17 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=131200
+23:34:12.392 [Red] 1 lectura(s) con acuse logico; quedan 0.
+23:34:22.014 [CAP] boot=697 seq=66 up=650 t=2026-10-28T23:34:21Z tq=sntp ds=26.38 ds_f=- sht=27.81 hr=72.11 sht_f=- door=1 door_s=9 pwr=NA sim=0 g=OK q=1 ocup=0 heap=131200
+23:34:22.218 [Red] 1 lectura(s) con acuse logico; quedan 0.
+23:34:32.014 [CAP] boot=697 seq=67 up=660 t=2026-10-28T23:34:31Z tq=sntp ds=26.38 ds_f=- sht=27.80 hr=72.03 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=131200
+23:34:32.215 [Red] 1 lectura(s) con acuse logico; quedan 0.
+23:34:42.213 [CAP] boot=697 seq=68 up=670 t=2026-10-28T23:34:41Z tq=sntp ds=26.38 ds_f=- sht=27.80 hr=72.03 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=131200
+23:34:42.213 [Red] 1 lectura(s) con acuse logico; quedan 0.
+23:34:43.426 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:34:43.831 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:34:48.934 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:34:49.353 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:34:52.050 [CAP] boot=697 seq=69 up=680 t=2026-10-28T23:34:51Z tq=sntp ds=26.38 ds_f=- sht=27.81 hr=71.99 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=172096
+23:34:54.095 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:34:54.298 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:34:54.513 [MQTT] ERROR: Sin PUBACK (lastError=-5).
+23:34:54.513 [Red] ERROR: El broker no confirmo el evento 'lectura_vigente'.
+23:34:59.431 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:34:59.833 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:35:00.049 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=69): se conserva en LittleFS.
+23:35:02.109 [CAP] boot=697 seq=70 up=690 t=2026-10-28T23:35:01Z tq=sntp ds=26.38 ds_f=- sht=27.81 hr=71.99 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=2 ocup=0 heap=172096
+23:35:04.571 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:35:04.978 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:35:04.978 [MQTT] ERROR: Sin PUBACK (lastError=-5).
+23:35:04.978 [Red] ERROR: El broker no confirmo el evento 'lectura_vigente'.
+23:35:08.659 >> estado
+23:35:09.174 
+23:35:09.174 == ThermoTrace Edge v1.2.0 ==
+23:35:09.174 device_id=ESP32_FARMACIA_01 boot_id=697 seq_no=70 uptime=697s intervalo=10s
+23:35:09.174 wifi=OK rssi=-52 dBm intentos_fallidos=0 retardo=1000ms diag=0 | mqtt=NO ca=1 aprov=1 cert_cliente=0
+23:35:09.174 flash_cifrada=0 arranque_seguro=0
+23:35:09.174 reloj=sntp_synced | buffer: pendientes=2/30000 ocupacion=0% libres=1444KB cuarentena=0
+23:35:09.174 perdidas: total=0 episodio=0 abierto=0 | energia=sin_sensado | heap=172136 (min 120956)
+23:35:09.593 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:35:10.011 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:35:10.011 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=69): se conserva en LittleFS.
+23:35:12.088 [CAP] boot=697 seq=71 up=700 t=2026-10-28T23:35:11Z tq=sntp ds=26.38 ds_f=- sht=27.83 hr=71.94 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=3 ocup=0 heap=172096
+23:35:14.558 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:35:14.978 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:35:14.978 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=69): se conserva en LittleFS.
+23:35:14.978 [Red] ERROR: El broker no confirmo el evento 'lectura_vigente'.
+23:35:19.666 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:35:19.869 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:35:20.085 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=69): se conserva en LittleFS.
+23:35:22.113 [CAP] boot=697 seq=72 up=710 t=2026-10-28T23:35:21Z tq=sntp ds=26.38 ds_f=- sht=27.87 hr=71.85 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=4 ocup=0 heap=171804
+23:35:24.557 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:35:24.966 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:35:24.966 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=69): se conserva en LittleFS.
+23:35:24.966 [Red] ERROR: El broker no confirmo el evento 'lectura_vigente'.
+23:35:29.690 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:35:29.893 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:35:30.095 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=69): se conserva en LittleFS.
+23:35:31.935 [CAP] boot=697 seq=73 up=720 t=2026-10-28T23:35:31Z tq=sntp ds=26.38 ds_f=- sht=27.87 hr=71.88 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=5 ocup=0 heap=171804
+23:35:34.998 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:35:35.403 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:35:35.607 [MQTT] ERROR: Sin PUBACK (lastError=-5).
+23:35:35.608 [Red] ERROR: El broker no confirmo el evento 'lectura_vigente'.
+23:35:40.507 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:35:40.912 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:35:41.114 [MQTT] ERROR: Sin PUBACK (lastError=-5).
+23:35:41.925 [CAP] boot=697 seq=74 up=730 t=2026-10-28T23:35:41Z tq=sntp ds=26.38 ds_f=- sht=27.85 hr=71.87 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=6 ocup=0 heap=171804
+23:35:45.605 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:35:46.010 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:35:46.010 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=69): se conserva en LittleFS.
+23:35:46.010 [Red] ERROR: El broker no confirmo el evento 'lectura_vigente'.
+23:35:50.539 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:35:50.944 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:35:50.944 [MQTT] ERROR: Sin PUBACK (lastError=-5).
+23:35:51.959 [CAP] boot=697 seq=75 up=740 t=2026-10-28T23:35:51Z tq=sntp ds=26.38 ds_f=- sht=27.90 hr=71.85 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=7 ocup=0 heap=171804
+23:35:56.044 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:35:56.448 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:35:56.448 [MQTT] ERROR: Sin PUBACK (lastError=-5).
+23:35:56.448 [Red] ERROR: El broker no confirmo el evento 'lectura_vigente'.
+23:36:01.144 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:36:01.552 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:36:01.552 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=69): se conserva en LittleFS.
+23:36:01.969 [CAP] boot=697 seq=76 up=750 t=2026-10-28T23:36:01Z tq=sntp ds=26.38 ds_f=- sht=27.91 hr=71.77 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=8 ocup=0 heap=171804
+23:36:06.066 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:36:06.469 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:36:06.469 [Tx] ERROR: PUBACK si, acuse logico no (boot=697 seq=69): se conserva en LittleFS.
+23:36:06.469 [Red] ERROR: El broker no confirmo el evento 'lectura_vigente'.
+23:36:11.168 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:36:11.588 [MQTT] ERROR: Conexion rechazada: lastError=-10 returnCode=5.
+23:36:11.588 [MQTT] ERROR:   -> credencial invalida o revocada (HU-10/HU-44).
+23:36:12.007 [CAP] boot=697 seq=77 up=760 t=2026-10-28T23:36:11Z tq=sntp ds=26.38 ds_f=- sht=27.91 hr=71.88 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=9 ocup=0 heap=171804
+23:36:21.625 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:36:21.830 [MQTT] ERROR: Conexion rechazada: lastError=-10 returnCode=5.
+23:36:21.830 [MQTT] ERROR:   -> credencial invalida o revocada (HU-10/HU-44).
+23:36:22.034 [CAP] boot=697 seq=78 up=770 t=2026-10-28T23:36:21Z tq=sntp ds=26.38 ds_f=- sht=27.90 hr=71.83 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=10 ocup=0 heap=171804
+23:36:32.075 [CAP] boot=697 seq=79 up=780 t=2026-10-28T23:36:31Z tq=sntp ds=26.38 ds_f=- sht=27.91 hr=71.86 sht_f=- door=1 door_s=9 pwr=NA sim=0 g=OK q=11 ocup=0 heap=171804
+23:36:41.495 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:36:41.915 [MQTT] ERROR: Conexion rechazada: lastError=-10 returnCode=5.
+23:36:42.119 [MQTT] ERROR:   -> credencial invalida o revocada (HU-10/HU-44).
+23:36:42.119 [CAP] boot=697 seq=80 up=790 t=2026-10-28T23:36:41Z tq=sntp ds=26.38 ds_f=- sht=27.94 hr=71.79 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=12 ocup=0 heap=171804
+23:36:51.928 [CAP] boot=697 seq=81 up=800 t=2026-10-28T23:36:51Z tq=sntp ds=26.31 ds_f=- sht=27.90 hr=71.78 sht_f=- door=1 door_s=9 pwr=NA sim=0 g=OK q=13 ocup=0 heap=171804
+23:37:02.107 [CAP] boot=697 seq=82 up=810 t=2026-10-28T23:37:01Z tq=sntp ds=26.38 ds_f=- sht=27.88 hr=71.79 sht_f=- door=1 door_s=9 pwr=NA sim=0 g=OK q=14 ocup=0 heap=171804
+23:37:11.941 [CAP] boot=697 seq=83 up=820 t=2026-10-28T23:37:11Z tq=sntp ds=26.31 ds_f=- sht=27.87 hr=71.88 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=15 ocup=0 heap=171804
+23:37:16.880 >> nvs set mqtt_token @token
+23:37:17.397 nvs set mqtt_token -> OK (valor no mostrado). Reiniciar para aplicar; el token se aplica sin reiniciar.
+23:37:17.397 [Evento] Encolado 'config_modificada'.
+23:37:17.397 [Red] Token MQTT rotado en NVS: reconexion ordenada sin reiniciar (HU-44).
+23:37:17.397 [Evento] Encolado 'credencial_rotada'.
+23:37:17.397 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:37:17.612 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+23:37:20.681 [Red] 15 lectura(s) con acuse logico; quedan 0.
+23:37:22.109 [CAP] boot=697 seq=84 up=830 t=2026-10-28T23:37:21Z tq=sntp ds=26.38 ds_f=- sht=27.85 hr=71.96 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=131176
+23:37:22.311 [Red] 1 lectura(s) con acuse logico; quedan 0.
+23:37:31.914 [CAP] boot=697 seq=85 up=840 t=2026-10-28T23:37:31Z tq=sntp ds=26.38 ds_f=- sht=27.87 hr=71.96 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=131176
+23:37:32.117 [Red] 1 lectura(s) con acuse logico; quedan 0.
+23:37:41.933 [CAP] boot=697 seq=86 up=850 t=2026-10-28T23:37:41Z tq=sntp ds=26.38 ds_f=- sht=27.91 hr=71.83 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=131176
+23:37:42.137 [Red] 1 lectura(s) con acuse logico; quedan 0.
+23:37:51.958 [CAP] boot=697 seq=87 up=860 t=2026-10-28T23:37:51Z tq=sntp ds=26.38 ds_f=- sht=27.91 hr=71.81 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=131176
+23:37:52.163 [Red] 1 lectura(s) con acuse logico; quedan 0.
+23:38:01.986 [CAP] boot=697 seq=88 up=870 t=2026-10-28T23:38:01Z tq=sntp ds=26.38 ds_f=- sht=27.90 hr=71.80 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=131176
+23:38:02.189 [Red] 1 lectura(s) con acuse logico; quedan 0.
+23:38:12.003 [CAP] boot=697 seq=89 up=880 t=2026-10-28T23:38:11Z tq=sntp ds=26.38 ds_f=- sht=27.93 hr=71.82 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=131176
+23:38:12.204 [Red] 1 lectura(s) con acuse logico; quedan 0.
+23:38:22.057 [CAP] boot=697 seq=90 up=890 t=2026-10-28T23:38:21Z tq=sntp ds=26.38 ds_f=- sht=27.91 hr=71.78 sht_f=- door=1 door_s=10 pwr=NA sim=0 g=OK q=1 ocup=0 heap=131176
+23:38:22.262 [Red] 1 lectura(s) con acuse logico; quedan 0.
+23:38:22.871 >> estado
+23:38:23.173 >> nvs set device_id ESP32_BANCO_01
+23:38:23.474 >> nvs set mqtt_token @banco
+23:38:23.777 >> reiniciar
+23:38:24.292 
+23:38:24.292 == ThermoTrace Edge v1.2.0 ==
+23:38:24.292 device_id=ESP32_FARMACIA_01 boot_id=697 seq_no=90 uptime=891s intervalo=10s
+23:38:24.292 wifi=OK rssi=-48 dBm intentos_fallidos=0 retardo=1000ms diag=0 | mqtt=OK ca=1 aprov=1 cert_cliente=0
+23:38:24.292 flash_cifrada=0 arranque_seguro=0
+23:38:24.292 reloj=sntp_synced | buffer: pendientes=0/30000 ocupacion=0% libres=1444KB cuarentena=0
+23:38:24.292 perdidas: total=0 episodio=0 abierto=0 | energia=sin_sensado | heap=131224 (min 120956)
+23:38:24.292 nvs set device_id -> OK (valor no mostrado). Reiniciar para aplicar.
+23:38:24.292 [Evento] Encolado 'config_modificada'.
+23:38:24.292 nvs set mqtt_token -> OK (valor no mostrado). Reiniciar para aplicar; el token se aplica sin reiniciar.
+23:38:24.292 [Evento] Encolado 'config_modificada'.
+23:38:24.292 [Red] Token MQTT rotado en NVS: reconexion ordenada sin reiniciar (HU-44).
+23:38:24.292 [Evento] Encolado 'credencial_rotada'.
+23:38:24.292 [MQTT] Conectando a 192.168.18.21:8883 como 'ESP32_FARMACIA_01'...
+23:38:24.292 [MQTT] ERROR: Conexion rechazada: lastError=-10 returnCode=4.
+23:38:24.292 [MQTT] ERROR:   -> credencial invalida o revocada (HU-10/HU-44).
+23:38:24.494 Reiniciando (DISCONNECT ordenado)...
+23:38:24.697 ets Jul 29 2019 12:21:46
+23:38:24.697 
+23:38:24.697 rst:0xc (SW_CPU_RESET),boot:0x17 (SPI_FAST_FLASH_BOOT)
+23:38:24.697 configsip: 0, SPIWP:0xee
+23:38:24.697 clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+23:38:24.697 mode:DIO, clock div:2
+23:38:24.901 load:0x3fff0030,len:4640
+23:38:24.901 load:0x40078000,len:15632
+23:38:24.901 load:0x40080400,len:3164
+23:38:24.901 entry 0x4008059c
+23:38:25.309 E (474) esp_core_dump_flash: No c��V dump partition found!
+23:38:25.309 E (474) esp_core_dump_flash: No core dump partition found!
+23:38:25.512 [WDT] Task watchdog a 30 s.

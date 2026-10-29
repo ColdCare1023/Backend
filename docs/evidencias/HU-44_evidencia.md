@@ -1,6 +1,7 @@
 # Evidencia — HU-44: rotación y revocación de credenciales del nodo
 
-**Estado: verificado en pila local, modo manual simulado. Pendiente: EMQX Cloud Serverless real.**
+**Estado: verificado en pila local, modo manual simulado (pruebas A a G, 28/10/2026; F con un defecto
+abierto). Pendiente: EMQX Cloud Serverless real.**
 Todavía no cuenta como «verificada» (DoD): falta la prueba H.
 
 Diseño y criterio: `docs/operacion/HU-44_rotacion_y_revocacion.md`. Firmware: IoT ADR-17.
@@ -76,7 +77,39 @@ reemplazan el banco.
 
 Suite completa: **1041** pruebas del backend y **131** nativas del firmware.
 
-## Pruebas de banco que faltan (pila local)
+## Pruebas de banco A a G (28/10/2026, pila local)
+
+Backend `62082c9` en modo manual, firmware `esp32dev` `0fb14e8`, EMQX 5.8.6,
+`ESP32_FARMACIA_01` arranque 697. Registro completo (logs serie, bitácora,
+EMQX y consultas): IoT `docs/evidencias/HU-44_banco_A-G_evidencia.md`. Anexos:
+`docs/evidencias/logs/2026-10-28_hu44_banco_serie.log` (log serie, tokens
+sustituidos) y `docs/evidencias/logs/2026-10-28_hu44_banco_bitacora.csv`.
+
+| Prueba | Resultado | Dato medido |
+|---|---|---|
+| **A** | PASS | Relevo rechazado con CONNACK 4; al confirmar, el nodo entra con el relevo en 0,45 s (`CREDENCIAL_ROTADA origen: relevo`) |
+| **B'** | PASS | Prueba de posesión verificada **8,6 s** después de confirmar; 19/19 lecturas retenidas (`seq_no` 25–43) con su hora de captura; `monitoreo_suspendido` 181,7 s y sin SIN_DATOS |
+| **C** | PASS (sin correo: SMTP no configurado) | `excursion_no_verificada` con `captura_a_alerta_s = 1.0`; un episodio por ventana |
+| **D** | PASS | En la ventana: CONNACK 0 y PUBACK, sin acuse lógico, 0 lecturas persistidas, expulsión mutua. Tras la consola: CONNACK 134 |
+| **E** | PASS | `PRUEBA_POSESION_FALLIDA firma_invalida`, una fila por minuto; tras cambiar la consola, «Reenviar desafío» verifica en 8,6 s; 14/14 lecturas |
+| **F** | **PASS con defecto** | El broker corta al nodo (CONNACK 5 tras borrar el usuario), pero el nodo **no recibe** el acuse `rejected`: el backend expulsa la sesión antes de publicarlo. Bucle de reconexión cada 5 s: 35 `EVENTO_CREDENCIAL_REVOCADA` y 10 `LECTURA_RECHAZADA_CREDENCIAL_REVOCADA` en 83 s, sin limitador |
+| **G** | PASS | `bad_username_or_password` (CONNACK 134) y `authorization_permission_denied` en `farmacias/FARM-02-TEST/lecturas`; 0 lecturas de FARM-02-TEST |
+
+Arranque 697 completo: 90/90 lecturas (`seq_no` 1–90), sin huecos ni
+duplicados.
+
+Defectos abiertos:
+
+1. `main.py`, rama `DispositivoNoAutorizadoError`: publicar el acuse
+   `dispositivo_no_autorizado` **antes** de `_expulsar_sesion_revocada`,
+   expulsar una sola vez y limitar sus filas de auditoría con `LIMITE_AUDITORIA`.
+   Repetir F después.
+2. `scripts/pruebas_hu44_banco.py`: el login va como JSON (422; la API espera
+   formulario OAuth2), falta `WindowsSelectorEventLoopPolicy` para aiomqtt en
+   Windows, la salida falla con cp1252 («→», «…») y `confirmar` repite las filas
+   en cada consulta.
+
+## Plan de las pruebas de banco (pila local)
 
 El script `scripts/pruebas_hu44_banco.py` ejecuta los pasos que no hace el
 nodo y deja la hora de cada resultado:
@@ -90,8 +123,8 @@ nodo y deja la hora de cada resultado:
 | `informe` | Bitácora en CSV para `docs/evidencias/logs/` |
 
 Los tokens se leen de variables de entorno, nunca de los argumentos. El script
-todavía no se ha ejecutado contra la pila; sus pruebas unitarias solo comprueban
-que la telemetría que publica cumple el contrato v1.0.
+se ejecutó contra la pila el 28/10/2026 (resultados arriba), con los arreglos
+locales del defecto 2.
 
 Para cada prueba se registra lo siguiente:
 
