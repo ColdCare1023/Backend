@@ -138,6 +138,15 @@ expulsión se auditan con `motivo` = `reconexion_por_rotacion`,
 `reconexion_por_confirmacion_consola`, `reconexion_por_reenvio_desafio` o
 `expulsion_por_revocacion`, y así no se confunden con una caída del nodo.
 
+> **Durante una retención por compromiso** el LWT y el `online` quedan
+> retenidos (no alteran el estado del nodo y solo se auditan con tope, como
+> `EVENTO_RETENIDO_ROTACION_COMPROMISO`). Por eso, en esos flujos no aparecen
+> las etiquetas `reconexion_por_confirmacion_consola` ni
+> `reconexion_por_reenvio_desafio`: la expulsión sí se anota, pero no llega a
+> auditarse un `DISPOSITIVO_OFFLINE`/`DISPOSITIVO_ONLINE` que la lleve. Que no
+> estén no indica un fallo; el cierre de la retención se ve en
+> `CREDENCIAL_POSESION_VERIFICADA`.
+
 ## Límites conocidos
 
 - **Expulsión mutua.** Mientras el broker acepte el token filtrado, el nodo y
