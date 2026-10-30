@@ -160,7 +160,8 @@ async def _api() -> httpx.AsyncClient:
     base = _entorno("BANCO_API_URL", obligatorio=False) or "http://localhost:8000"
     cliente = httpx.AsyncClient(base_url=base, timeout=20)
     respuesta = await cliente.post(
-        "/api/auth/login", json={"email": _entorno("BANCO_ADMIN_EMAIL"), "password": _entorno("BANCO_ADMIN_PASSWORD")}
+        "/api/auth/login",
+        data={"username": _entorno("BANCO_ADMIN_EMAIL"), "password": _entorno("BANCO_ADMIN_PASSWORD")},
     )
     respuesta.raise_for_status()
     cliente.headers["Authorization"] = f"Bearer {respuesta.json()['access_token']}"
@@ -180,12 +181,17 @@ async def confirmar(args: argparse.Namespace) -> None:
     api = await _api()
     inicio = datetime.now(timezone.utc)
     marca = time.monotonic()
+    vistas: set[str] = set()  # la consulta devuelve todo desde `inicio`: no repetir filas ya mostradas
     respuesta = await api.post(f"/api/dispositivos/{args.device_id}/broker/confirmar", json={"nota": args.nota})
     _log("B'/E", f"Confirmar consola → HTTP {respuesta.status_code}; posesion_pendiente="
                  f"{respuesta.json().get('posesion_pendiente') if respuesta.is_success else '—'}")
     while time.monotonic() - marca < args.espera:
         filas = await _auditoria(api, inicio.isoformat())
         for fila in filas:
+            clave = json.dumps(fila, sort_keys=True, default=str)
+            if clave in vistas:
+                continue
+            vistas.add(clave)
             if fila["accion"] in ("CREDENCIAL_POSESION_VERIFICADA", "PRUEBA_POSESION_FALLIDA"):
                 tardanza = (datetime.fromisoformat(fila["created_at"]) - inicio).total_seconds()
                 _log("B'/E", f"{fila['accion']} {json.dumps(fila['detalle'])} a {tardanza:.1f} s de confirmar.")
@@ -232,6 +238,13 @@ async def informe(args: argparse.Namespace) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Consolas cp1252 (Windows): los textos llevan «→» y «…».
+    for flujo in (sys.stdout, sys.stderr):
+        if hasattr(flujo, "reconfigure"):
+            flujo.reconfigure(encoding="utf-8", errors="replace")
+    # aiomqtt (paho) necesita add_reader, que el ProactorEventLoop de Windows no tiene.
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="prueba", required=True)
     p = sub.add_parser("atacante")

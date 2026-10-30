@@ -27,9 +27,11 @@ class _Espia:
     def __init__(self) -> None:
         self.acuses: list[dict] = []
         self.expulsados: list[str] = []
+        self.orden: list[str] = []
 
     async def publish(self, topic, payload=None, qos=0, **_kwargs):
         self.acuses.append(json.loads(payload))
+        self.orden.append("acuse")
 
     async def aprovisionar_credencial(self, device_id: str, token: str):
         return None  # modo manual: el usuario se crea a mano en la consola
@@ -39,6 +41,7 @@ class _Espia:
 
     async def desconectar_cliente(self, client_id: str) -> bool:
         self.expulsados.append(client_id)
+        self.orden.append("expulsion")
         return True
 
 
@@ -121,7 +124,24 @@ async def test_lectura_con_credencial_revocada_no_se_persiste_y_se_audita(
     assert espia.acuses[-1]["estado"] == "dispositivo_no_autorizado"
     assert await _lecturas(db_session_factory) == []
     assert "LECTURA_RECHAZADA_CREDENCIAL_REVOCADA" in await _acciones(db_session_factory)
-    assert espia.expulsados[-1] == DEVICE_ID  # cada intento expulsa la sesión
+    assert espia.expulsados[-1] == DEVICE_ID
+
+
+async def test_revocada_publica_el_acuse_antes_de_expulsar_y_expulsa_una_vez(
+    client, token_admin, espia, db_session_factory
+):
+    _alta_y_rotacion(client, token_admin)
+    _revocar(client, token_admin)
+    espia.orden.clear()
+
+    for n in range(3):
+        await main._procesar_lectura_mqtt(_Mensaje("lecturas", _telemetria(f"r{n}")), _Broadcaster(), espia)
+
+    # El acuse sale antes de la expulsión (que se lo llevaría) y en cada intento;
+    # la expulsión, una sola vez por ventana.
+    assert espia.orden == ["acuse", "expulsion", "acuse", "acuse"]
+    filas = [a for a in await _acciones(db_session_factory) if a == "LECTURA_RECHAZADA_CREDENCIAL_REVOCADA"]
+    assert len(filas) == 1  # tope de auditoría: el resto solo se cuenta
 
 
 async def test_evento_con_credencial_revocada_no_altera_el_estado(client, token_admin, espia, db_session_factory):

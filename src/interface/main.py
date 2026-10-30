@@ -197,11 +197,22 @@ def _payload_en_conflicto(existente, nueva) -> bool:
     )
 
 
+# Última expulsión por dispositivo: se expulsa una vez por ventana, no con cada
+# lectura (cada DELETE al broker es una llamada HTTP y el nodo reconecta).
+_EXPULSIONES_REVOCADAS: dict[str, float] = {}
+_VENTANA_EXPULSION_REVOCADA = 60.0
+
+
 async def _expulsar_sesion_revocada(device_id: str) -> None:
-    """HU-44: un nodo con credencial revocada que sigue publicando se expulsa en
-    cada intento. Es el mismo efecto de `DELETE /clients/{id}` que al revocar, y
+    """HU-44: un nodo con credencial revocada que sigue publicando se expulsa una
+    vez por ventana, no en cada intento. Es el mismo efecto de `DELETE /clients/{id}` que al revocar, y
     cubre la ventana en que el usuario sigue vivo en el broker (EMQX Serverless:
     se retira a mano en la consola)."""
+    ahora = time.monotonic()
+    ultima = _EXPULSIONES_REVOCADAS.get(device_id)
+    if ultima is not None and ahora - ultima < _VENTANA_EXPULSION_REVOCADA:
+        return
+    _EXPULSIONES_REVOCADAS[device_id] = ahora
     if await BrokerAdmin(get_settings()).desconectar_cliente(device_id) is False:
         logger.warning("No se pudo expulsar la sesión del dispositivo con credencial revocada: %s", device_id)
 
@@ -472,14 +483,17 @@ async def _procesar_evento_v1(
             return
         if await credencial_revocada(device_repository, evento.device_id):
             # HU-44: credencial revocada: el evento no altera el estado del nodo.
-            await auditoria.execute(
-                usuario_id=None,
-                accion="EVENTO_CREDENCIAL_REVOCADA",
-                recurso="mqtt/eventos",
-                detalle={"device_id": evento.device_id, "tipo_evento": evento.event_type},
-                ip_origen=None,
-            )
-            await session.commit()
+            suprimidos = LIMITE_AUDITORIA.permitir("evento_revocado", evento.device_id)
+            if suprimidos is not None:
+                await auditoria.execute(
+                    usuario_id=None,
+                    accion="EVENTO_CREDENCIAL_REVOCADA",
+                    recurso="mqtt/eventos",
+                    detalle={"device_id": evento.device_id, "tipo_evento": evento.event_type,
+                             "suprimidos_desde_anterior": suprimidos},
+                    ip_origen=None,
+                )
+                await session.commit()
             await _expulsar_sesion_revocada(evento.device_id)
             return
 
@@ -628,14 +642,17 @@ async def _procesar_evento_mqtt(
             return
         if await credencial_revocada(device_repository, evento.device_id):
             # HU-44: credencial revocada: el evento no altera el estado del nodo.
-            await auditoria.execute(
-                usuario_id=None,
-                accion="EVENTO_CREDENCIAL_REVOCADA",
-                recurso="mqtt/eventos",
-                detalle={"device_id": evento.device_id, "tipo_evento": evento.tipo_evento.value},
-                ip_origen=None,
-            )
-            await session.commit()
+            suprimidos = LIMITE_AUDITORIA.permitir("evento_revocado", evento.device_id)
+            if suprimidos is not None:
+                await auditoria.execute(
+                    usuario_id=None,
+                    accion="EVENTO_CREDENCIAL_REVOCADA",
+                    recurso="mqtt/eventos",
+                    detalle={"device_id": evento.device_id, "tipo_evento": evento.tipo_evento.value,
+                             "suprimidos_desde_anterior": suprimidos},
+                    ip_origen=None,
+                )
+                await session.commit()
             logger.warning("Evento de dispositivo con credencial revocada: %s", evento.device_id)
             await _expulsar_sesion_revocada(evento.device_id)
             return
@@ -978,28 +995,33 @@ async def _procesar_lectura_mqtt(
             return
         except DispositivoNoAutorizadoError as exc:
             revocada = isinstance(exc, CredencialRevocadaError)
-            auditoria = AuditarAccionCriticaUseCase(
-                SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
-            )
-            await auditoria.execute(
-                usuario_id=None,
-                accion="LECTURA_RECHAZADA_CREDENCIAL_REVOCADA" if revocada else "DISPOSITIVO_RECHAZADO",
-                recurso="mqtt/lecturas",
-                detalle={"device_id": payload.device_id},
-                ip_origen=None,
-            )
-            await session.commit()
+            # Revocada: tope de filas como en la retención; sin él cada reintento
+            # del nodo encadena una fila nueva sin límite.
+            suprimidos = LIMITE_AUDITORIA.permitir("lectura_revocada", payload.device_id) if revocada else 0
+            if suprimidos is not None:
+                await AuditarAccionCriticaUseCase(
+                    SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+                ).execute(
+                    usuario_id=None,
+                    accion="LECTURA_RECHAZADA_CREDENCIAL_REVOCADA" if revocada else "DISPOSITIVO_RECHAZADO",
+                    recurso="mqtt/lecturas",
+                    detalle={"device_id": payload.device_id}
+                    | ({"suprimidos_desde_anterior": suprimidos} if revocada else {}),
+                    ip_origen=None,
+                )
+                await session.commit()
             logger.warning("Dispositivo no autorizado rechazado: %s (%s)", payload.device_id, exc)
-            if revocada:
-                await _expulsar_sesion_revocada(payload.device_id)
             # HU-07: rechazo PERMANENTE ya auditado — sin acuse, el firmware
             # reintentaría este bloque para siempre y bloquearía toda la cola
-            # FIFO detrás de él.
+            # FIFO detrás de él. HU-44: el acuse sale ANTES de expulsar la
+            # sesión; si no, la desconexión se lo lleva y el nodo reintenta.
             await _publicar_ack_lectura(
                 client, payload.device_id, payload.reading_id, payload.timestamp,
                 estado="dispositivo_no_autorizado", boot_id=payload.boot_id, seq_no=payload.seq_no,
                 contenido=message.payload,
             )
+            if revocada:
+                await _expulsar_sesion_revocada(payload.device_id)
             return
         except LecturaInvalidaError as exc:
             # El caso de uso ya dejó el motivo del rechazo en audit_logs (p. ej.

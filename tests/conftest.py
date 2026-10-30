@@ -54,6 +54,7 @@ def _estado_en_memoria_hu44():
     memoria del proceso; cada prueba empieza sin ellos."""
     LIMITE_AUDITORIA.reiniciar()
     interfaz_main._DESAFIOS_ENVIADOS.clear()
+    interfaz_main._EXPULSIONES_REVOCADAS.clear()
     yield
 
 
