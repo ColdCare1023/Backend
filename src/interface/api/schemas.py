@@ -255,6 +255,16 @@ class AlertaResponse(BaseModel):
     estado: str = "pendiente"
     reconocida_en: datetime | None = None
     atendida_en: datetime | None = None
+    # Aviso por correo: `notificada_en` se llena solo con un envío exitoso;
+    # `notificacion_intentos` cuenta los intentos (fallidos incluidos).
+    notificada_en: datetime | None = None
+    notificacion_intentos: int = 0
+    # Evidencia de la excursión: inicio (hora de captura), pico, duración y si
+    # se detectó con lecturas diferidas del buffer del nodo.
+    iniciada_en: datetime | None = None
+    temperatura_pico: float | None = None
+    duracion_s: float | None = None
+    historica: bool = False
 
 
 class AccionCorrectivaCreateRequest(_PeticionEstricta):

@@ -132,6 +132,14 @@ class ServicioPrediccionPreventiva:
             raise RuntimeError("El modelo no es el clasificador binario normal(0)/riesgo_preventivo(1)")
         return modelo, manifiesto, config
 
+    def motivo_rechazo(self) -> str | None:
+        """Por qué el modelo habilitado no se cargó (hash que no coincide,
+        estado no admitido...), o None si cargó o el modo es desactivado."""
+        if not self.habilitado:
+            return None
+        self._cargar()
+        return None if self._modelo is not None else self._motivo_no_disponible
+
     @property
     def disponible(self) -> bool:
         self._cargar()

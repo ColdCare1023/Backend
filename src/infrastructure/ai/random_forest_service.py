@@ -191,6 +191,15 @@ class RandomForestRiesgoService:
                     self._metadata = metadata
         return self._modelo
 
+    def motivo_rechazo(self) -> str | None:
+        """Carga el modelo y devuelve por qué se rechazó (p. ej. checksum
+        inválido), o None si carga bien o no hay artefacto en este entorno."""
+        try:
+            self._cargar_modelo()
+        except Exception as exc:
+            return str(exc)[:200]
+        return None
+
     @property
     def modelo_disponible(self) -> bool:
         return self._cargar_modelo() is not None

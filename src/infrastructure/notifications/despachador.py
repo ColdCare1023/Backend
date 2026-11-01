@@ -402,7 +402,7 @@ class DespachadorNotificaciones:
                     telefono_destino=telefono,
                     origen_no_verificado=True,
                 )
-            elif aviso.tipo == "monitoreo_suspendido":
+            elif aviso.tipo in ("monitoreo_suspendido", "sensor_fault", "colision_clave"):
                 return  # solo correo: no es una excursión ni un silencio del nodo
             else:
                 resultado = await self._canales_opcionales.notificar_sin_datos(

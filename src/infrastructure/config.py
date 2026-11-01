@@ -174,7 +174,9 @@ class Settings(BaseSettings):
     smtp_enabled: bool = False
     smtp_host: str = ""
     smtp_port: int = 465
-    smtp_seguridad: Literal["ssl", "starttls"] = "ssl"
+    # `ninguna` (SMTP en claro, sin login) solo para Mailpit/servidores de prueba:
+    # se rechaza con ENVIRONMENT=production.
+    smtp_seguridad: Literal["ssl", "starttls", "ninguna"] = "ssl"
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from: str = ""
@@ -246,6 +248,17 @@ class Settings(BaseSettings):
     #   desactivado: no se ejecuta; solo regla de rango y salvaguarda.
     #   activo: comportamiento anterior (su clase abre alertas preventivas).
     ia_legado_modo: Literal["experimental", "desactivado", "activo"] = "experimental"
+    # La alerta crítica (regla 2-8 °C) nunca espera a la IA: clasificar y predecir
+    # corren en un hilo con este tope. Si vence, la lectura queda con
+    # estado_inferencia=fallida y sigue la regla determinista.
+    ia_inferencia_timeout_s: float = Field(default=1.0, gt=0)
+    # SOLO PRUEBAS: simulan una inferencia lenta o que lanza una excepción
+    # (casos RIE-01, RIE-03, LAT-02). El arranque se niega con ENVIRONMENT=production.
+    ia_prueba_retardo_s: float = Field(default=0.0, ge=0)
+    ia_prueba_excepcion: bool = False
+    # SOLO PRUEBAS (MQT-01): falla justo ANTES del COMMIT de una lectura. `excepcion`
+    # lanza un error; `salir` mata el proceso sin cierre ordenado (os._exit).
+    mqtt_prueba_fallo_antes_commit: Literal["", "excepcion", "salir"] = ""
     # HU-46: criterio que debe cumplir una versión para activarse (decisión con
     # el asesor). `por_incidente`: sensibilidad por incidente, IC95, falsas
     # alarmas/día y anticipación; `f1`: F1 macro ≥ 0,85. Ambos se reportan.
@@ -299,6 +312,26 @@ class Settings(BaseSettings):
                 ClaveJWTDebilWarning,
                 stacklevel=2,
             )
+        return self
+
+    @model_validator(mode="after")
+    def _rechazar_opciones_de_prueba_en_produccion(self) -> "Settings":
+        """Las opciones de inyección de fallos existen solo para el banco de pruebas."""
+        if self.environment == "production":
+            activas = [
+                nombre
+                for nombre, valor in (
+                    ("IA_PRUEBA_RETARDO_S", self.ia_prueba_retardo_s > 0),
+                    ("IA_PRUEBA_EXCEPCION", self.ia_prueba_excepcion),
+                    ("MQTT_PRUEBA_FALLO_ANTES_COMMIT", bool(self.mqtt_prueba_fallo_antes_commit)),
+                    ("SMTP_SEGURIDAD=ninguna", self.smtp_seguridad == "ninguna"),
+                )
+                if valor
+            ]
+            if activas:
+                raise ValueError(
+                    f"{', '.join(activas)} inyecta fallos y no puede activarse con ENVIRONMENT=production."
+                )
         return self
 
     @model_validator(mode="after")

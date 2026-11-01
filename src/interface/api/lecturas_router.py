@@ -67,6 +67,9 @@ async def ingestar_lectura(
         ventana_normalizacion_alerta_minutos=settings.alerta_ventana_normalizacion_minutos,
         antiguedad_maxima_horas=settings.lectura_antiguedad_max_horas,
         ia_legado_modo=settings.ia_legado_modo,
+        ia_timeout_s=settings.ia_inferencia_timeout_s,
+        ia_prueba_retardo_s=settings.ia_prueba_retardo_s,
+        ia_prueba_excepcion=settings.ia_prueba_excepcion,
     )
     lectura = LecturaTermica(
         device_id=body.device_id,

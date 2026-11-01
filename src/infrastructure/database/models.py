@@ -360,6 +360,11 @@ class ThermalAlertModel(Base):
     # HU-53: deduplicación persistente del aviso por correo (migración 0027).
     notificada_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notificacion_intentos: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # Migración 0035: evidencia de la excursión (inicio por hora de captura,
+    # temperatura más alejada de 2-8 °C, episodio detectado con lecturas diferidas).
+    iniciada_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    temperatura_pico: Mapped[float | None] = mapped_column(Float, nullable=True)
+    historica: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa_text("false"))
     created_at: Mapped[datetime] = _created_at_column()
 
     lectura: Mapped[ThermalReadingModel] = relationship(back_populates="alertas", foreign_keys=[reading_id])

@@ -8,6 +8,12 @@ TIPO_SIN_DATOS = "sin_datos"
 # suspendido) o una lectura retenida salió de 2-8 °C con origen no verificado.
 TIPO_MONITOREO_SUSPENDIDO = "monitoreo_suspendido"
 TIPO_EXCURSION_NO_VERIFICADA = "excursion_no_verificada"
+# El DS18B20 falla en lecturas seguidas: sin temperatura interior no se sabe si
+# el refrigerador está en rango. El SHT31 no lo abre (es la sonda ambiental).
+TIPO_SENSOR_FAULT = "sensor_fault"
+# Misma identidad de lectura (boot_id, seq_no) con contenido distinto: dos
+# nodos con la misma clave, o un nodo reiniciado sin contador.
+TIPO_COLISION_CLAVE = "colision_clave"
 
 
 @dataclass(slots=True)

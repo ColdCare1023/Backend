@@ -82,6 +82,19 @@ class GenerarAlertaUseCase:
         self._alerta_repository = alerta_repository
         self._ventana_normalizacion_minutos = ventana_normalizacion_minutos
         self.avisos_pendientes: list[AvisoExcursion] = []
+        # Episodios que este caso de uso cerró: quien orquesta deja el evento
+        # ALERTA_CERRADA en la cadena (el cierre no devuelve la alerta).
+        self.cierres: list[AlertaTermica] = []
+
+    @staticmethod
+    def _es_diferida(timestamp: datetime, received_at: datetime | None) -> bool:
+        """Lectura que llegó más de RETRASO_LECTURA_DIFERIDA después de capturada."""
+        return received_at is not None and _a_utc(received_at) - _a_utc(timestamp) > RETRASO_LECTURA_DIFERIDA
+
+    async def _cerrar(self, episodio: AlertaTermica, timestamp: datetime) -> None:
+        episodio.cerrar(timestamp)
+        await self._alerta_repository.actualizar(episodio)
+        self.cierres.append(episodio)
 
     def _registrar_aviso_si_es_apertura_critica(
         self,
@@ -127,18 +140,19 @@ class GenerarAlertaUseCase:
 
         if nivel_riesgo is None or nivel_riesgo == NivelRiesgo.NORMAL:
             if episodio_abierto is not None:
-                episodio_abierto.cerrar(timestamp)
-                await self._alerta_repository.actualizar(episodio_abierto)
+                await self._cerrar(episodio_abierto, timestamp)
             return None
 
         if episodio_abierto is not None:
             if episodio_abierto.nivel_riesgo == nivel_riesgo:
                 episodio_abierto.registrar_lectura(reading_id, timestamp)
+                episodio_abierto.actualizar_pico(temperatura_interna)
+                if self._es_diferida(timestamp, received_at):
+                    episodio_abierto.historica = True
                 return await self._alerta_repository.actualizar(episodio_abierto)
             # Escalamiento/desescalamiento: cierra el episodio anterior antes
             # de evaluar si corresponde abrir/reabrir uno del nuevo tipo.
-            episodio_abierto.cerrar(timestamp)
-            await self._alerta_repository.actualizar(episodio_abierto)
+            await self._cerrar(episodio_abierto, timestamp)
 
         ultimo_cerrado = await self._alerta_repository.obtener_ultimo_cerrado(device_id, nivel_riesgo)
         if (
@@ -148,6 +162,11 @@ class GenerarAlertaUseCase:
             <= timedelta(minutes=self._ventana_normalizacion_minutos)
         ):
             ultimo_cerrado.reabrir(reading_id, timestamp)
+            if ultimo_cerrado.iniciada_en is None:
+                ultimo_cerrado.iniciada_en = timestamp
+            ultimo_cerrado.actualizar_pico(temperatura_interna)
+            if self._es_diferida(timestamp, received_at):
+                ultimo_cerrado.historica = True
             reabierta = await self._alerta_repository.actualizar(ultimo_cerrado)
             self._registrar_aviso_si_es_apertura_critica(
                 reabierta, episodio_abierto, temperatura_interna, timestamp, received_at, time_quality
@@ -162,6 +181,10 @@ class GenerarAlertaUseCase:
             lectura_inicial_id=reading_id,
             lectura_mas_reciente_id=reading_id,
             ultima_actualizacion=timestamp,
+            # Hora de captura, no de llegada: la lectura puede venir del buffer.
+            iniciada_en=timestamp,
+            temperatura_pico=temperatura_interna,
+            historica=self._es_diferida(timestamp, received_at),
         )
         creada = await self._alerta_repository.agregar(alerta)
         self._registrar_aviso_si_es_apertura_critica(

@@ -110,6 +110,28 @@ def _correo_retencion(
             "quien tenga el token filtrado, por eso no se registra todavía. Compruebe ya el refrigerador con "
             "el termómetro de respaldo y actúe como ante una excursión real.",
         ]
+    elif aviso.tipo == "sensor_fault":
+        titulo = "FALLA DEL SENSOR DE TEMPERATURA"
+        lineas = [f"{titulo} — Cadena de frío", "", f"Dispositivo: {aviso.device_id}"]
+        if dispositivo.get("nombre"):
+            lineas.append(f"Equipo: {dispositivo['nombre']}")
+        lineas += [
+            f"Detectada con la lectura de: {detalle.get('captured_at') or 'hora no sincronizada'}",
+            "",
+            "El sensor DS18B20 falló en lecturas seguidas: no se conoce la temperatura interior del "
+            "refrigerador, así que el sistema no puede avisar de una excursión. Compruebe el sensor y su "
+            "cableado y controle el refrigerador con el termómetro de respaldo.",
+        ]
+    elif aviso.tipo == "colision_clave":
+        titulo = "COLISIÓN DE IDENTIDAD DE LECTURAS"
+        lineas = [
+            f"{titulo} — Cadena de frío", "", f"Dispositivo: {aviso.device_id}",
+            f"Arranque (boot_id): {detalle.get('boot_id')}  Secuencia (seq_no): {detalle.get('seq_no')}",
+            "",
+            "Llegó una lectura con la misma identidad que otra ya registrada pero con valores distintos. "
+            "La original se conservó y la recibida quedó solo en la bitácora. Puede haber dos nodos con el "
+            "mismo identificador, o un nodo cuyo contador se reinició: revise el dispositivo.",
+        ]
     else:
         titulo = "MONITOREO SUSPENDIDO POR ROTACIÓN"
         lineas = [

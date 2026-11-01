@@ -55,6 +55,7 @@ def _estado_en_memoria_hu44():
     LIMITE_AUDITORIA.reiniciar()
     interfaz_main._DESAFIOS_ENVIADOS.clear()
     interfaz_main._EXPULSIONES_REVOCADAS.clear()
+    interfaz_main._PAUSA_ANTES_DE_EXPULSAR_S = 0.0
     yield
 
 

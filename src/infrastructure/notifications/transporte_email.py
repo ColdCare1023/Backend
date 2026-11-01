@@ -63,7 +63,11 @@ class SmtpTransporte:
 
     def _enviar_bloqueante(self, correo: EmailMessage) -> None:
         s = self._settings
-        if s.smtp_seguridad == "starttls":
+        if s.smtp_seguridad == "ninguna":
+            # Mailpit / SMTP de prueba: en claro y sin login (no admitido en producción).
+            with smtplib.SMTP(s.smtp_host, s.smtp_port, timeout=TIMEOUT_SEGUNDOS) as servidor:
+                servidor.send_message(correo)
+        elif s.smtp_seguridad == "starttls":
             with smtplib.SMTP(s.smtp_host, s.smtp_port, timeout=TIMEOUT_SEGUNDOS) as servidor:
                 servidor.starttls()
                 servidor.login(s.smtp_user, s.smtp_password)

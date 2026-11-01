@@ -121,6 +121,12 @@ def alerta_to_response(alerta: AlertaTermica, revisada_por_nombre: str | None = 
         estado=alerta.estado.value,
         reconocida_en=alerta.reconocida_en,
         atendida_en=alerta.atendida_en,
+        notificada_en=alerta.notificada_en,
+        notificacion_intentos=alerta.notificacion_intentos,
+        iniciada_en=alerta.iniciada_en,
+        temperatura_pico=alerta.temperatura_pico,
+        duracion_s=alerta.duracion_s,
+        historica=alerta.historica,
     )
 
 

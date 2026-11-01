@@ -1,9 +1,14 @@
+import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
+from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.clasificar_riesgo_termico import ClasificarRiesgoTermicoUseCase
 from src.application.use_cases.generar_alerta import AvisoExcursion, GenerarAlertaUseCase
+from src.application.use_cases.incidentes_lectura import abrir_incidente, cerrar_incidente
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
+from src.application.use_cases.vigilar_sin_datos import AvisoSinDatos, CambioIncidente
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.exceptions import (
     CredencialEnCuarentenaError,
@@ -14,9 +19,19 @@ from src.domain.exceptions import (
 from src.domain.repositories.i_alerta_repository import IAlertaRepository
 from src.domain.repositories.i_audit_log_repository import IAuditLogRepository
 from src.domain.repositories.i_device_repository import IDeviceRepository
+from src.domain.repositories.i_incidente_repository import TIPO_SENSOR_FAULT, IIncidenteRepository
 from src.domain.repositories.i_lectura_repository import ILecturaRepository
 from src.domain.repositories.i_trazabilidad_repository import ITrazabilidadRepository
-from src.infrastructure.ai.random_forest_service import ORIGEN_MODELO
+from src.domain.value_objects.nivel_riesgo import NivelRiesgo
+from src.domain.value_objects.rango_termico import RANGO_TERMICO_BPA
+from src.infrastructure.ai.random_forest_service import (
+    ESTADO_FALLIDA,
+    ORIGEN_MODELO,
+    ORIGEN_REGLA_SALVAGUARDA,
+    ResultadoInferencia,
+)
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from src.application.use_cases.predecir_riesgo_preventivo import PredecirRiesgoPreventivoUseCase
@@ -38,6 +53,11 @@ async def credencial_en_cuarentena(device_repository: IDeviceRepository, device_
     # La retención dura mientras la marca siga puesta: confirmar la consola no
     # basta, el nodo debe probar que tiene el token nuevo (prueba_posesion.py).
     return bool(credencial and credencial.get("rotacion_por_compromiso"))
+
+
+def _motivo_fallo_ia(exc: Exception) -> str:
+    """Motivo breve, sin trazas ni mensajes del modelo (motivo_no_inferencia)."""
+    return "timeout_inferencia" if isinstance(exc, asyncio.TimeoutError) else "excepcion_inferencia"
 
 
 class RegistrarLecturaTermicaUseCase:
@@ -65,7 +85,21 @@ class RegistrarLecturaTermicaUseCase:
         prediccion_preventiva: "PredecirRiesgoPreventivoUseCase | None" = None,
         antiguedad_maxima_horas: int | None = None,
         ia_legado_modo: str = "activo",
+        ia_timeout_s: float | None = None,
+        ia_prueba_retardo_s: float = 0.0,
+        ia_prueba_excepcion: bool = False,
+        incidente_repository: IIncidenteRepository | None = None,
     ) -> None:
+        # Incidente `sensor_fault` (outcome 3): se abre/cierra con la telemetría.
+        self._incidentes = incidente_repository
+        self._trazabilidad = trazabilidad_repository
+        self.cambios_incidente: list[CambioIncidente] = []
+        self.avisos_incidente: list[AvisoSinDatos] = []
+        # La alerta crítica no depende de la IA: tope de tiempo y excepciones
+        # absorbidas (None = sin tope, el comportamiento anterior).
+        self._ia_timeout_s = ia_timeout_s
+        self._ia_prueba_retardo_s = ia_prueba_retardo_s
+        self._ia_prueba_excepcion = ia_prueba_excepcion
         self._lectura_repository = lectura_repository
         self._antiguedad_maxima = timedelta(hours=antiguedad_maxima_horas) if antiguedad_maxima_horas else None
         self._generar_alerta = GenerarAlertaUseCase(
@@ -119,6 +153,69 @@ class RegistrarLecturaTermicaUseCase:
         if not es_manual and await credencial_en_cuarentena(self._device_repository, device_id):
             raise CredencialEnCuarentenaError(
                 f"Rotación por compromiso de '{device_id}' pendiente en el broker; la lectura se retiene."
+            )
+
+    async def _evaluar_sensor_fault(self, lectura: LecturaTermica, historial: list) -> None:
+        """Segunda lectura seguida con el DS18B20 en falla abre `sensor_fault`;
+        la siguiente válida lo cierra. Las lecturas manuales no cuentan."""
+        if self._incidentes is None or lectura.es_manual:
+            return
+        auditoria = AuditarAccionCriticaUseCase(self._audit_log_repository, self._trazabilidad)
+        ahora = datetime.now(timezone.utc)
+        if lectura.temperatura_interna is None:
+            previa = historial[0] if historial else None  # la más reciente (orden descendente)
+            if previa is None or previa.temperatura_interna is not None:
+                return  # primera falla: puede ser aislada
+            abierto = await abrir_incidente(
+                self._incidentes, auditoria, lectura.device_id, TIPO_SENSOR_FAULT, ahora,
+                {
+                    "captured_at": lectura.timestamp.isoformat(),
+                    "boot_id": lectura.boot_id,
+                    "seq_no": lectura.seq_no,
+                    "lecturas_seguidas": 2,
+                },
+                ultimo_reporte_en=lectura.timestamp,
+            )
+            if abierto is not None:
+                self.cambios_incidente.append(abierto[0])
+                self.avisos_incidente.append(abierto[1])
+            return
+        cierre = await cerrar_incidente(self._incidentes, auditoria, lectura.device_id, TIPO_SENSOR_FAULT, ahora)
+        if cierre is not None:
+            self.cambios_incidente.append(cierre)
+
+    async def _con_limite(self, corrutina):
+        """Espera `corrutina` como mucho `ia_timeout_s` y aplica la inyección de
+        fallos de prueba (retardo o excepción) antes de ella."""
+        async def _ejecutar():
+            if self._ia_prueba_retardo_s:
+                await asyncio.sleep(self._ia_prueba_retardo_s)
+            if self._ia_prueba_excepcion:
+                raise RuntimeError("fallo de inferencia inyectado")
+            return await corrutina
+
+        try:
+            return await asyncio.wait_for(_ejecutar(), self._ia_timeout_s)
+        finally:
+            corrutina.close()  # no queda sin esperar si el fallo o el tope se adelantaron
+
+    async def _clasificar_con_limite(self, lectura: LecturaTermica, historial: list) -> ResultadoInferencia:
+        """Clasifica en un hilo, con tope de tiempo. Si vence o lanza, la lectura
+        queda `fallida` y la regla determinista sigue decidiendo la excursión."""
+        async def _en_hilo():
+            return await asyncio.to_thread(self._clasificar_riesgo.execute, lectura, historial)
+
+        try:
+            return await self._con_limite(_en_hilo())
+        except Exception as exc:
+            motivo = _motivo_fallo_ia(exc)
+            logger.warning("Clasificación fallida para %s: %s", lectura.device_id, motivo)
+            return ResultadoInferencia(
+                nivel=None,
+                confianza=None,
+                origen=ORIGEN_REGLA_SALVAGUARDA,
+                estado_inferencia=ESTADO_FALLIDA,
+                motivo_no_inferencia=motivo,
             )
 
     async def execute(self, lectura: LecturaTermica) -> LecturaTermica:
@@ -184,7 +281,7 @@ class RegistrarLecturaTermicaUseCase:
         historial = await self._lectura_repository.listar_recientes_por_device(
             lectura.device_id, limite=20, solo_dispositivo=not lectura.es_manual
         )
-        clasificacion = self._clasificar_riesgo.execute(lectura, historial)
+        clasificacion = await self._clasificar_con_limite(lectura, historial)
         lectura.nivel_riesgo = clasificacion.nivel
         # Hallazgo AI-06: la versión del modelo y la confianza quedan en la
         # propia lectura, no solo en el payload de trazabilidad, para poder
@@ -208,7 +305,16 @@ class RegistrarLecturaTermicaUseCase:
         prediccion = None
         reemplazada = False
         if self._prediccion_preventiva is not None:
-            prediccion = await self._prediccion_preventiva.predecir(lectura)
+            try:
+                prediccion = await self._con_limite(self._prediccion_preventiva.predecir(lectura))
+            except Exception as exc:  # nunca propagar: la regla 2-8 °C no espera al modelo
+                prediccion = None
+                motivo = _motivo_fallo_ia(exc)
+                logger.warning("Predicción preventiva fallida para %s: %s", lectura.device_id, motivo)
+                if self._prediccion_preventiva.modo == "activo":
+                    lectura.nivel_riesgo = None
+                    lectura.estado_inferencia = ESTADO_FALLIDA
+                    lectura.motivo_no_inferencia = f"preventivo_{motivo}"[:100]
             reemplazada = self._prediccion_preventiva.aplicar_a_lectura(lectura, prediccion)
 
         # HU-18/21/34: excursión confirmada y riesgo efectivo se calculan
@@ -220,6 +326,16 @@ class RegistrarLecturaTermicaUseCase:
         # marcando excursion_confirmada=True y riesgo_efectivo=critica.
         lectura.excursion_confirmada = lectura.es_excursion_confirmada()
         lectura.riesgo_efectivo = lectura.calcular_riesgo_efectivo()
+        # Si la IA falló (tiempo agotado o excepción) no hay nivel de modelo, pero
+        # una lectura DENTRO de 2-8 °C sigue siendo normal: sin esto no llegaría a
+        # la gestión de alertas y un episodio abierto no se cerraría nunca.
+        if (
+            lectura.riesgo_efectivo is None
+            and lectura.estado_inferencia == ESTADO_FALLIDA
+            and lectura.temperatura_interna is not None
+            and RANGO_TERMICO_BPA.contiene(lectura.temperatura_interna)
+        ):
+            lectura.riesgo_efectivo = NivelRiesgo.NORMAL
         # HU-20: el modelo legado (datos sintéticos) en modo experimental deja su
         # clase como evidencia marcada, pero no abre alertas preventivas: sin
         # excursión, el riesgo efectivo es el de la salvaguarda determinista.
@@ -317,4 +433,21 @@ class RegistrarLecturaTermicaUseCase:
                     device_id=lectura_guardada.device_id,
                 )
 
+        for cerrada in self._generar_alerta.cierres:
+            await self._registrar_hash.execute(
+                tipo_evento="ALERTA_CERRADA",
+                payload={
+                    "alerta_id": str(cerrada.id),
+                    "device_id": cerrada.device_id,
+                    "nivel_riesgo": cerrada.nivel_riesgo.value,
+                    "iniciada_en": cerrada.iniciada_en.isoformat() if cerrada.iniciada_en else None,
+                    "cerrada_en": cerrada.cerrada_en.isoformat() if cerrada.cerrada_en else None,
+                    "duracion_s": cerrada.duracion_s,
+                    "temperatura_pico": cerrada.temperatura_pico,
+                    "historica": cerrada.historica,
+                },
+                device_id=cerrada.device_id,
+            )
+        self._generar_alerta.cierres.clear()
+        await self._evaluar_sensor_fault(lectura_guardada, historial)
         return lectura_guardada

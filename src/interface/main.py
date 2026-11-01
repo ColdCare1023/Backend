@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import hashlib
 import json
@@ -23,6 +24,7 @@ from src.application.use_cases.clasificar_riesgo_termico import ClasificarRiesgo
 from src.application.use_cases.detectar_anomalia_reloj import anomalias_de_reloj
 from src.application.use_cases.gestionar_dispositivos import ActualizarIntervaloReporteUseCase
 from src.application.use_cases.gestionar_firmware import RegistrarResultadoOtaUseCase, normalizar_version
+from src.application.use_cases.incidentes_lectura import abrir_incidente
 from src.application.use_cases.predecir_riesgo_preventivo import PredecirRiesgoPreventivoUseCase
 from src.application.use_cases.prueba_posesion import (
     REEMISION_MINIMA,
@@ -47,6 +49,7 @@ from src.domain.exceptions import (
     DomainError,
     LecturaInvalidaError,
 )
+from src.domain.repositories.i_incidente_repository import TIPO_COLISION_CLAVE
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.ai.prediccion_preventiva.servicio import obtener_servicio_preventivo
 from src.infrastructure.ai.random_forest_service import get_random_forest_service
@@ -201,6 +204,9 @@ def _payload_en_conflicto(existente, nueva) -> bool:
 # lectura (cada DELETE al broker es una llamada HTTP y el nodo reconecta).
 _EXPULSIONES_REVOCADAS: dict[str, float] = {}
 _VENTANA_EXPULSION_REVOCADA = 60.0
+# SEG-01: el acuse `rejected` ya salió, pero el broker aún debe entregarlo al
+# nodo; expulsar de inmediato lo corta y el nodo reintenta la lectura.
+_PAUSA_ANTES_DE_EXPULSAR_S = 0.5
 
 
 async def _expulsar_sesion_revocada(device_id: str) -> None:
@@ -213,6 +219,7 @@ async def _expulsar_sesion_revocada(device_id: str) -> None:
     if ultima is not None and ahora - ultima < _VENTANA_EXPULSION_REVOCADA:
         return
     _EXPULSIONES_REVOCADAS[device_id] = ahora
+    await asyncio.sleep(_PAUSA_ANTES_DE_EXPULSAR_S)
     if await BrokerAdmin(get_settings()).desconectar_cliente(device_id) is False:
         logger.warning("No se pudo expulsar la sesión del dispositivo con credencial revocada: %s", device_id)
 
@@ -415,6 +422,10 @@ async def _procesar_evento_v1(
     device_topic = _device_id_del_topic(str(message.topic), sufijo="eventos")
     if device_topic is None or device_topic != evento.device_id:
         logger.warning("Descartado: evento v1.0 de %s en tópico de %s", evento.device_id, device_topic)
+        await _auditar_rechazo_sin_acuse(
+            "EVENTO_RECHAZADO_SUPLANTACION", "mqtt/eventos", device_topic,
+            {"device_id_topico": device_topic, "device_id_payload": evento.device_id}, "suplantacion",
+        )
         return
 
     # HU-44: los dos eventos de la retención por compromiso se atienden antes
@@ -600,6 +611,10 @@ async def _procesar_evento_mqtt(
             evento.device_id,
             device_topic,
         )
+        await _auditar_rechazo_sin_acuse(
+            "EVENTO_RECHAZADO_SUPLANTACION", "mqtt/eventos", device_topic,
+            {"device_id_topico": device_topic, "device_id_payload": evento.device_id}, "suplantacion",
+        )
         return
 
     async with _session_factory() as session:
@@ -724,6 +739,40 @@ async def _procesar_evento_mqtt(
         await broadcaster.publicar(cambio.como_evento_sse(), "conectividad")
 
 
+def _inyectar_fallo_antes_del_commit(settings) -> None:
+    """MQT-01 (solo pruebas): simula un fallo justo antes del COMMIT de la lectura,
+    para comprobar que el nodo conserva el bloque (sin acuse) y lo reenvía. La
+    configuración se niega a arrancar con esta opción en producción."""
+    modo = settings.mqtt_prueba_fallo_antes_commit
+    if modo == "excepcion":
+        raise RuntimeError("fallo inyectado antes del commit")
+    if modo == "salir":
+        os._exit(70)
+
+
+async def _auditar_rechazo_sin_acuse(
+    accion: str, recurso: str, device_id: str | None, detalle: dict, motivo: str
+) -> None:
+    """Rechazo auditado SIN acuse: la identidad del emisor no es confiable (otro
+    `device_id` en el payload) o no se pudo leer el mensaje (demasiado grande).
+    Una fila por minuto y motivo: quien publica en bucle no inunda la bitácora."""
+    clave = device_id or "desconocido"
+    suprimidos = LIMITE_AUDITORIA.permitir(accion.lower(), clave, motivo)
+    if suprimidos is None:
+        return
+    async with _session_factory() as session:
+        await AuditarAccionCriticaUseCase(
+            SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+        ).execute(
+            usuario_id=None,
+            accion=accion,
+            recurso=recurso,
+            detalle={**detalle, "suprimidos_desde_anterior": suprimidos},
+            ip_origen=None,
+        )
+        await session.commit()
+
+
 async def _rechazar_payload_invalido(
     message: aiomqtt.Message,
     exc: ValidationError | None,
@@ -793,6 +842,12 @@ async def _procesar_lectura_mqtt(
             message.topic,
             MAX_BYTES_PAYLOAD_MQTT,
         )
+        await _auditar_rechazo_sin_acuse(
+            "LECTURA_RECHAZADA_TAMANO", "mqtt/lecturas", _device_id_del_topic(str(message.topic)),
+            {"device_id": _device_id_del_topic(str(message.topic)), "bytes": len(message.payload),
+             "maximo": MAX_BYTES_PAYLOAD_MQTT},
+            "tamano",
+        )
         return
 
     try:
@@ -829,6 +884,12 @@ async def _procesar_lectura_mqtt(
             "Descartado: tópico MQTT inválido o device_id (%s) no coincide con el tópico (%s)",
             payload.device_id,
             device_topic,
+        )
+        # Sin acuse: ese `device_id` no es confiable, el nodo real no lo envió.
+        await _auditar_rechazo_sin_acuse(
+            "LECTURA_RECHAZADA_SUPLANTACION", "mqtt/lecturas", device_topic,
+            {"device_id_topico": device_topic, "device_id_payload": payload.device_id},
+            "suplantacion",
         )
         return
 
@@ -875,6 +936,10 @@ async def _procesar_lectura_mqtt(
             ventana_normalizacion_alerta_minutos=settings.alerta_ventana_normalizacion_minutos,
             antiguedad_maxima_horas=settings.lectura_antiguedad_max_horas,
             ia_legado_modo=settings.ia_legado_modo,
+            ia_timeout_s=settings.ia_inferencia_timeout_s,
+            ia_prueba_retardo_s=settings.ia_prueba_retardo_s,
+            ia_prueba_excepcion=settings.ia_prueba_excepcion,
+            incidente_repository=SQLAlchemyIncidenteRepository(session),
             prediccion_preventiva=(
                 PredecirRiesgoPreventivoUseCase(
                     servicio_preventivo, lectura_repository, SQLAlchemyPrediccionPreventivaRepository(session)
@@ -945,7 +1010,17 @@ async def _procesar_lectura_mqtt(
                     },
                     ip_origen=None,
                 )
+                colision = await abrir_incidente(
+                    SQLAlchemyIncidenteRepository(session), auditoria, payload.device_id, TIPO_COLISION_CLAVE,
+                    datetime.now(timezone.utc),
+                    {"boot_id": payload.boot_id, "seq_no": payload.seq_no,
+                     "reading_id": payload.reading_id, "timestamp": payload.timestamp.isoformat()},
+                )
                 await session.commit()
+                if colision is not None:
+                    if notificaciones is not None:
+                        notificaciones.encolar(colision[1])
+                    await broadcaster.publicar(colision[0].como_evento_sse(), tipo_sse(colision[0]))
                 logger.warning(
                     "Conflicto de lectura MQTT %s/%s: mismo identificador, contenido distinto.",
                     payload.device_id, payload.timestamp,
@@ -1089,6 +1164,7 @@ async def _procesar_lectura_mqtt(
             lectura_guardada.device_id,
             lectura_guardada.received_at or datetime.now(timezone.utc),
         )
+        _inyectar_fallo_antes_del_commit(settings)
         await session.commit()
 
     # HU-53 (D2): el aviso por correo se ENCOLA después del COMMIT; el envío lo
@@ -1096,6 +1172,9 @@ async def _procesar_lectura_mqtt(
     # caído no retrasa el acuse ni la lectura siguiente.
     if notificaciones is not None:
         notificaciones.encolar_todos(use_case.avisos_pendientes)
+        notificaciones.encolar_todos(use_case.avisos_incidente)
+    for cambio in use_case.cambios_incidente:
+        await broadcaster.publicar(cambio.como_evento_sse(), tipo_sse(cambio))
 
     # HU-07 Escenario 1: el acuse lógico se publica DESPUÉS del COMMIT, nunca
     # antes ni en su lugar. Es lo único que autoriza al firmware a borrar el
@@ -1137,6 +1216,36 @@ async def _procesar_lectura_mqtt(
         await broadcaster.publicar(sin_datos_resuelto.como_evento_sse(), tipo_sse(sin_datos_resuelto))
 
 
+async def _auditar_modelos_rechazados(settings) -> None:
+    """Un modelo que no pasa la verificación (hash que no coincide, versión no
+    admitida) queda en la bitácora al arrancar, no solo en el log: es la
+    evidencia de que el artefacto fue alterado o no es el aprobado."""
+    rechazos: list[dict] = []
+    if settings.ia_legado_modo != "desactivado":
+        motivo = get_random_forest_service().motivo_rechazo()
+        if motivo:
+            rechazos.append({"modelo": "legado", "motivo": motivo})
+    servicio = obtener_servicio_preventivo(
+        settings.ia_preventivo_modo, settings.ia_preventivo_version, settings.ia_preventivo_sha256
+    )
+    motivo = servicio.motivo_rechazo()
+    if motivo:
+        rechazos.append({"modelo": "preventivo", "motivo": motivo, "version": settings.ia_preventivo_version})
+    if not rechazos:
+        return
+    async with _session_factory() as session:
+        auditoria = AuditarAccionCriticaUseCase(
+            SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+        )
+        for rechazo in rechazos:
+            logger.warning("Modelo rechazado (%s): %s", rechazo["modelo"], rechazo["motivo"])
+            await auditoria.execute(
+                usuario_id=None, accion="MODELO_RECHAZADO", recurso=f"ia/{rechazo['modelo']}",
+                detalle=rechazo, ip_origen=None,
+            )
+        await session.commit()
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
@@ -1157,6 +1266,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # expulsión de sesión pareciera hecha; se comprueba una vez al arrancar y el
     # resultado queda en /health/detalle.
     app.state.broker_api = await BrokerAdmin(settings).verificar_api()
+    if settings.environment != "test":
+        try:
+            await _auditar_modelos_rechazados(settings)
+        except Exception:  # el arranque no depende de poder auditar
+            logger.exception("No se pudo auditar el rechazo de modelos al arrancar.")
 
     # HU-53: UNA instancia por proceso (D1) — la cola, el worker y los
     # reintentos de los avisos por correo viven aquí, no en cada lectura.

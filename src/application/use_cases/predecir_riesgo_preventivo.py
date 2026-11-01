@@ -1,3 +1,5 @@
+import asyncio
+
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.entities.prediccion_preventiva import PrediccionPreventiva
 from src.domain.repositories.i_lectura_repository import ILecturaRepository
@@ -66,7 +68,8 @@ class PredecirRiesgoPreventivoUseCase:
         historial = await self._lectura_repository.listar_recientes_por_device(
             lectura.device_id, limite=LIMITE_HISTORIAL_PREVENTIVO, solo_dispositivo=True
         )
-        return self._servicio.predecir(lectura, historial)
+        # En un hilo: el modelo es CPU y no debe bloquear el bucle de eventos.
+        return await asyncio.to_thread(self._servicio.predecir, lectura, historial)
 
     def aplicar_a_lectura(self, lectura: LecturaTermica, prediccion: PrediccionPreventiva | None) -> bool:
         """Solo en modo activo. Devuelve True si la predicción reemplazó la

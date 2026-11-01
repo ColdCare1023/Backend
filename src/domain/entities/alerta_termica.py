@@ -1,10 +1,22 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from src.domain.exceptions import DomainError
 from src.domain.value_objects.estado_alerta import EstadoAlerta
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
+from src.domain.value_objects.rango_termico import RANGO_TERMICO_BPA
+
+
+def _a_utc(valor: datetime) -> datetime:
+    return valor if valor.tzinfo is not None else valor.replace(tzinfo=timezone.utc)
+
+
+def _distancia_al_rango(temperatura: float) -> float:
+    """Grados fuera de 2-8 °C (0 dentro del rango)."""
+    if RANGO_TERMICO_BPA.contiene(temperatura):
+        return 0.0
+    return RANGO_TERMICO_BPA.distancia_al_limite(temperatura)
 
 
 @dataclass(slots=True)
@@ -38,6 +50,12 @@ class AlertaTermica:
     # HU-53: el episodio ya fue avisado por correo (dedup persistente).
     notificada_en: datetime | None = None
     notificacion_intentos: int = 0
+    # Evidencia de la excursión (migración 0035): inicio según la hora de CAPTURA
+    # (las lecturas pueden llegar tarde), temperatura más alejada de 2-8 °C y si
+    # el episodio se detectó con lecturas diferidas del buffer del nodo.
+    iniciada_en: datetime | None = None
+    temperatura_pico: float | None = None
+    historica: bool = False
 
     def marcar_revisada(self, usuario_id: UUID) -> None:
         self.revisada = True
@@ -71,6 +89,23 @@ class AlertaTermica:
         (que sigue apuntando a la lectura que originó la alerta)."""
         self.lectura_mas_reciente_id = reading_id
         self.ultima_actualizacion = timestamp
+
+    def actualizar_pico(self, temperatura: float | None) -> None:
+        """Conserva la temperatura más alejada del rango 2-8 °C del episodio."""
+        if temperatura is None:
+            return
+        if self.temperatura_pico is None or _distancia_al_rango(temperatura) > _distancia_al_rango(
+            self.temperatura_pico
+        ):
+            self.temperatura_pico = temperatura
+
+    @property
+    def duracion_s(self) -> float | None:
+        """Del inicio (hora de captura) al cierre, o a la última lectura si sigue abierto."""
+        fin = self.cerrada_en or self.ultima_actualizacion
+        if self.iniciada_en is None or fin is None:
+            return None
+        return max((_a_utc(fin) - _a_utc(self.iniciada_en)).total_seconds(), 0.0)
 
     def cerrar(self, timestamp: datetime) -> None:
         """El riesgo volvió a NORMAL (evento de recuperación) o el episodio
