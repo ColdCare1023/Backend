@@ -18,9 +18,14 @@ Todas las opciones de falla **se niegan a arrancar con `ENVIRONMENT=production`*
 ## LAT-02: una excursión repetida no envía otro correo
 
 Con la ventana de normalización (`ALERTA_VENTANA_NORMALIZACION_MINUTOS`, 15 min) una excursión que se repite
-**reabre la misma alerta** y no genera otro correo (`notificada_en` ya está puesto). Para que las 100 corridas
-sintéticas midan algo, usa **un `device_id` distinto por corrida** o baja la ventana a 1 minuto. De lo contrario
-solo se mide el primer correo.
+**reabre la misma alerta** y no genera otro correo (`notificada_en` ya está puesto). Usa
+`ALERTA_VENTANA_NORMALIZACION_MINUTOS=0` y **alterna una lectura fuera de rango (12 °C) y una en rango (5 °C)**
+(`inyector_casos.py --casos latencia`); cada subida abre un episodio nuevo. Declara esa configuración en el paper.
+Bajar la ventana a 1 minuto no basta si las excursiones se repiten en menos de un minuto. No hace falta un
+`device_id` por corrida (cada uno necesitaría su credencial y ACL).
+
+La latencia de `NOTIFICACION_ENVIADA` se cuenta desde que el backend empieza a procesar la lectura: la espera en
+cola del despachador no aparece. Separa las excursiones (`--pausa`) en vez de mandarlas en ráfaga.
 
 ## Criterios de aceptación que cambian
 
@@ -33,3 +38,9 @@ solo se mide el primer correo.
 - **Inferencia:** si la IA no responde en `IA_INFERENCIA_TIMEOUT_S`, la lectura queda con
   `estado_inferencia=fallida` (`timeout_inferencia` o `excepcion_inferencia`) y la regla 2-8 °C sigue decidiendo.
 - **Modelo alterado:** al arrancar, un hash que no coincide deja `MODELO_RECHAZADO` en la bitácora.
+- **Límites de las herramientas.** `huecos_seq` no detecta lecturas perdidas al inicio ni al final de un arranque
+  (solo huecos entre las que llegaron): para decir «0 pérdidas» compáralo con lo que emitió el nodo. Una alerta
+  sin SMTP o sin destinatario se queda en «Pendiente» en la interfaz.
+- **`colision_clave`** no tiene regla de cierre automático todavía: el incidente queda abierto hasta resolverlo.
+- **Banco de pruebas en contenedor:** `infra-local/docker-compose.pruebas.yml` pasa estas opciones al backend y usa
+  una base aparte (`coldcare_prueba`).
