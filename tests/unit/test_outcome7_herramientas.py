@@ -284,3 +284,23 @@ async def test_verificar_una_cadena_inexistente_no_pasa_por_integra(monkeypatch,
     salida = capsys.readouterr().out
     assert "NO EXISTE" in salida
     assert "ÍNTEGRA" not in salida
+
+
+async def test_probar_notificaciones_usa_el_notificador_real(monkeypatch):
+    from scripts import probar_notificaciones
+
+    llamadas = []
+
+    class _Notificador:
+        def __init__(self, ajustes) -> None:
+            pass
+
+        async def notificar(self, nombre, email, telefono):
+            from src.infrastructure.notifications.bienvenida import ResultadoBienvenida
+
+            llamadas.append((email, telefono))
+            return ResultadoBienvenida(correo="enviado", sms="no_configurado")
+
+    monkeypatch.setattr(probar_notificaciones, "NotificadorBienvenida", _Notificador)
+    assert await probar_notificaciones.probar("yo@ejemplo.com", "+51999888777") == ("enviado", "no_configurado")
+    assert llamadas == [("yo@ejemplo.com", "+51999888777")]
