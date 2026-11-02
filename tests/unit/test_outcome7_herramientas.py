@@ -250,3 +250,37 @@ def test_los_parametros_de_insercion_llevan_datetime_no_texto():
     (fila,) = generar_eslabones("PRUEBA", 1, 2, None)
     p = _parametros_fila(fila)
     assert isinstance(p["timestamp"], datetime) and isinstance(p["payload"], str)
+
+
+def test_exigir_filas_sale_con_error_si_no_toco_nada():
+    from scripts.cadenas_prueba import exigir_filas
+
+    exigir_filas(1, "algo")  # no pasa nada
+    with pytest.raises(SystemExit, match="0 filas"):
+        exigir_filas(0, "el eslabón #5 de X")
+
+
+async def test_verificar_una_cadena_inexistente_no_pasa_por_integra(monkeypatch, capsys):
+    import contextlib
+    from types import SimpleNamespace
+
+    from scripts import cadenas_prueba
+
+    class _Motor:
+        @contextlib.asynccontextmanager
+        async def connect(self):
+            yield object()
+
+        async def dispose(self):
+            return None
+
+    async def _vacia(conexion, chain_id):
+        return []
+
+    monkeypatch.setattr(cadenas_prueba, "create_async_engine", lambda url: _Motor())
+    monkeypatch.setattr(cadenas_prueba, "_leer_cadena", _vacia)
+    codigo = await cadenas_prueba._verificar(SimpleNamespace(chain_id="NO-EXISTE", clave=""), "postgresql://x/prueba")
+    assert codigo == 2
+    salida = capsys.readouterr().out
+    assert "NO EXISTE" in salida
+    assert "ÍNTEGRA" not in salida

@@ -126,6 +126,13 @@ def _parametros_fila(fila: dict) -> dict:
     return {**fila, "payload": json.dumps(fila["payload"]), "timestamp": a_datetime(fila["timestamp"])}
 
 
+def exigir_filas(cantidad: int, que: str) -> None:
+    """Sale con error si una operación no tocó nada: un nombre o una posición equivocados
+    no deben darse por buenos."""
+    if cantidad <= 0:
+        sys.exit(f"Error: no se encontró {que} (0 filas); no se cambió nada.")
+
+
 def _validar_entorno(url: str) -> None:
     if os.getenv("ENVIRONMENT", "development") == "production":
         sys.exit("Se niega a correr con ENVIRONMENT=production.")
@@ -181,6 +188,10 @@ async def _verificar(args, url: str) -> int:
     async with motor.connect() as conexion:
         filas = await _leer_cadena(conexion, args.chain_id)
     await motor.dispose()
+    if not filas:
+        # Un error de nombre no puede pasar como «cadena íntegra».
+        print(f"Cadena {args.chain_id}: NO EXISTE o está vacía (0 eslabones).")
+        return 2
     roto = verificar_eslabones(filas, clave)
     if roto is None:
         print(f"Cadena {args.chain_id}: ÍNTEGRA ({len(filas)} eslabones).")
@@ -196,6 +207,7 @@ async def _reescribir(args, url: str, transformar) -> None:
     motor = create_async_engine(url)
     async with motor.begin() as conexion:
         filas = await _leer_cadena(conexion, args.chain_id)
+        exigir_filas(len(filas), f"la cadena {args.chain_id}")
         nuevas = transformar(filas, clave)
         for tabla, disparador in TRIGGERS:
             await conexion.execute(text(f"ALTER TABLE {tabla} DISABLE TRIGGER {disparador}"))
@@ -249,11 +261,13 @@ async def _alterar(args, url: str) -> None:
             else:
                 sentencia = "DELETE FROM traceability_records WHERE chain_id = :c AND chain_seq = :s"
             resultado = await conexion.execute(text(sentencia), parametros)
-            print(f"Alteración «{args.tipo}» en {args.chain_id} #{args.seq}: {resultado.rowcount} fila(s).")
+            afectadas = resultado.rowcount
         finally:
             for tabla, disparador in TRIGGERS:
                 await conexion.execute(text(f"ALTER TABLE {tabla} ENABLE TRIGGER {disparador}"))
     await motor.dispose()
+    exigir_filas(afectadas, f"el eslabón #{args.seq} de {args.chain_id}")
+    print(f"Alteración «{args.tipo}» en {args.chain_id} #{args.seq}: {afectadas} fila(s).")
 
 
 def main(argv: list[str] | None = None) -> int:
