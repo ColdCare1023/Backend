@@ -7,6 +7,7 @@ import os
 import time
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
+from pathlib import Path
 
 import aiomqtt
 from fastapi import Depends, FastAPI, Request
@@ -744,6 +745,14 @@ def _inyectar_fallo_antes_del_commit(settings) -> None:
     para comprobar que el nodo conserva el bloque (sin acuse) y lo reenvía. La
     configuración se niega a arrancar con esta opción en producción."""
     modo = settings.mqtt_prueba_fallo_antes_commit
+    if not modo:
+        return
+    if modo.endswith("_una_vez"):
+        marca = Path(settings.mqtt_prueba_fallo_marca)
+        if marca.exists():
+            return  # ya falló una vez: el interruptor sigue armado pero inactivo
+        marca.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
+        modo = modo.removesuffix("_una_vez")
     if modo == "excepcion":
         raise RuntimeError("fallo inyectado antes del commit")
     if modo == "salir":

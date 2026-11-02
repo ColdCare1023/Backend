@@ -258,7 +258,12 @@ class Settings(BaseSettings):
     ia_prueba_excepcion: bool = False
     # SOLO PRUEBAS (MQT-01): falla justo ANTES del COMMIT de una lectura. `excepcion`
     # lanza un error; `salir` mata el proceso sin cierre ordenado (os._exit).
-    mqtt_prueba_fallo_antes_commit: Literal["", "excepcion", "salir"] = ""
+    # Los modos `*_una_vez` fallan SOLO la primera lectura tras armar el interruptor:
+    # dejan un archivo marca (MQTT_PRUEBA_FALLO_MARCA) y, mientras exista, no vuelven
+    # a fallar, ni siquiera tras el reinicio del proceso. Para repetir el caso, borrar
+    # la marca. Sin esto cada una de las 10 repeticiones de MQT-01 pide reiniciar.
+    mqtt_prueba_fallo_antes_commit: Literal["", "excepcion", "salir", "excepcion_una_vez", "salir_una_vez"] = ""
+    mqtt_prueba_fallo_marca: str = "/tmp/coldcare_fallo_una_vez"
     # HU-46: criterio que debe cumplir una versión para activarse (decisión con
     # el asesor). `por_incidente`: sensibilidad por incidente, IC95, falsas
     # alarmas/día y anticipación; `f1`: F1 macro ≥ 0,85. Ambos se reportan.

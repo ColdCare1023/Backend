@@ -120,6 +120,7 @@ async def test_smtp_timeout_agota_al_cliente():
 @pytest.mark.parametrize(
     "opcion",
     [{"mqtt_prueba_fallo_antes_commit": "excepcion"}, {"mqtt_prueba_fallo_antes_commit": "salir"},
+     {"mqtt_prueba_fallo_antes_commit": "excepcion_una_vez"},
      {"smtp_seguridad": "ninguna"}],
 )
 def test_las_opciones_de_prueba_no_arrancan_en_produccion(opcion, monkeypatch):
@@ -128,9 +129,31 @@ def test_las_opciones_de_prueba_no_arrancan_en_produccion(opcion, monkeypatch):
         Settings(environment="production", _env_file=None, **opcion)
 
 
+def test_el_modo_una_vez_falla_solo_la_primera(tmp_path, monkeypatch):
+    class _Ajustes:
+        mqtt_prueba_fallo_antes_commit = "excepcion_una_vez"
+        mqtt_prueba_fallo_marca = str(tmp_path / "marca")
+
+    with pytest.raises(RuntimeError, match="antes del commit"):
+        main._inyectar_fallo_antes_del_commit(_Ajustes())
+    main._inyectar_fallo_antes_del_commit(_Ajustes())  # la marca existe: ya no falla
+    (tmp_path / "marca").unlink()  # volver a armar para la repetición siguiente
+    with pytest.raises(RuntimeError):
+        main._inyectar_fallo_antes_del_commit(_Ajustes())
+
+    salidas = []
+    monkeypatch.setattr(main.os, "_exit", lambda codigo: salidas.append(codigo))
+    _Ajustes.mqtt_prueba_fallo_antes_commit = "salir_una_vez"
+    (tmp_path / "marca").unlink()
+    main._inyectar_fallo_antes_del_commit(_Ajustes())
+    main._inyectar_fallo_antes_del_commit(_Ajustes())
+    assert salidas == [70]
+
+
 def test_el_interruptor_de_commit(monkeypatch):
     class _Ajustes:
         mqtt_prueba_fallo_antes_commit = ""
+        mqtt_prueba_fallo_marca = "/nonexistent/marca"
 
     main._inyectar_fallo_antes_del_commit(_Ajustes())  # apagado: no hace nada
     _Ajustes.mqtt_prueba_fallo_antes_commit = "excepcion"
