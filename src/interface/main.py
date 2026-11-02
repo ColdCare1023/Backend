@@ -140,6 +140,7 @@ async def _publicar_ack_lectura(
     boot_id: int | None = None,
     seq_no: int | None = None,
     contenido: bytes | None = None,
+    status: str | None = None,
 ) -> None:
     """HU-07 Escenario 1: el acuse lógico se publica DESPUÉS de que la
     transacción de la lectura ya hizo COMMIT (se llama tras `session.commit()`
@@ -167,7 +168,7 @@ async def _publicar_ack_lectura(
     # Contrato v1.0 (firmware ColdCare): el nodo correlaciona por boot_id+seq_no
     # y decide por `status` si libera el registro o lo pasa a cuarentena.
     if boot_id is not None and seq_no is not None:
-        acuse.update(boot_id=boot_id, seq_no=seq_no, status=contrato_v1.STATUS_ACK.get(estado, "rejected"))
+        acuse.update(boot_id=boot_id, seq_no=seq_no, status=status or contrato_v1.STATUS_ACK.get(estado, "rejected"))
     # IOT-008: huella de los bytes EXACTOS recibidos. El nodo solo libera el
     # registro si coincide con la del JSON que publicó: un acuse ajeno (ACL
     # mal puesta, broker o backend comprometido) no borra evidencia.
@@ -1103,6 +1104,8 @@ async def _procesar_lectura_mqtt(
                 client, payload.device_id, payload.reading_id, payload.timestamp,
                 estado="dispositivo_no_autorizado", boot_id=payload.boot_id, seq_no=payload.seq_no,
                 contenido=message.payload,
+                # Revocada: `revoked` (el nodo conserva su cola). Dado de baja: `rejected`.
+                status=contrato_v1.STATUS_REVOCADO if revocada else None,
             )
             if revocada:
                 await _expulsar_sesion_revocada(payload.device_id)

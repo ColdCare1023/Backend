@@ -146,6 +146,11 @@ TIME_QUALITY_INTERNO = {"sntp_synced": "synced", "sntp_backfilled": "backfilled"
 # acusa como `duplicate`: eso autorizaba al nodo a borrar su única copia de una
 # lectura que el backend no tiene. Va a cuarentena, donde se conserva como
 # evidencia, y el conflicto queda auditado en el backend.
+# Credencial revocada: el firmware desconoce este `status` y descarta el acuse, así que
+# el registro NO se borra ni pasa a cuarentena (core::parsearAcuse devuelve false). El nodo
+# conserva su cola y reintenta con espera creciente: una revocación por error no pierde datos.
+STATUS_REVOCADO = "revoked"
+
 STATUS_ACK = {
     "commit_confirmado": "committed",
     "duplicado": "duplicate",

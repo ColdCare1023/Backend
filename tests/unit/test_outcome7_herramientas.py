@@ -206,3 +206,26 @@ def test_el_informe_filtra_por_dispositivo_y_solo_cuenta_correo():
     ]
     assert [f["latencia_s"] for f in seleccionar(filas, "RUN1")] == [1.5, 0.9]
     assert len(seleccionar(filas, None)) == 3
+
+
+async def test_el_acuse_admite_un_status_explicito_y_por_defecto_usa_el_mapa():
+    import json as _json
+
+    class _Cliente:
+        def __init__(self) -> None:
+            self.acuses = []
+
+        async def publish(self, topic, payload=None, qos=0, **_kw):
+            self.acuses.append(_json.loads(payload))
+
+    from datetime import datetime, timezone
+
+    cliente = _Cliente()
+    ahora = datetime.now(timezone.utc)
+    kw = {"boot_id": 1, "seq_no": 2, "contenido": b"x"}
+    await main._publicar_ack_lectura(cliente, "N", "r", ahora, estado="dispositivo_no_autorizado", status="revoked", **kw)
+    await main._publicar_ack_lectura(cliente, "N", "r", ahora, estado="dispositivo_no_autorizado", **kw)
+    assert [(a["estado"], a["status"]) for a in cliente.acuses] == [
+        ("dispositivo_no_autorizado", "revoked"),
+        ("dispositivo_no_autorizado", "rejected"),
+    ]

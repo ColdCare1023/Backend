@@ -119,9 +119,13 @@ async def test_lectura_con_credencial_revocada_no_se_persiste_y_se_audita(
     _alta_y_rotacion(client, token_admin)
     _revocar(client, token_admin)  # el usuario sigue en el broker (modo manual): el nodo aún puede publicar
 
-    await main._procesar_lectura_mqtt(_Mensaje("lecturas", _telemetria("r2")), _Broadcaster(), espia)
+    await main._procesar_lectura_mqtt(
+        _Mensaje("lecturas", {**_telemetria("r2"), "boot_id": 1, "seq_no": 5}), _Broadcaster(), espia
+    )
 
     assert espia.acuses[-1]["estado"] == "dispositivo_no_autorizado"
+    # `revoked`, no `rejected`: el firmware lo ignora y conserva la lectura en su cola.
+    assert espia.acuses[-1]["status"] == "revoked"
     assert await _lecturas(db_session_factory) == []
     assert "LECTURA_RECHAZADA_CREDENCIAL_REVOCADA" in await _acciones(db_session_factory)
     assert espia.expulsados[-1] == DEVICE_ID
