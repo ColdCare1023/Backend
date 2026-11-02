@@ -10,7 +10,7 @@ cierra esa ventana a nivel de aplicación.
 
 | Operación | Mientras dura la ventana | Cómo termina |
 |---|---|---|
-| Revocar | La telemetría y los eventos se rechazan y se auditan (`LECTURA_RECHAZADA_CREDENCIAL_REVOCADA`), y la sesión se expulsa en cada intento. El rechazo es **permanente** (con acuse `rejected`): el nodo pasa esas lecturas a cuarentena en LittleFS (no las borra; quedan contadas). | Se confirma la consola y se expulsa la sesión. |
+| Revocar | La telemetría y los eventos se rechazan y se auditan (`LECTURA_RECHAZADA_CREDENCIAL_REVOCADA`), y la sesión se expulsa **una vez por ventana de 60 s**, después de publicar el acuse (así el `rejected` llega al nodo). La auditoría tiene tope: una fila por minuto y motivo, con `suprimidos_desde_anterior`. El rechazo es **permanente** (con acuse `rejected`): el nodo pasa esas lecturas a cuarentena en LittleFS (no las borra; quedan contadas). | Se confirma la consola y se expulsa la sesión. |
 | Rotar, causa `preventiva` | La ingesta sigue aceptando al nodo, porque el token anterior no está comprometido. | Se confirma la consola y se expulsa la sesión: el nodo reconecta con el token de relevo (IoT ADR-17). |
 | Rotar, causa `compromiso` | La telemetría y los eventos se **retienen**: no se persisten, se auditan (`LECTURA_RETENIDA_ROTACION_COMPROMISO`, `EVENTO_RETENIDO_ROTACION_COMPROMISO`) y **no llevan acuse**, así que el nodo legítimo los conserva en LittleFS. Se abre el incidente **«monitoreo_suspendido»** y se avisa; SIN_DATOS no se abre. Las lecturas retenidas y las muestras `lectura_vigente` se evalúan con la regla 2-8 °C (ver abajo). | **Prueba de posesión** (ver abajo). Confirmar la consola no basta. |
 
@@ -170,7 +170,7 @@ expulsión se auditan con `motivo` = `reconexion_por_rotacion`,
 > «pendiente en el broker» con fecha y responsable, abre el incidente «monitoreo
 > suspendido» y lo avisa, y **desde ese instante hasta que el nodo pruebe la
 > posesión del token nuevo** no persiste telemetría ni eventos del nodo, audita
-> cada intento y no envía acuse;
+> los intentos con tope (una fila por minuto y clave, con el conteo de los suprimidos) y no envía acuse;
 > **y si** durante la ventana llega una temperatura válida fuera de 2-8 °C,
 > **entonces** abre una excursión crítica de origen no verificado y la avisa;
 > **y cuando** el administrador confirma la consola, el sistema expulsa la
