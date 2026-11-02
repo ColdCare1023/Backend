@@ -91,7 +91,7 @@ from src.interface.api.dispositivos_router import router as dispositivos_router
 from src.interface.api.firmware_router import router as firmware_router
 from src.interface.api.ia_router import router as ia_router
 from src.interface.api.lecturas_router import router as lecturas_router
-from src.interface.api.mappers import evidencia_edge, lectura_to_response
+from src.interface.api.mappers import evidencia_edge, lectura_to_response, tipo_sse_lectura
 from src.interface.api.reportes_router import router as reportes_router
 from src.interface.api.security_headers import instalar_security_headers
 from src.interface.api.sse_broadcaster import SSEBroadcaster
@@ -1198,11 +1198,7 @@ async def _procesar_lectura_mqtt(
     )
 
     evento_lectura = lectura_to_response(lectura_guardada).model_dump(mode="json")
-    if lectura_guardada.estado_inferencia == "omitida":
-        tipo = "fallo_sensor" if lectura_guardada.origen_clasificacion == "fallo_sensor" else "inferencia_omitida"
-    else:
-        tipo = "lectura"
-    await broadcaster.publicar(evento_lectura, tipo)
+    await broadcaster.publicar(evento_lectura, tipo_sse_lectura(lectura_guardada))
 
     # HU-18/21/34: se sigue riesgo_efectivo, no nivel_riesgo/model_class —
     # una excursión confirmada por rango abre/mantiene episodio de alerta

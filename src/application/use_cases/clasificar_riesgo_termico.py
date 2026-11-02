@@ -16,6 +16,7 @@ from src.infrastructure.ai.random_forest_service import (
     ResultadoInferencia,
 )
 
+MOTIVO_REGLA_DIRECTA = "regla_directa_fuera_de_rango"
 UMBRAL_DESVIACION_C = 0.5
 # HU-17: se requieren al menos 2 temperaturas internas previas válidas para
 # calcular una tendencia térmica real (regresión lineal). Con menos, no se
@@ -205,6 +206,14 @@ class ClasificarRiesgoTermicoUseCase:
         features = self._construir_features(lectura, historial)
         # RF-08: una lectura ya fuera de 2-8 °C no se clasifica con el modelo;
         # la regla directa decide y la IA no consume tiempo del aviso.
-        if self._modo_legado == "desactivado" or solo_regla:
+        if solo_regla:
+            # Se omitió por la regla directa, no porque el modelo falte o esté apagado: la
+            # auditoría de HU-47 debe poder distinguirlo.
+            return replace(
+                self._ai_service.inferir_solo_regla(features),
+                estado_inferencia=ESTADO_OMITIDA,
+                motivo_no_inferencia=MOTIVO_REGLA_DIRECTA,
+            )
+        if self._modo_legado == "desactivado":
             return self._ai_service.inferir_solo_regla(features)
         return self._ai_service.inferir(features)

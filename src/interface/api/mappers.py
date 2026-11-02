@@ -1,6 +1,7 @@
 import math
 from numbers import Real
 
+from src.application.use_cases.clasificar_riesgo_termico import MOTIVO_REGLA_DIRECTA
 from src.domain.entities.alerta_termica import AlertaTermica
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.entities.registro_trazabilidad import RegistroTrazabilidad
@@ -100,6 +101,15 @@ def nombre_visible(usuario: Usuario | None) -> str | None:
     if usuario.anonymized_for_gdpr:
         return NOMBRE_USUARIO_ANONIMIZADO
     return usuario.nombre
+
+
+def tipo_sse_lectura(lectura: LecturaTermica) -> str:
+    """Tipo del evento SSE de una lectura nueva. Una inferencia omitida por la regla directa
+    (lectura fuera de 2-8 °C) sigue siendo una `lectura` normal para el tablero: solo el
+    modelo ausente o el sensor en falla se anuncian aparte."""
+    if lectura.estado_inferencia == "omitida" and lectura.motivo_no_inferencia != MOTIVO_REGLA_DIRECTA:
+        return "fallo_sensor" if lectura.origen_clasificacion == "fallo_sensor" else "inferencia_omitida"
+    return "lectura"
 
 
 def alerta_to_response(alerta: AlertaTermica, revisada_por_nombre: str | None = None) -> AlertaResponse:

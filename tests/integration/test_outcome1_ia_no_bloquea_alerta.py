@@ -15,7 +15,12 @@ from src.application.use_cases.clasificar_riesgo_termico import ClasificarRiesgo
 from src.application.use_cases.registrar_lectura_termica import RegistrarLecturaTermicaUseCase
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
-from src.infrastructure.ai.random_forest_service import ESTADO_FALLIDA
+from src.infrastructure.ai.random_forest_service import (
+    ESTADO_FALLIDA,
+    ESTADO_MODELO_NO_DISPONIBLE,
+    ORIGEN_REGLA_SALVAGUARDA,
+    ResultadoInferencia,
+)
 from src.infrastructure.config import Settings
 from src.infrastructure.database.models import ThermalAlertModel
 from src.infrastructure.database.repositories.alerta_repository import SQLAlchemyAlertaRepository
@@ -149,3 +154,30 @@ def test_las_opciones_de_falla_no_arrancan_en_produccion(opcion, monkeypatch):
         monkeypatch.setenv(k, "x" * 48)
     with pytest.raises(ValueError, match="no puede activarse con ENVIRONMENT=production"):
         Settings(environment="production", _env_file=None, **opcion)
+
+
+async def test_la_lectura_fuera_de_rango_queda_omitida_por_la_regla_directa(db_session_factory):
+    """HU-47: no debe verse como «modelo no disponible» ni «legado desactivado»."""
+
+    class _Modelo:
+        metadata = {"model_version": "ok"}
+
+        def inferir(self, features):  # pragma: no cover - no se invoca
+            raise AssertionError("el modelo no debe correr fuera de rango")
+
+        def inferir_solo_regla(self, features):
+            from src.infrastructure.ai.reglas_riesgo import clasificar_por_regla
+
+            nivel = clasificar_por_regla(features)
+            return ResultadoInferencia(
+                nivel, None, ORIGEN_REGLA_SALVAGUARDA, ESTADO_MODELO_NO_DISPONIBLE,
+                "modelo_legado_desactivado", nivel_regla=nivel,
+            )
+
+    for modo in ("activo", "desactivado"):
+        lecturas = await _registrar(db_session_factory, _Modelo(), [5.0, 5.0, 12.0], ia_timeout_s=1.0)
+        fuera = lecturas[-1]
+        assert fuera.estado_inferencia == "omitida", modo
+        assert fuera.motivo_no_inferencia == "regla_directa_fuera_de_rango", modo
+        assert fuera.origen_clasificacion == ORIGEN_REGLA_SALVAGUARDA
+        assert fuera.riesgo_efectivo == NivelRiesgo.EXCURSION_CRITICA

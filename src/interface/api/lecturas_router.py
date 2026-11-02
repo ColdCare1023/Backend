@@ -22,7 +22,7 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
 )
 from src.interface.api.api_protection import limitar_ingesta_lecturas
 from src.interface.api.deps import DbSessionDep, SettingsDep, require_roles
-from src.interface.api.mappers import lectura_to_response
+from src.interface.api.mappers import lectura_to_response, tipo_sse_lectura
 from src.interface.api.schemas import LecturaIngestRequest, LecturaResponse
 
 router = APIRouter(prefix="/api/lecturas", tags=["lecturas"])
@@ -140,11 +140,7 @@ async def _emitir_eventos_sse(
         return
 
     evento = respuesta.model_dump(mode="json")
-    if lectura_guardada.estado_inferencia == "omitida":
-        tipo = "fallo_sensor" if lectura_guardada.origen_clasificacion == "fallo_sensor" else "inferencia_omitida"
-    else:
-        tipo = "lectura"
-    await broadcaster.publicar(evento, tipo)
+    await broadcaster.publicar(evento, tipo_sse_lectura(lectura_guardada))
 
     if lectura_guardada.nivel_riesgo is None:
         return
