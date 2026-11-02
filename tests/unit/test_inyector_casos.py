@@ -16,9 +16,27 @@ def _cuerpos(casos, nombre):
     return [json.loads(inyector.cuerpo_de(m)) for m in casos[nombre]]
 
 
-def test_tem05_cubre_los_seis_valores_del_limite():
+def test_tem05_usa_los_valores_de_la_matriz_con_dos_normales_antes():
     casos = inyector.construir_casos(1000)
-    assert [c["temp_ds18b20"] for c in _cuerpos(casos, "tem05_limites")] == [1.9, 2.0, 2.1, 7.9, 8.0, 8.1]
+    temps = [c["temp_ds18b20"] for c in _cuerpos(casos, "tem05_limites")]
+    assert temps[:2] == [4.5, 4.5]  # historial normal antes de los límites
+    assert temps[2:8] == [1.9, 1.9375, 2.0, 8.0, 8.0625, 8.1]
+    assert temps[8] != temps[8]  # NaN
+    assert temps[9] is None  # sensor en falla
+
+
+def test_tem05_declara_que_valores_son_excursion():
+    mensajes = inyector.construir_casos(1000)["tem05_limites"]
+    esperadas = {m["datos"]["temp_ds18b20"]: m["excursion"] for m in mensajes[2:8]}
+    assert esperadas == {1.9: True, 1.9375: True, 2.0: False, 8.0: False, 8.0625: True, 8.1: True}
+    assert mensajes[8]["esperado"] == "payload_rechazado"
+    assert mensajes[9]["datos"]["ds18b20_status"] == "SENSOR_FAULT" and mensajes[9]["excursion"] is False
+
+
+def test_el_veredicto_de_excursion_exige_coincidir_cuando_hay_dato():
+    assert inyector.veredicto_excursion(True, True) and inyector.veredicto_excursion(False, False)
+    assert not inyector.veredicto_excursion(True, False)
+    assert inyector.veredicto_excursion(None, True) and inyector.veredicto_excursion(True, None)
 
 
 def test_latencia_alterna_fuera_y_dentro_de_rango_con_identidades_distintas():
