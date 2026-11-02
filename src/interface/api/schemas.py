@@ -467,7 +467,7 @@ class IncidenteOperativoResponse(BaseModel):
 
     id: str
     device_id: str
-    tipo: Literal["sin_datos", "monitoreo_suspendido", "excursion_no_verificada"]
+    tipo: Literal["sin_datos", "monitoreo_suspendido", "excursion_no_verificada", "sensor_fault", "colision_clave"]
     estado: Literal["activo", "resuelto"]
     detectado_en: datetime
     ultimo_reporte_en: datetime | None

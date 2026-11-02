@@ -51,7 +51,7 @@ def test_huecos_y_duplicados():
 
 def test_percentiles_por_rango_mas_cercano():
     datos = [float(i) for i in range(1, 101)]
-    r = resumir(datos + [None])
+    r = resumir([*datos, None])
     assert (r["p50_s"], r["p95_s"], r["p99_s"], r["max_s"]) == (50.0, 95.0, 99.0, 100.0)
     assert r["sin_medir"] == 1
     assert percentil([3.0], 99) == 3.0

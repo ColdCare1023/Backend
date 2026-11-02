@@ -16,6 +16,7 @@ import asyncio
 import os
 import sys
 from collections import Counter
+from itertools import pairwise
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -28,7 +29,7 @@ def analizar(seqs: list[int]) -> dict:
     cuentas = Counter(seqs)
     unicos = sorted(cuentas)
     huecos = []
-    for anterior, siguiente in zip(unicos, unicos[1:]):
+    for anterior, siguiente in pairwise(unicos):
         if siguiente - anterior > 1:
             huecos.append((anterior + 1, siguiente - 1))
     return {

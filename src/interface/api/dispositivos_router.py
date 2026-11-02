@@ -27,8 +27,10 @@ from src.application.use_cases.retencion_compromiso import abrir_monitoreo_suspe
 from src.application.use_cases.vigilar_sin_datos import umbral_sin_datos
 from src.domain.exceptions import DomainError, RecursoNoEncontradoError
 from src.domain.repositories.i_incidente_repository import (
+    TIPO_COLISION_CLAVE,
     TIPO_EXCURSION_NO_VERIFICADA,
     TIPO_MONITOREO_SUSPENDIDO,
+    TIPO_SENSOR_FAULT,
     IncidenteOperativo,
 )
 from src.domain.value_objects.device_id import PATRON_DEVICE_ID
@@ -267,6 +269,7 @@ def _estado_operativo(
     abierto: IncidenteOperativo | None,
     n_intervalos: int,
     retencion: list[IncidenteOperativo] | None = None,
+    de_lectura: list[IncidenteOperativo] | None = None,
 ) -> EstadoOperativoResponse:
     """Clasifica el nodo por su última lectura recibida (no por la IA).
 
@@ -308,10 +311,13 @@ def _estado_operativo(
             device_id=device["id"], tipo="sin_datos", estado="activo", detectado_en=detectado,
             ultimo_reporte_en=ultimo_reporte, umbral_silencio_segundos=umbral,
         ))
-    elif any(s.estado == "error" for s in sensores):
+    elif any(s.estado == "error" for s in sensores) or any(i.tipo == TIPO_SENSOR_FAULT for i in de_lectura or []):
         estado = "FALLA_SENSOR"
     else:
         estado = "OPERATIVO"
+    # Incidentes que nacen de la ingesta (sensor_fault, colision_clave): visibles
+    # en cualquier estado, no solo cuando el nodo calla.
+    incidencias.extend(_incidente_response(i) for i in de_lectura or [])
 
     return EstadoOperativoResponse(
         **{k: v for k, v in device.items() if k not in ("intervalo_reporte_segundos",)},
@@ -348,9 +354,13 @@ async def estado_operativo(
             i for tipo in (TIPO_MONITOREO_SUSPENDIDO, TIPO_EXCURSION_NO_VERIFICADA)
             if (i := await incidentes.abierto(device["id"], tipo)) is not None
         ]
+        de_lectura = [
+            i for tipo in (TIPO_SENSOR_FAULT, TIPO_COLISION_CLAVE)
+            if (i := await incidentes.abierto(device["id"], tipo)) is not None
+        ]
         estado = _estado_operativo(
             device, await lecturas.ultima_recibida_por_device(device["id"]), ahora,
-            await incidentes.abierto(device["id"]), settings.sin_datos_n_intervalos, retencion,
+            await incidentes.abierto(device["id"]), settings.sin_datos_n_intervalos, retencion, de_lectura,
         )
         if todos or estado.estado_operativo != "OPERATIVO":
             resultado.append(estado)

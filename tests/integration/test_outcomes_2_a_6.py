@@ -308,3 +308,23 @@ async def test_la_respuesta_de_la_alerta_expone_el_estado_del_correo(db_session_
     entidad.notificada_en = datetime.now(tz=timezone.utc)
     respuesta = alerta_to_response(entidad)
     assert respuesta.notificacion_intentos == 2 and respuesta.notificada_en is not None
+
+
+# ── Los incidentes nuevos son visibles en la API ───────────────────────────────
+
+
+async def test_la_api_expone_sensor_fault_y_marca_falla_de_sensor(client, token_admin, db_session_factory):
+    from tests.conftest import auth_header
+
+    cabecera = auth_header(token_admin)
+    assert client.post("/api/dispositivos", json={"device_id": DEVICE_ID}, headers=cabecera).status_code == 201
+    await _correr(db_session_factory, [5.0, None, None])
+
+    incidentes = client.get("/api/dispositivos/incidentes", headers=cabecera)
+    assert incidentes.status_code == 200
+    assert [i["tipo"] for i in incidentes.json()] == ["sensor_fault"]
+
+    estado = client.get("/api/dispositivos/estado-operativo", params={"todos": True}, headers=cabecera)
+    nodo = next(e for e in estado.json() if e["id"] == DEVICE_ID)
+    assert nodo["estado_operativo"] == "FALLA_SENSOR"
+    assert [i["tipo"] for i in nodo["incidencias_operativas"]] == ["sensor_fault"]
