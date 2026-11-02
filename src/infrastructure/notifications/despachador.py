@@ -363,6 +363,9 @@ class DespachadorNotificaciones:
             recurso=recurso,
             detalle={
                 **referencia,
+                # Sin el dispositivo en el detalle no se puede medir una corrida
+                # (informe de latencia por device_id).
+                "device_id": aviso.device_id,
                 "canal": canal,
                 "transporte": getattr(self._transporte, "nombre", None) if canal == "email" else None,
                 **extra,

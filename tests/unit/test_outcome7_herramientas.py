@@ -164,3 +164,19 @@ def test_el_interruptor_de_commit(monkeypatch):
     _Ajustes.mqtt_prueba_fallo_antes_commit = "salir"
     main._inyectar_fallo_antes_del_commit(_Ajustes())
     assert salidas == [70]
+
+
+def test_el_informe_filtra_por_dispositivo_y_solo_cuenta_correo():
+    from datetime import datetime, timezone
+
+    from scripts.informe_latencia import seleccionar
+
+    t = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    filas = [
+        (t, {"canal": "email", "device_id": "RUN1", "latencia_s": 1.5}),
+        (t, {"canal": "sms", "device_id": "RUN1", "latencia_s": None}),
+        (t, {"canal": "email", "device_id": "RUN2", "latencia_s": 2.0}),
+        (t, '{"canal": "email", "device_id": "RUN1", "latencia_s": 0.9}'),
+    ]
+    assert [f["latencia_s"] for f in seleccionar(filas, "RUN1")] == [1.5, 0.9]
+    assert len(seleccionar(filas, None)) == 3

@@ -1,5 +1,7 @@
 """LAT-02 / RIE-03: latencia del aviso por correo (p50, p95, p99, máximo).
 
+Solo cuenta el canal de correo. `--device-id` filtra por el `device_id` del detalle,
+que existe desde que el despachador lo guarda (las filas anteriores no lo traen).
 Lee `NOTIFICACION_ENVIADA.latencia_s` (segundos entre la recepción de la
 lectura y el envío del correo) de `audit_logs` y la resume. Con `--desde`
 acota la corrida y con `--device-id` la limita a un dispositivo de prueba.
@@ -44,14 +46,29 @@ def resumir(latencias: list[float | None]) -> dict:
     return resumen
 
 
+def seleccionar(filas: list[tuple], device_id: str | None) -> list[dict]:
+    """Filas (creado, detalle) de NOTIFICACION_ENVIADA -> avisos de correo de la corrida."""
+    salida = []
+    for creado, detalle in filas:
+        d = json.loads(detalle) if isinstance(detalle, str) else (detalle or {})
+        # El SMS también deja NOTIFICACION_ENVIADA (sin latencia): solo cuenta el correo.
+        # Las filas anteriores a este campo no traen `canal`: se asumen de correo.
+        if d.get("canal", "email") != "email":
+            continue
+        if device_id and d.get("device_id") != device_id:
+            continue
+        salida.append({
+            "creado": creado.isoformat(), "device_id": d.get("device_id"),
+            "latencia_s": d.get("latencia_s"), "diferida": d.get("diferida"),
+        })
+    return salida
+
+
 async def _leer(url: str, desde: str | None, device_id: str | None) -> list[dict]:
     condiciones, parametros = ["accion = 'NOTIFICACION_ENVIADA'"], {}
     if desde:
         condiciones.append("created_at >= CAST(:desde AS TIMESTAMPTZ)")
         parametros["desde"] = desde
-    if device_id:
-        condiciones.append("CAST(detalle AS TEXT) LIKE :dev")
-        parametros["dev"] = f'%"{device_id}"%'
     motor = create_async_engine(url)
     async with motor.connect() as conexion:
         filas = (await conexion.execute(
@@ -59,11 +76,7 @@ async def _leer(url: str, desde: str | None, device_id: str | None) -> list[dict
             parametros,
         )).all()
     await motor.dispose()
-    salida = []
-    for creado, detalle in filas:
-        d = json.loads(detalle) if isinstance(detalle, str) else (detalle or {})
-        salida.append({"creado": creado.isoformat(), "latencia_s": d.get("latencia_s"), "diferida": d.get("diferida")})
-    return salida
+    return seleccionar(filas, device_id)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -81,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{clave:>10}: {valor}")
     if args.csv:
         with open(args.csv, "w", newline="", encoding="utf-8") as salida:
-            escritor = csv.DictWriter(salida, fieldnames=["creado", "latencia_s", "diferida"])
+            escritor = csv.DictWriter(salida, fieldnames=["creado", "device_id", "latencia_s", "diferida"])
             escritor.writeheader()
             escritor.writerows(filas)
         print(f"{len(filas)} filas en {args.csv}")
