@@ -7,7 +7,7 @@ from email.message import EmailMessage
 
 import pytest
 
-from scripts.cadenas_prueba import generar_eslabones, verificar_eslabones
+from scripts.cadenas_prueba import forjar_insercion, generar_eslabones, recomputar_desde, verificar_eslabones
 from scripts.huecos_seq import analizar
 from scripts.informe_latencia import percentil, resumir
 from scripts.smtp_falla import servir
@@ -33,6 +33,32 @@ def test_un_eslabon_borrado_rompe_el_enlace():
     filas = generar_eslabones("PRUEBA", 100, 2, None)
     del filas[29]
     assert verificar_eslabones(filas, None) == 31
+
+
+@pytest.mark.parametrize("version,clave", [(1, None), (2, None), (3, b"clave-de-prueba")])
+def test_una_insercion_forjada_se_detecta_en_el_eslabon_siguiente(version, clave):
+    filas = generar_eslabones("PRUEBA", 100, version, clave)
+    forjada = forjar_insercion(filas, 40, clave)
+    assert len(forjada) == 101 and forjada[39]["payload"].get("forjado")
+    assert verificar_eslabones(forjada, clave) == 41  # el forjado enlaza bien; el que sigue no
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_recomputar_sin_clave_deja_la_cadena_coherente_aunque_alterada(version):
+    filas = generar_eslabones("PRUEBA", 100, version, None)
+    filas[49]["payload"] = {"alterado": True}
+    assert verificar_eslabones(filas, None) == 50
+    assert verificar_eslabones(recomputar_desde(filas, 50, None), None) is None  # solo un ancla externa lo delata
+
+
+def test_recomputar_v3_necesita_la_clave_y_con_la_equivocada_se_detecta():
+    clave = b"clave-de-prueba"
+    filas = generar_eslabones("PRUEBA", 100, 3, clave)
+    filas[49]["payload"] = {"alterado": True}
+    with pytest.raises(ValueError):
+        recomputar_desde(filas, 50, None)
+    reescrita = recomputar_desde(filas, 50, b"otra-clave")
+    assert verificar_eslabones(reescrita, clave) == 50
 
 
 def test_la_cadena_v3_exige_clave():
