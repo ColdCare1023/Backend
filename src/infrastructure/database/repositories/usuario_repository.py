@@ -27,6 +27,7 @@ def _to_entity(model: UserModel) -> Usuario:
         anonymized_for_gdpr=model.anonymized_for_gdpr,
         tokens_invalidos_antes_de=model.tokens_invalidos_antes_de,
         debe_cambiar_password=model.debe_cambiar_password,
+        telefono=model.telefono,
     )
 
 
@@ -67,6 +68,7 @@ class SQLAlchemyUsuarioRepository(IUsuarioRepository):
             anonymized_for_gdpr=usuario.anonymized_for_gdpr,
             tokens_invalidos_antes_de=usuario.tokens_invalidos_antes_de,
             debe_cambiar_password=usuario.debe_cambiar_password,
+            telefono=usuario.telefono,
         )
         self._session.add(model)
         await self._session.flush()

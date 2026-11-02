@@ -328,3 +328,34 @@ async def test_la_api_expone_sensor_fault_y_marca_falla_de_sensor(client, token_
     nodo = next(e for e in estado.json() if e["id"] == DEVICE_ID)
     assert nodo["estado_operativo"] == "FALLA_SENSOR"
     assert [i["tipo"] for i in nodo["incidencias_operativas"]] == ["sensor_fault"]
+
+
+# ── Celular del usuario ────────────────────────────────────────────────────────
+
+
+async def test_el_usuario_guarda_su_celular_y_la_api_lo_devuelve_enmascarado(client, token_admin):
+    from tests.conftest import auth_header
+
+    cabecera = auth_header(token_admin)
+    alta = client.post(
+        "/api/usuarios",
+        json={"nombre": "Con Celular", "email": "celular@prueba.pe", "password": "Clave-Segura-2026!x",
+              "rol": "farmaceutico", "telefono": "+51999888777"},
+        headers=cabecera,
+    )
+    assert alta.status_code == 201, alta.text
+    assert alta.json()["telefono"] == "+51••••••777"  # nunca el número completo
+    assert "999888" not in alta.text
+
+
+@pytest.mark.parametrize("telefono", ["999888777", "+0123456789", "+51 999 888 777", "+5199"])
+async def test_un_celular_que_no_es_e164_se_rechaza(client, token_admin, telefono):
+    from tests.conftest import auth_header
+
+    respuesta = client.post(
+        "/api/usuarios",
+        json={"nombre": "X", "email": "malcel@prueba.pe", "password": "Clave-Segura-2026!x",
+              "rol": "farmaceutico", "telefono": telefono},
+        headers=auth_header(token_admin),
+    )
+    assert respuesta.status_code == 422

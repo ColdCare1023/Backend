@@ -24,7 +24,7 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
 from src.infrastructure.database.repositories.usuario_repository import SQLAlchemyUsuarioRepository
-from src.infrastructure.security.privacidad import enmascarar_email
+from src.infrastructure.security.privacidad import enmascarar_email, enmascarar_telefono
 from src.interface.api.deps import DbSessionDep, require_roles
 from src.interface.api.mappers import nombre_visible
 from src.interface.api.schemas import (
@@ -53,6 +53,7 @@ def _to_response(usuario) -> UsuarioResponse:
         motivo_desactivacion=usuario.motivo_desactivacion,
         desactivado_en=usuario.desactivado_en,
         debe_cambiar_password=usuario.debe_cambiar_password,
+        telefono=enmascarar_telefono(None if anonimizado else getattr(usuario, "telefono", None)),
     )
 
 
@@ -66,7 +67,7 @@ async def crear_usuario(
     repositorio = SQLAlchemyUsuarioRepository(session)
     use_case = CrearUsuarioUseCase(repositorio)
     try:
-        usuario = await use_case.execute(body.nombre, body.email, body.password, body.rol)
+        usuario = await use_case.execute(body.nombre, body.email, body.password, body.rol, body.telefono)
     except DomainError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 

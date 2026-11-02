@@ -162,6 +162,8 @@ class UserModel(Base):
     id: Mapped[uuid.UUID] = _uuid_pk()
     nombre: Mapped[str] = mapped_column(String(120), nullable=False)
     email: Mapped[str] = mapped_column(String(150), unique=True, nullable=False, index=True)
+    # Migración 0036: celular E.164 del usuario (aviso por SMS al crear la cuenta).
+    telefono: Mapped[str | None] = mapped_column(String(20), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     rol_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("roles.id"), nullable=False)
 

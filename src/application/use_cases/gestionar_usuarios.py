@@ -24,7 +24,9 @@ class CrearUsuarioUseCase:
     def __init__(self, usuario_repository: IUsuarioRepository) -> None:
         self._usuario_repository = usuario_repository
 
-    async def execute(self, nombre: str, email: str, password: str, rol: Rol) -> Usuario:
+    async def execute(
+        self, nombre: str, email: str, password: str, rol: Rol, telefono: str | None = None
+    ) -> Usuario:
         existente = await self._usuario_repository.obtener_por_email(email)
         if existente is not None:
             if not existente.is_active:
@@ -36,7 +38,8 @@ class CrearUsuarioUseCase:
         # BE-025: la contraseña inicial la conoce el administrador; el usuario
         # debe reemplazarla por una propia en su primer acceso.
         usuario = Usuario(
-            nombre=nombre, email=email, password_hash=await hash_password_async(password), rol=rol, debe_cambiar_password=True
+            nombre=nombre, email=email, password_hash=await hash_password_async(password), rol=rol, debe_cambiar_password=True,
+            telefono=telefono,
         )
         return await self._usuario_repository.agregar(usuario)
 

@@ -100,6 +100,8 @@ class UsuarioCreateRequest(_PeticionEstricta):
     email: EmailStr
     password: PasswordNueva
     rol: Rol
+    # Celular E.164 (+51999888777): recibe el SMS de bienvenida al crear la cuenta.
+    telefono: str | None = Field(default=None, pattern=r"^\+[1-9]\d{7,14}$")
 
 
 class CambiarPasswordRequest(_PeticionEstricta):
@@ -131,6 +133,8 @@ class UsuarioResponse(BaseModel):
     motivo_desactivacion: str | None = None
     desactivado_en: datetime | None = None
     debe_cambiar_password: bool = False
+    # Enmascarado (+51••••••777): el número completo no sale por la API.
+    telefono: str | None = None
 
 
 class PasswordTemporalResponse(BaseModel):

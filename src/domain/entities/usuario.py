@@ -35,6 +35,8 @@ class Usuario:
     # BE-025: contraseña asignada por un administrador (alta, restablecimiento
     # o reactivación): debe cambiarse antes de usar el sistema.
     debe_cambiar_password: bool = False
+    # Celular en formato E.164 (+51999888777) para el aviso por SMS al crear la cuenta.
+    telefono: str | None = None
 
     def tiene_permiso(self, roles_permitidos: tuple[Rol, ...]) -> bool:
         return self.rol in roles_permitidos

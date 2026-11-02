@@ -6,6 +6,13 @@ inmutable por diseño.
 """
 
 
+def enmascarar_telefono(telefono: str | None) -> str | None:
+    """+51999888777 -> +51•••••777: lo justo para reconocerlo, nunca el número completo."""
+    if not telefono:
+        return None
+    return f"{telefono[:3]}{'•' * max(len(telefono) - 6, 0)}{telefono[-3:]}"
+
+
 def enmascarar_email(email: str) -> str:
     """Reduce un correo a `p***@dominio` para la bitácora.
 
