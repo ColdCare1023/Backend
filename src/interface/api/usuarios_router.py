@@ -1,6 +1,7 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.gestionar_credenciales import (
@@ -24,8 +25,9 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
 from src.infrastructure.database.repositories.usuario_repository import SQLAlchemyUsuarioRepository
+from src.infrastructure.notifications.bienvenida import NotificadorBienvenida
 from src.infrastructure.security.privacidad import enmascarar_email, enmascarar_telefono
-from src.interface.api.deps import DbSessionDep, require_roles
+from src.interface.api.deps import DbSessionDep, SettingsDep, require_roles
 from src.interface.api.mappers import nombre_visible
 from src.interface.api.schemas import (
     CambiarRolUsuarioRequest,
@@ -38,6 +40,34 @@ from src.interface.api.schemas import (
 EMAIL_ANONIMIZADO = "—"
 
 router = APIRouter(prefix="/api/usuarios", tags=["usuarios"])
+
+
+def get_notificador_bienvenida(settings: SettingsDep) -> NotificadorBienvenida:
+    """Sustituible en pruebas (no se sale a la red)."""
+    return NotificadorBienvenida(settings)
+
+
+async def _avisar_alta(
+    fabrica_sesiones: async_sessionmaker, notificador: NotificadorBienvenida, usuario_id: UUID, admin_id: UUID, nombre: str, email: str,
+    telefono: str | None,
+) -> None:
+    """Después de responder: correo y SMS reales al usuario nuevo, y su resultado en la bitácora
+    (enmascarado: audit_logs es inmutable)."""
+    resultado = await notificador.notificar(nombre, email, telefono)
+    async with fabrica_sesiones() as session:
+        await AuditarAccionCriticaUseCase(
+            SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+        ).execute(
+            usuario_id=admin_id,
+            accion="BIENVENIDA_NOTIFICADA",
+            recurso=f"usuarios/{usuario_id}",
+            detalle={
+                "correo": resultado.correo, "sms": resultado.sms,
+                "email": enmascarar_email(email), "telefono": enmascarar_telefono(telefono),
+            },
+            ip_origen=None,
+        )
+        await session.commit()
 
 
 def _to_response(usuario) -> UsuarioResponse:
@@ -62,6 +92,8 @@ async def crear_usuario(
     body: UsuarioCreateRequest,
     session: DbSessionDep,
     request: Request,
+    tareas: BackgroundTasks,
+    notificador: NotificadorBienvenida = Depends(get_notificador_bienvenida),
     admin=Depends(require_roles(Rol.ADMINISTRADOR)),
 ) -> UsuarioResponse:
     repositorio = SQLAlchemyUsuarioRepository(session)
@@ -83,6 +115,11 @@ async def crear_usuario(
         ip_origen=request.client.host if request.client else None,
     )
     await session.commit()
+    # Aviso real al usuario nuevo, tras confirmar el alta y sin retrasar la respuesta.
+    tareas.add_task(
+        _avisar_alta, async_sessionmaker(session.bind, expire_on_commit=False), notificador,
+        usuario.id, admin.id, usuario.nombre, usuario.email, usuario.telefono,
+    )
     return _to_response(usuario)
 
 

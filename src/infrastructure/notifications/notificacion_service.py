@@ -293,6 +293,13 @@ class NotificacionService:
         except Exception:
             logger.exception("No se pudo enviar el aviso por Telegram para %s", device_id)
 
+    async def enviar_sms_a(self, telefono_destino: str, texto: str, referencia: str) -> bool:
+        """SMS directo a un número (p. ej. la bienvenida a un usuario nuevo). `referencia`
+        solo identifica el motivo en el log; el número no se registra."""
+        if not self._settings.sms_enabled:
+            return False
+        return await self._enviar_sms(referencia, texto, telefono_destino)
+
     async def _enviar_sms(self, device_id: str, texto: str, telefono_destino: str) -> bool:
         """HU-54: pasarela compatible con la API REST de Twilio (Account SID
         + Auth Token vía HTTP Basic, cuerpo form-encoded) — el proveedor
