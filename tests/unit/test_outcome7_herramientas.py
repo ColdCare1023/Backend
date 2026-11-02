@@ -331,3 +331,10 @@ def test_guardar_credenciales_limpia_los_marcadores_de_pegado():
     assert limpiar(f"  {sid}\n") == sid
     assert limpiar("a b\tc") == "abc"
     assert validar("SMS_ACCOUNT_SID", limpiar(f"\x1b[200~{sid}\x1b[201~")) is None
+
+
+def test_probar_notificaciones_acepta_varios_correos_sin_repetidos():
+    from scripts.probar_notificaciones import separar_correos
+
+    assert separar_correos("a@x.com, b@y.com,,a@x.com ") == ["a@x.com", "b@y.com"]
+    assert separar_correos("") == [] and separar_correos(" , ") == []

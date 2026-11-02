@@ -5,7 +5,7 @@ mismos textos), con la configuración del entorno (`.env`): no hay un canal de s
 Imprime qué pasó con cada canal y sale con 1 si alguno falló o no está configurado.
 
 Uso:
-    export PRUEBA_EMAIL=tu_correo@ejemplo.com
+    export PRUEBA_EMAIL=tu_correo@ejemplo.com             # o varios, separados por coma: a@x.com,b@y.com
     export PRUEBA_TELEFONO=+51999888777          # E.164; opcional, sin él solo prueba el correo
     python -m scripts.probar_notificaciones
 
@@ -34,22 +34,38 @@ from src.infrastructure.security.privacidad import enmascarar_email, enmascarar_
 E164 = re.compile(r"^\+[1-9]\d{7,14}$")
 
 
+def separar_correos(texto: str) -> list[str]:
+    """«a@x.com, b@y.com» -> ['a@x.com', 'b@y.com'] (sin vacíos ni repetidos, en orden)."""
+    vistos: list[str] = []
+    for parte in texto.split(","):
+        correo = parte.strip()
+        if correo and correo not in vistos:
+            vistos.append(correo)
+    return vistos
+
+
 async def probar(email: str, telefono: str | None) -> tuple[str, str]:
     resultado = await NotificadorBienvenida(get_settings()).notificar("Prueba de ColdCare", email, telefono)
     return resultado.correo, resultado.sms
 
 
 def main() -> int:
-    email = os.getenv("PRUEBA_EMAIL", "").strip()
+    correos = separar_correos(os.getenv("PRUEBA_EMAIL", ""))
     telefono = os.getenv("PRUEBA_TELEFONO", "").strip() or None
-    if not email:
-        sys.exit("Falta PRUEBA_EMAIL (tu correo real).")
+    if not correos:
+        sys.exit("Falta PRUEBA_EMAIL (tu correo real; varios, separados por coma).")
     if telefono and not E164.match(telefono):
         sys.exit("PRUEBA_TELEFONO debe estar en formato E.164, p. ej. +51999888777.")
-    correo, sms = asyncio.run(probar(email, telefono))
-    print(f"Correo  → {enmascarar_email(email)}: {correo}")
+    correo_ok = True
+    sms = None
+    for i, email in enumerate(correos):
+        # El SMS se manda una sola vez (con el primer correo): no se repite por destinatario.
+        correo, sms_i = asyncio.run(probar(email, telefono if i == 0 else None))
+        print(f"Correo  → {enmascarar_email(email)}: {correo}")
+        correo_ok = correo_ok and correo == ENVIADO
+        if i == 0:
+            sms = sms_i
     print(f"SMS     → {enmascarar_telefono(telefono) or '(sin número)'}: {sms}")
-    correo_ok = correo == ENVIADO
     sms_ok = sms == ENVIADO or telefono is None
     print("Revisa tu bandeja y tu teléfono: «enviado» significa que el proveedor aceptó el mensaje.")
     return 0 if correo_ok and sms_ok else 1
