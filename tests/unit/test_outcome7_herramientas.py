@@ -229,3 +229,24 @@ async def test_el_acuse_admite_un_status_explicito_y_por_defecto_usa_el_mapa():
         ("dispositivo_no_autorizado", "revoked"),
         ("dispositivo_no_autorizado", "rejected"),
     ]
+
+
+def test_las_fechas_de_los_scripts_son_datetime_con_zona():
+    from datetime import datetime, timedelta, timezone
+
+    from scripts._fechas import a_datetime, a_datetime_opcional
+
+    assert a_datetime("2026-11-01T15:00:00Z") == datetime(2026, 11, 1, 15, tzinfo=timezone.utc)
+    assert a_datetime("2026-11-01T15:00:00-05:00").utcoffset() == timedelta(hours=-5)
+    assert a_datetime("2026-11-01T15:00:00").tzinfo is timezone.utc  # sin zona: UTC
+    assert a_datetime_opcional(None) is None and a_datetime_opcional("") is None
+
+
+def test_los_parametros_de_insercion_llevan_datetime_no_texto():
+    from datetime import datetime
+
+    from scripts.cadenas_prueba import _parametros_fila
+
+    (fila,) = generar_eslabones("PRUEBA", 1, 2, None)
+    p = _parametros_fila(fila)
+    assert isinstance(p["timestamp"], datetime) and isinstance(p["payload"], str)

@@ -21,6 +21,8 @@ from itertools import pairwise
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from scripts._fechas import a_datetime
+
 
 def analizar(seqs: list[int]) -> dict:
     """Huecos (rangos que faltan entre el menor y el mayor) y duplicados de una lista de seq_no."""
@@ -47,7 +49,7 @@ async def _leer(url: str, device_id: str, desde: str | None) -> dict[int, list[i
     parametros = {"d": device_id}
     if desde:
         sql += " AND timestamp >= CAST(:desde AS TIMESTAMPTZ)"
-        parametros["desde"] = desde
+        parametros["desde"] = a_datetime(desde)  # asyncpg exige datetime, no texto
     motor = create_async_engine(url)
     async with motor.connect() as conexion:
         filas = (await conexion.execute(text(sql), parametros)).all()

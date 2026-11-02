@@ -34,6 +34,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from scripts._fechas import a_datetime
 from src.domain.value_objects.hash_encadenado import GENESIS_HASH, hash_esperado, timestamp_canonico
 
 TRIGGERS = (
@@ -118,6 +119,13 @@ def recomputar_desde(filas: list[dict], desde: int, clave: bytes | None) -> list
     return salida
 
 
+def _parametros_fila(fila: dict) -> dict:
+    """Parámetros de INSERT: el payload como JSON y el timestamp como datetime (asyncpg no acepta texto)."""
+    import json
+
+    return {**fila, "payload": json.dumps(fila["payload"]), "timestamp": a_datetime(fila["timestamp"])}
+
+
 def _validar_entorno(url: str) -> None:
     if os.getenv("ENVIRONMENT", "development") == "production":
         sys.exit("Se niega a correr con ENVIRONMENT=production.")
@@ -127,7 +135,6 @@ def _validar_entorno(url: str) -> None:
 
 
 async def _generar(args, url: str) -> None:
-    import json
 
     clave = args.clave.encode() if args.clave else None
     filas = generar_eslabones(args.chain_id, args.n, args.version, clave)
@@ -141,7 +148,7 @@ async def _generar(args, url: str) -> None:
                     " VALUES (:id, :tipo_evento, :device_id, CAST(:payload AS JSON), CAST(:timestamp AS TIMESTAMPTZ),"
                     " :previous_hash, :hash_actual, :chain_id, :chain_seq, :hash_version, false, false)"
                 ),
-                [{**f, "payload": json.dumps(f["payload"])} for f in filas[lote : lote + 1000]],
+                [_parametros_fila(f) for f in filas[lote : lote + 1000]],
             )
     await motor.dispose()
     print(f"{len(filas)} eslabones v{args.version} en la cadena {args.chain_id}.")
@@ -184,7 +191,6 @@ async def _verificar(args, url: str) -> int:
 
 async def _reescribir(args, url: str, transformar) -> None:
     """Lee la cadena, aplica `transformar` y la reescribe con los triggers desactivados."""
-    import json
 
     clave = args.clave.encode() if args.clave else None
     motor = create_async_engine(url)
@@ -209,7 +215,7 @@ async def _reescribir(args, url: str, transformar) -> None:
                         " CAST(:timestamp AS TIMESTAMPTZ), :previous_hash, :hash_actual, :chain_id, :chain_seq,"
                         " :hash_version, false, false)"
                     ),
-                    [{**f, "payload": json.dumps(f["payload"])} for f in nuevas[lote : lote + 1000]],
+                    [_parametros_fila(f) for f in nuevas[lote : lote + 1000]],
                 )
         finally:
             for tabla, disparador in TRIGGERS:

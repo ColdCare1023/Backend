@@ -25,6 +25,8 @@ import sys
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from scripts._fechas import a_datetime
+
 
 def percentil(valores_ordenados: list[float], p: float) -> float:
     """Percentil por rango más cercano (el que se reporta en el paper)."""
@@ -68,7 +70,7 @@ async def _leer(url: str, desde: str | None, device_id: str | None) -> list[dict
     condiciones, parametros = ["accion = 'NOTIFICACION_ENVIADA'"], {}
     if desde:
         condiciones.append("created_at >= CAST(:desde AS TIMESTAMPTZ)")
-        parametros["desde"] = desde
+        parametros["desde"] = a_datetime(desde)  # asyncpg exige datetime, no texto
     motor = create_async_engine(url)
     async with motor.connect() as conexion:
         filas = (await conexion.execute(
