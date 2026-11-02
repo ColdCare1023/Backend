@@ -88,44 +88,48 @@ async def _alertas(db_session_factory) -> list[ThermalAlertModel]:
         return (await session.execute(select(ThermalAlertModel))).scalars().all()
 
 
-async def test_inferencia_colgada_vence_y_la_alerta_critica_sale(db_session_factory):
+async def test_inferencia_colgada_vence_en_una_lectura_normal(db_session_factory):
     inicio = time.monotonic()
-    lecturas = await _registrar(db_session_factory, _ModeloLento(), [5.0, 5.0, 9.5], ia_timeout_s=0.2)
+    lecturas = await _registrar(db_session_factory, _ModeloLento(), [5.0, 5.0, 5.0], ia_timeout_s=0.2)
 
     assert time.monotonic() - inicio < 3  # no esperó los 5 s del modelo
+    assert lecturas[-1].estado_inferencia == ESTADO_FALLIDA
+    assert lecturas[-1].motivo_no_inferencia == "timeout_inferencia"
+    assert lecturas[-1].nivel_riesgo is None
+    assert lecturas[-1].riesgo_efectivo == NivelRiesgo.NORMAL
+
+
+async def test_la_excursion_sale_aunque_la_ia_este_colgada(db_session_factory):
+    # La lectura fuera de rango no consulta al modelo (RF-08): ni espera ni falla.
+    inicio = time.monotonic()
+    lecturas = await _registrar(
+        db_session_factory, _ModeloLento(), [5.0, 9.5], ia_timeout_s=0.2, ia_prueba_retardo_s=1.0
+    )
+
     ultima = lecturas[-1]
-    assert ultima.estado_inferencia == ESTADO_FALLIDA
-    assert ultima.motivo_no_inferencia == "timeout_inferencia"
-    assert ultima.nivel_riesgo is None
+    assert time.monotonic() - inicio < 3
+    assert ultima.estado_inferencia != ESTADO_FALLIDA  # la IA ni se intentó
     assert ultima.excursion_confirmada is True
     assert ultima.riesgo_efectivo == NivelRiesgo.EXCURSION_CRITICA
     assert [a.nivel_riesgo for a in await _alertas(db_session_factory)] == [NivelRiesgo.EXCURSION_CRITICA.value]
 
 
-async def test_excepcion_del_modelo_no_impide_la_alerta_y_no_filtra_el_mensaje(db_session_factory):
-    lecturas = await _registrar(db_session_factory, _ModeloQueLanza(), [5.0, 5.0, 9.5], ia_timeout_s=1.0)
+async def test_excepcion_del_modelo_no_filtra_el_mensaje(db_session_factory):
+    lecturas = await _registrar(db_session_factory, _ModeloQueLanza(), [5.0, 5.0, 5.0], ia_timeout_s=1.0)
 
-    ultima = lecturas[-1]
-    assert ultima.estado_inferencia == ESTADO_FALLIDA
-    assert ultima.motivo_no_inferencia == "excepcion_inferencia"
-    assert ultima.riesgo_efectivo == NivelRiesgo.EXCURSION_CRITICA
-    assert len(await _alertas(db_session_factory)) == 1
+    assert lecturas[-1].estado_inferencia == ESTADO_FALLIDA
+    assert lecturas[-1].motivo_no_inferencia == "excepcion_inferencia"
+    assert "datos que no deben filtrarse" not in (lecturas[-1].motivo_no_inferencia or "")
 
 
 async def test_opciones_de_prueba_simulan_retardo_y_excepcion(db_session_factory):
     class _Normal:
         metadata = {"model_version": "ok"}
 
-        def inferir(self, features):  # pragma: no cover - no se llega
-            raise AssertionError
-
-        inferir_solo_regla = inferir
-
     retardo = await _registrar(
-        db_session_factory, _Normal(), [5.0, 9.5], ia_timeout_s=0.1, ia_prueba_retardo_s=1.0
+        db_session_factory, _Normal(), [5.0, 5.0, 5.0], ia_timeout_s=0.1, ia_prueba_retardo_s=1.0
     )
     assert retardo[-1].motivo_no_inferencia == "timeout_inferencia"
-    assert retardo[-1].riesgo_efectivo == NivelRiesgo.EXCURSION_CRITICA
 
 
 async def test_excepcion_inyectada(db_session_factory):
@@ -133,11 +137,10 @@ async def test_excepcion_inyectada(db_session_factory):
         metadata = {"model_version": "ok"}
 
     lecturas = await _registrar(
-        db_session_factory, _Normal(), [5.0, 9.5], ia_timeout_s=1.0, ia_prueba_excepcion=True
+        db_session_factory, _Normal(), [5.0, 5.0, 5.0], ia_timeout_s=1.0, ia_prueba_excepcion=True
     )
     assert lecturas[-1].estado_inferencia == ESTADO_FALLIDA
     assert lecturas[-1].motivo_no_inferencia == "excepcion_inferencia"
-    assert lecturas[-1].riesgo_efectivo == NivelRiesgo.EXCURSION_CRITICA
 
 
 @pytest.mark.parametrize("opcion", [{"ia_prueba_retardo_s": 2.0}, {"ia_prueba_excepcion": True}])

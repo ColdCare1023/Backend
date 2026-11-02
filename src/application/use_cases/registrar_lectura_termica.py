@@ -184,13 +184,13 @@ class RegistrarLecturaTermicaUseCase:
         if cierre is not None:
             self.cambios_incidente.append(cierre)
 
-    async def _con_limite(self, corrutina):
+    async def _con_limite(self, corrutina, inyectar: bool = True):
         """Espera `corrutina` como mucho `ia_timeout_s` y aplica la inyección de
         fallos de prueba (retardo o excepción) antes de ella."""
         async def _ejecutar():
-            if self._ia_prueba_retardo_s:
+            if inyectar and self._ia_prueba_retardo_s:
                 await asyncio.sleep(self._ia_prueba_retardo_s)
-            if self._ia_prueba_excepcion:
+            if inyectar and self._ia_prueba_excepcion:
                 raise RuntimeError("fallo de inferencia inyectado")
             return await corrutina
 
@@ -199,14 +199,16 @@ class RegistrarLecturaTermicaUseCase:
         finally:
             corrutina.close()  # no queda sin esperar si el fallo o el tope se adelantaron
 
-    async def _clasificar_con_limite(self, lectura: LecturaTermica, historial: list) -> ResultadoInferencia:
+    async def _clasificar_con_limite(
+        self, lectura: LecturaTermica, historial: list, solo_regla: bool = False
+    ) -> ResultadoInferencia:
         """Clasifica en un hilo, con tope de tiempo. Si vence o lanza, la lectura
         queda `fallida` y la regla determinista sigue decidiendo la excursión."""
         async def _en_hilo():
-            return await asyncio.to_thread(self._clasificar_riesgo.execute, lectura, historial)
+            return await asyncio.to_thread(self._clasificar_riesgo.execute, lectura, historial, solo_regla)
 
         try:
-            return await self._con_limite(_en_hilo())
+            return await self._con_limite(_en_hilo(), inyectar=not solo_regla)
         except Exception as exc:
             motivo = _motivo_fallo_ia(exc)
             logger.warning("Clasificación fallida para %s: %s", lectura.device_id, motivo)
@@ -281,7 +283,10 @@ class RegistrarLecturaTermicaUseCase:
         historial = await self._lectura_repository.listar_recientes_por_device(
             lectura.device_id, limite=20, solo_dispositivo=not lectura.es_manual
         )
-        clasificacion = await self._clasificar_con_limite(lectura, historial)
+        # La clasificación con el modelo no corre si la regla directa ya declaró la
+        # excursión (RF-08): el aviso no gasta su presupuesto de tiempo en ella.
+        fuera_de_rango = lectura.es_excursion_confirmada()
+        clasificacion = await self._clasificar_con_limite(lectura, historial, solo_regla=fuera_de_rango)
         lectura.nivel_riesgo = clasificacion.nivel
         # Hallazgo AI-06: la versión del modelo y la confianza quedan en la
         # propia lectura, no solo en el payload de trazabilidad, para poder
@@ -306,7 +311,11 @@ class RegistrarLecturaTermicaUseCase:
         reemplazada = False
         if self._prediccion_preventiva is not None:
             try:
-                prediccion = await self._con_limite(self._prediccion_preventiva.predecir(lectura))
+                # Fuera de rango el servicio responde `excursion_en_curso` sin invocar al
+                # modelo; solo se conserva el tope de tiempo (sin inyección de pruebas).
+                prediccion = await self._con_limite(
+                    self._prediccion_preventiva.predecir(lectura), inyectar=not fuera_de_rango
+                )
             except Exception as exc:  # nunca propagar: la regla 2-8 °C no espera al modelo
                 prediccion = None
                 motivo = _motivo_fallo_ia(exc)

@@ -117,7 +117,7 @@ class ClasificarRiesgoTermicoUseCase:
         )
 
     def execute(
-        self, lectura: LecturaTermica, historial: list[LecturaTermica]
+        self, lectura: LecturaTermica, historial: list[LecturaTermica], solo_regla: bool = False
     ) -> ResultadoInferencia:
         """Guard completo de sensores (AIV-03). Nunca convierte `None` en
         `0.0`; nunca deja pasar NaN/infinito al modelo; distingue sensor
@@ -203,6 +203,8 @@ class ClasificarRiesgoTermicoUseCase:
             )
 
         features = self._construir_features(lectura, historial)
-        if self._modo_legado == "desactivado":
+        # RF-08: una lectura ya fuera de 2-8 °C no se clasifica con el modelo;
+        # la regla directa decide y la IA no consume tiempo del aviso.
+        if self._modo_legado == "desactivado" or solo_regla:
             return self._ai_service.inferir_solo_regla(features)
         return self._ai_service.inferir(features)
