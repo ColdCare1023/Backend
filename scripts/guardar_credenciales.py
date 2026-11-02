@@ -27,6 +27,18 @@ FORMATOS = {
 }
 
 
+# Al pegar, muchas terminales envuelven el texto en marcadores (ESC[200~ ... ESC[201~) que getpass
+# deja pasar: contaban como parte del valor y un valor correcto parecía inválido.
+_MARCADORES_PEGADO = re.compile(r"(?:\x1b)?\[20[01]~")
+_SECUENCIAS_ESC = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+
+
+def limpiar(valor: str) -> str:
+    """Quita marcadores de pegado, secuencias de escape, espacios y caracteres no imprimibles."""
+    valor = _SECUENCIAS_ESC.sub("", _MARCADORES_PEGADO.sub("", valor))
+    return "".join(c for c in valor if c.isprintable() and not c.isspace())
+
+
 def validar(clave: str, valor: str) -> str | None:
     """None si el valor sirve; si no, qué se esperaba."""
     formato = FORMATOS.get(clave)
@@ -60,12 +72,13 @@ def main(argv: list[str] | None = None) -> int:
     texto = ruta.read_text(encoding="utf-8")
     guardadas = []
     for clave in args.claves:
-        valor = getpass.getpass(f"{clave} (no se ve; Enter vacío = no cambiar): ").strip().replace(" ", "")
+        valor = limpiar(getpass.getpass(f"{clave} (no se ve; Enter vacío = no cambiar): "))
         if not valor:
             continue
         error = validar(clave, valor)
         if error:
-            print(f"  ✗ {clave} no parece correcto ({error}); no se guardó.")
+            # Solo el largo y el inicio permitido: nunca el valor.
+            print(f"  ✗ {clave} no parece correcto ({error}); recibí {len(valor)} caracteres. No se guardó.")
             continue
         texto = establecer(texto, clave, valor)
         guardadas.append(clave)

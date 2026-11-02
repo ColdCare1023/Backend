@@ -320,3 +320,14 @@ def test_guardar_credenciales_reemplaza_sin_romperse_con_caracteres_especiales()
     assert validar("SMS_FROM", "+15551234567") is None
     assert validar("SMS_FROM", "5551234567") is not None
     assert validar("SMTP_PASSWORD", "cualquiera") is None  # sin formato conocido
+
+
+def test_guardar_credenciales_limpia_los_marcadores_de_pegado():
+    from scripts.guardar_credenciales import limpiar, validar
+
+    sid = "AC" + "0123456789abcdef" * 2
+    assert limpiar(f"\x1b[200~{sid}\x1b[201~") == sid  # con el ESC
+    assert limpiar(f"[200~{sid}[201~") == sid  # el ESC ya descartado
+    assert limpiar(f"  {sid}\n") == sid
+    assert limpiar("a b\tc") == "abc"
+    assert validar("SMS_ACCOUNT_SID", limpiar(f"\x1b[200~{sid}\x1b[201~")) is None
