@@ -10,7 +10,7 @@ Todas las opciones de falla **se niegan a arrancar con `ENVIRONMENT=production`*
 | Falla justo antes del COMMIT | `MQTT_PRUEBA_FALLO_ANTES_COMMIT=excepcion\|salir` | MQT-01 |
 | Bandeja de correo local | `infra-local/docker-compose.correo-prueba.yml` (Mailpit, SMTP 1025, web 8025) | LAT-02, ALE-01 |
 | SMTP que falla | `python -m scripts.smtp_falla --modo rechazar\|timeout\|temporal\|permanente\|ok` | ALE-02 |
-| Inyector con tabla de resultados | `python infra-local/scripts/inyector_casos.py --casos … --csv …` | TEM-05, RIE-01, RIE-03, LAT-02, MQT-03, MQT-06, MQT-08 |
+| Inyector con tabla de resultados | `python infra-local/scripts/inyector_casos.py --casos … --csv …` | TEM-05, RIE-01, RIE-03, LAT-02, MQT-03, MQT-06 (colisión), MQT-08 (device_id ajeno) |
 | Latencia (p50/p95/p99/máx) | `python -m scripts.informe_latencia --desde … --device-id …` | LAT-02, RIE-03 |
 | Cadenas de 10 000 (v1, v2, v3) y su alteración | `python -m scripts.cadenas_prueba generar\|alterar` | INT-02, INT-03, INT-04, INT-06, INT-08 |
 | Huecos y duplicados de `seq_no` | `python -m scripts.huecos_seq --device-id …` | CON-02, ENE-02 |
