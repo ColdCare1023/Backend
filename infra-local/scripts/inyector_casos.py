@@ -35,12 +35,15 @@ import aiomqtt
 RAIZ = Path(__file__).resolve().parent.parent
 DEV = "FARM-02-TEST"
 COMMIT = "commit_confirmado"
+PAUSA_MINIMA_LATENCIA = 1.1  # s; la hora de captura tiene resolución de segundo
 
 
 def base(seq: int, boot_id: int, device_id: str = DEV, **cambios) -> dict:
     cuerpo = {
         "schema_version": "1.0", "device_id": device_id, "boot_id": boot_id, "seq_no": seq,
-        "captured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "time_quality": "sntp_synced",
+        # None = se fija al ENVIAR (cuerpo_de). Calcularla al construir los casos daba a todas las
+        # lecturas la misma hora: la alerta se reabría y 5 subidas producían 1 solo correo.
+        "captured_at": None, "time_quality": "sntp_synced",
         "uptime_s": 60, "temp_ds18b20": 4.5, "ds18b20_status": "OK", "ds18b20_fault": None,
         "temp_sht31": 21.0, "humedad_sht31": 55.0, "sht31_status": "OK", "sht31_fault": None,
         "door_open": False, "door_open_s": 0, "door_open_streak_s": None, "mc38_status": "installed",
@@ -54,14 +57,28 @@ def texto(cuerpo: dict) -> str:
     return json.dumps(cuerpo, separators=(",", ":"))
 
 
+def ahora_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def cuerpo_de(mensaje: dict) -> str:
+    """Texto a publicar. La hora de captura se toma AHORA salvo que el mensaje la traiga fija."""
+    if "crudo" in mensaje:
+        return mensaje["crudo"]
+    datos = dict(mensaje["datos"])
+    if datos.get("captured_at") is None:
+        datos["captured_at"] = ahora_iso()
+    return texto(datos)
+
+
 def construir_casos(boot_id: int, repetir: int = 1) -> dict[str, list[dict]]:
-    """Cada mensaje: {cuerpo, esperado, espera_acuse}. `esperado` es el `estado` del acuse
+    """Cada mensaje: {datos | crudo, esperado, espera_acuse}; el texto sale de `cuerpo_de`. `esperado` es el `estado` del acuse
     (None = no debe haber acuse). `seq` crece por mensaje: nunca se reutiliza una identidad
     salvo en `colision` y `duplicado`, donde es el punto del caso."""
     contador = iter(range(1, 10_000_000))
 
     def msg(esperado: str | None, **cambios) -> dict:
-        return {"cuerpo": texto(base(next(contador), boot_id, **cambios)), "esperado": esperado,
+        return {"datos": base(next(contador), boot_id, **cambios), "esperado": esperado,
                 "espera_acuse": esperado is not None}
 
     casos: dict[str, list[dict]] = {
@@ -71,22 +88,25 @@ def construir_casos(boot_id: int, repetir: int = 1) -> dict[str, list[dict]]:
             msg(COMMIT, temp_ds18b20=t) for _ in range(repetir) for t in (12.0, 5.0)
         ],
         "rango_fisico": [msg("payload_rechazado", temp_ds18b20=200.0)],
-        "json_malformado": [{"cuerpo": '{"schema_version": "1.0", "device_id": ', "esperado": None,
+        "json_malformado": [{"crudo": '{"schema_version": "1.0", "device_id": ', "esperado": None,
                              "espera_acuse": False}],
         "device_ajeno": [msg(None, device_id="OTRO-NODO")],
-        "payload_grande": [{"cuerpo": texto(base(next(contador), boot_id, extra="x" * 6000)), "esperado": None,
+        "payload_grande": [{"datos": base(next(contador), boot_id, extra="x" * 6000), "esperado": None,
                             "espera_acuse": False}],
     }
+    # Colisión y duplicado comparten la hora: es la MISMA lectura reenviada (o alterada).
+    hora = ahora_iso()
     identidad = next(contador)
     casos["colision"] = [
-        {"cuerpo": texto(base(identidad, boot_id, temp_ds18b20=4.5)), "esperado": COMMIT, "espera_acuse": True},
-        {"cuerpo": texto(base(identidad, boot_id, temp_ds18b20=6.5)), "esperado": "conflicto_payload",
+        {"datos": base(identidad, boot_id, captured_at=hora, temp_ds18b20=4.5), "esperado": COMMIT,
+         "espera_acuse": True},
+        {"datos": base(identidad, boot_id, captured_at=hora, temp_ds18b20=6.5), "esperado": "conflicto_payload",
          "espera_acuse": True},
     ]
     repetida = next(contador)
     casos["duplicado"] = [
-        {"cuerpo": texto(base(repetida, boot_id)), "esperado": COMMIT, "espera_acuse": True},
-        {"cuerpo": texto(base(repetida, boot_id)), "esperado": "duplicado", "espera_acuse": True},
+        {"datos": base(repetida, boot_id, captured_at=hora), "esperado": COMMIT, "espera_acuse": True},
+        {"datos": base(repetida, boot_id, captured_at=hora), "esperado": "duplicado", "espera_acuse": True},
     ]
     return casos
 
@@ -108,7 +128,7 @@ async def ejecutar(casos: dict[str, list[dict]], espera: float, pausa: float) ->
         for nombre, mensajes in casos.items():
             for numero, m in enumerate(mensajes, 1):
                 inicio = time.monotonic()
-                await c.publish(f"farmacias/{DEV}/lecturas", m["cuerpo"], qos=1)
+                await c.publish(f"farmacias/{DEV}/lecturas", cuerpo_de(m), qos=1)
                 acuse = "SIN ACUSE"
                 try:
                     msg = await asyncio.wait_for(anext(c.messages), espera if m["espera_acuse"] else 2.0)
@@ -147,10 +167,13 @@ def main() -> None:
     if desconocidos:
         sys.exit(f"Casos desconocidos: {desconocidos}. Disponibles: {list(todos)}")
     casos = {n: todos[n] for n in elegidos}
+    if "latencia" in casos and a.pausa < PAUSA_MINIMA_LATENCIA:
+        # captured_at tiene resolución de segundo: dos subidas en el mismo segundo reabrirían la alerta.
+        a.pausa = PAUSA_MINIMA_LATENCIA
     if a.dry_run:
         for n, ms in casos.items():
             for m in ms:
-                print(f"[{n}] esperado={m['esperado']} -> {m['cuerpo'][:110]}")
+                print(f"[{n}] esperado={m['esperado']} -> {cuerpo_de(m)[:110]}")
         return
     filas = asyncio.run(ejecutar(casos, a.espera, a.pausa), loop_factory=asyncio.SelectorEventLoop)
     imprimir(filas)
