@@ -1,7 +1,14 @@
 # Banco de pruebas de escritorio: el backend recibe las opciones de prueba y usa una base APARTE
 # (coldcare_prueba), para no mezclar la evidencia con la del entorno de desarrollo.
 #
-#   docker compose -f docker-compose.yml -f docker-compose.pruebas.yml --profile backend up -d --build
+#   docker compose -p coldcare-develop -f docker-compose.yml -f docker-compose.pruebas.yml --profile backend up -d --build
+#
+# IMPORTANTE: usa el MISMO nombre de proyecto del stack que ya corre (`-p coldcare-develop`). Sin `-p`
+# Compose crea otro stack (`thermotrace`) con un Postgres vacío y choca en los puertos. Con `-p` comparte el
+# Postgres actual y solo crea la base `coldcare_prueba`, sin tocar tus lecturas.
+# La base nueva arranca SIN usuarios ni dispositivos: siémbralos antes de correr casos, apuntando a ella:
+#   DATABASE_URL=postgresql+asyncpg://USER:PASS@localhost:5433/coldcare_prueba python -m scripts.seed_dev
+#   (y scripts/crear_dispositivo.py para FARM-02-TEST, que además emite su credencial MQTT)
 #   docker compose -f docker-compose.correo-prueba.yml up -d          # Mailpit (SMTP 1025, web 8025)
 #
 # Todas las variables tienen un valor por defecto «sin efecto»; se activan desde el entorno o `.env`:

@@ -44,3 +44,6 @@ cola del despachador no aparece. Separa las excursiones (`--pausa`) en vez de ma
 - **`colision_clave`** no tiene regla de cierre automático todavía: el incidente queda abierto hasta resolverlo.
 - **Banco de pruebas en contenedor:** `infra-local/docker-compose.pruebas.yml` pasa estas opciones al backend y usa
   una base aparte (`coldcare_prueba`).
+- **Levantar el banco:** `docker compose -p coldcare-develop -f docker-compose.yml -f docker-compose.pruebas.yml --profile backend up -d --build`
+  (siempre con `-p coldcare-develop`: sin él se crea otro stack con Postgres vacío y conflicto de puertos). La base
+  `coldcare_prueba` nace sin usuarios ni dispositivos: siembra con `scripts.seed_dev` y `crear_dispositivo.py`.
