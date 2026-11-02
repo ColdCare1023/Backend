@@ -138,11 +138,65 @@ async def test_la_excursion_confirmada_no_depende_del_modo(db_session_factory, m
     assert [a.nivel_riesgo for a in alertas] == [NivelRiesgo.EXCURSION_CRITICA.value]
 
 
-async def test_experimental_respeta_la_salvaguarda_cerca_del_limite(db_session_factory):
-    # 7,6 °C: a menos de 1 °C del límite superior; la regla determinista sí
-    # anticipa y su alerta preventiva no depende del modelo legado.
-    lecturas = await _registrar(db_session_factory, _ModeloQueSiempreAnticipa(), "experimental", [5.0, 5.0, 7.6])
+@pytest.mark.parametrize("modo", ["experimental", "desactivado"])
+async def test_sin_modelo_aprobado_una_lectura_en_rango_es_normal_aunque_la_salvaguarda_anticipe(
+    db_session_factory, modo
+):
+    # 7,6 °C: a menos de 1 °C del límite; la salvaguarda diría «preventivo», pero sin un modelo
+    # aprobado solo opera la regla 2-8 °C y esa lectura es normal.
+    lecturas = await _registrar(db_session_factory, _ModeloQueSiempreAnticipa(), modo, [5.0, 5.0, 7.6])
+
+    assert lecturas[-1].riesgo_efectivo == NivelRiesgo.NORMAL
+    assert lecturas[-1].excursion_confirmada is False
+    assert await _alertas(db_session_factory) == []
+
+
+async def test_5_grados_justo_despues_de_una_excursion_no_abre_alerta_preventiva(db_session_factory):
+    lecturas = await _registrar(
+        db_session_factory, _ModeloQueSiempreAnticipa(), "experimental", [5.0, 5.0, 9.5, 5.0, 5.0]
+    )
+
+    assert [x.riesgo_efectivo for x in lecturas[-2:]] == [NivelRiesgo.NORMAL, NivelRiesgo.NORMAL]
+    (alerta,) = await _alertas(db_session_factory)
+    assert alerta.nivel_riesgo == NivelRiesgo.EXCURSION_CRITICA.value
+    assert alerta.cerrada_en is not None  # la excursión se cerró; no quedó ninguna preventiva
+
+
+@pytest.mark.parametrize("modo", ["experimental", "desactivado"])
+async def test_una_lectura_sin_temperatura_valida_nunca_es_normal(db_session_factory, modo):
+    lecturas = await _registrar(db_session_factory, _ModeloQueSiempreAnticipa(), modo, [5.0, 5.0, None])
+
+    assert lecturas[-1].temperatura_interna is None
+    assert lecturas[-1].riesgo_efectivo is None
+    assert lecturas[-1].excursion_confirmada is False
+
+
+async def test_con_el_legado_activo_manda_el_modelo_y_la_preventiva_se_abre(db_session_factory):
+    lecturas = await _registrar(db_session_factory, _ModeloQueSiempreAnticipa(), "activo", [5.0, 5.0, 5.0])
 
     assert lecturas[-1].riesgo_efectivo == NivelRiesgo.RIESGO_PREVENTIVO
-    alertas = await _alertas(db_session_factory)
-    assert [a.nivel_riesgo for a in alertas] == [NivelRiesgo.RIESGO_PREVENTIVO.value]
+    assert [a.nivel_riesgo for a in await _alertas(db_session_factory)] == [NivelRiesgo.RIESGO_PREVENTIVO.value]
+
+
+async def test_una_preventiva_abierta_se_cierra_con_la_siguiente_lectura_en_rango_y_deja_alerta_cerrada(
+    db_session_factory,
+):
+    from src.infrastructure.database.models import TraceabilityRecordModel
+
+    async with db_session_factory() as session:  # abre una preventiva con el legado en «activo»
+        uc = _use_case(session, _ModeloQueSiempreAnticipa(), "activo")
+        for minuto in range(3):
+            await uc.execute(_lectura(minuto, 5.0))
+        await session.commit()
+    assert len(await _alertas(db_session_factory)) == 1
+
+    async with db_session_factory() as session:  # ahora sin modelo aprobado
+        uc = _use_case(session, _ModeloQueSiempreAnticipa(), "experimental")
+        await uc.execute(_lectura(3, 5.0))
+        await session.commit()
+
+    (alerta,) = await _alertas(db_session_factory)
+    assert alerta.episodio_abierto is None and alerta.cerrada_en is not None
+    async with db_session_factory() as session:
+        tipos = [r.tipo_evento for r in (await session.execute(select(TraceabilityRecordModel))).scalars().all()]
+    assert tipos.count("ALERTA_CERRADA") == 1

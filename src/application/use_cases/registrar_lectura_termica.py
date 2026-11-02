@@ -26,7 +26,6 @@ from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 from src.domain.value_objects.rango_termico import RANGO_TERMICO_BPA
 from src.infrastructure.ai.random_forest_service import (
     ESTADO_FALLIDA,
-    ORIGEN_MODELO,
     ORIGEN_REGLA_SALVAGUARDA,
     ResultadoInferencia,
 )
@@ -354,8 +353,19 @@ class RegistrarLecturaTermicaUseCase:
             and clasificacion.probabilidades_por_clase is not None
         ):
             lectura.payload = {**(lectura.payload or {}), "ia_experimental": True}
-            if clasificacion.origen == ORIGEN_MODELO and not lectura.excursion_confirmada:
-                lectura.riesgo_efectivo = clasificacion.nivel_regla
+
+        # Sin un modelo aprobado (legado experimental o desactivado, y el preventivo no activo)
+        # solo opera la regla 2-8 °C: una lectura válida EN rango es normal, aunque el modelo o la
+        # salvaguarda sugieran un riesgo preventivo. Una lectura sin temperatura válida (sensor en
+        # falla, nula) NO pasa a normal: conserva lo que ya tenía (None). Con el preventivo activo
+        # y aprobado, o el legado activo, manda el modelo.
+        sin_modelo_aprobado = not reemplazada and self._ia_legado_modo != "activo"
+        if (
+            sin_modelo_aprobado
+            and lectura.temperatura_interna is not None
+            and RANGO_TERMICO_BPA.contiene(lectura.temperatura_interna)
+        ):
+            lectura.riesgo_efectivo = NivelRiesgo.NORMAL
 
         lectura_guardada, creada = await self._lectura_repository.agregar_si_no_existe(lectura)
         if not creada:

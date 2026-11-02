@@ -66,7 +66,7 @@ def _registrar_modelo(raiz, aprobado: bool):
         registro.cambiar_estado(VERSION, ESTADO_APROBADO, "prueba", "qa", evidencia, raiz)
 
 
-def _use_case(session, servicio=None):
+def _use_case(session, servicio=None, legado="activo"):
     lecturas = SQLAlchemyLecturaRepository(session)
     return RegistrarLecturaTermicaUseCase(
         lecturas,
@@ -75,6 +75,7 @@ def _use_case(session, servicio=None):
         ClasificarRiesgoTermicoUseCase(get_random_forest_service()),
         device_repository=SQLAlchemyDeviceRepository(session),
         registro_dispositivos_estricto=False,
+        ia_legado_modo=legado,
         prediccion_preventiva=(
             PredecirRiesgoPreventivoUseCase(servicio, lecturas, SQLAlchemyPrediccionPreventivaRepository(session))
             if servicio is not None
@@ -91,11 +92,11 @@ def _lectura(device: str, t: datetime, temp: float, **extra) -> LecturaTermica:
     )
 
 
-async def _ingestar_serie(factory, device: str, servicio, temps: list[float], paso_s: int = 60):
+async def _ingestar_serie(factory, device: str, servicio, temps: list[float], paso_s: int = 60, legado="activo"):
     resultados = []
     for i, temp in enumerate(temps):
         async with factory() as session:
-            resultados.append(await _use_case(session, servicio).execute(_lectura(device, BASE + timedelta(seconds=paso_s * i), temp)))
+            resultados.append(await _use_case(session, servicio, legado).execute(_lectura(device, BASE + timedelta(seconds=paso_s * i), temp)))
             await session.commit()
     return resultados
 
@@ -150,6 +151,8 @@ async def test_modo_activo_decide_el_nivel_y_la_excursion_sigue_siendo_critica(d
     assert lecturas[0].origen_clasificacion == "dato_insuficiente"
     subida = lecturas[-2]
     assert subida.nivel_riesgo == NivelRiesgo.RIESGO_PREVENTIVO
+    # Con el preventivo activo y aprobado manda el modelo: el riesgo efectivo es preventivo.
+    assert subida.riesgo_efectivo == NivelRiesgo.RIESGO_PREVENTIVO
     assert subida.modelo_version == VERSION
     assert subida.confianza_ia is None, "una puntuación no calibrada no se presenta como probabilidad"
     critica = lecturas[-1]
@@ -212,3 +215,33 @@ def test_produccion_activo_exige_version_y_hash():
             allowed_hosts=["api.x"], cors_origins=["https://x"], database_url="postgresql+asyncpg://a:b@h/d",
             mqtt_enabled=False, ia_preventivo_modo="activo", ia_preventivo_version="v",
         )
+
+
+async def test_preventivo_activo_aprobado_abre_la_alerta_preventiva_aun_con_el_legado_experimental(
+    db_session_factory, tmp_path
+):
+    _registrar_modelo(tmp_path, aprobado=True)
+    servicio = ServicioPrediccionPreventiva(MODO_ACTIVO, VERSION, raiz=tmp_path)
+    temps = [5.0] * 20 + [5.0 + 0.12 * i for i in range(1, 6)]
+    await _ingestar_serie(db_session_factory, "ESP32-PREV-ACTALERTA", servicio, temps, legado="experimental")
+    async with db_session_factory() as session:
+        alertas = (await session.execute(
+            select(ThermalAlertModel).where(ThermalAlertModel.device_id == "ESP32-PREV-ACTALERTA")
+        )).scalars().all()
+    assert [a.nivel_riesgo for a in alertas] == [NivelRiesgo.RIESGO_PREVENTIVO.value]
+
+
+async def test_sombra_con_el_legado_experimental_guarda_predicciones_sin_alerta(db_session_factory, tmp_path):
+    _registrar_modelo(tmp_path, aprobado=False)
+    servicio = ServicioPrediccionPreventiva(MODO_SOMBRA, VERSION, raiz=tmp_path)
+    temps = [5.0] * 20 + [5.0 + 0.12 * i for i in range(1, 6)]
+    lecturas = await _ingestar_serie(db_session_factory, "ESP32-PREV-SOMBRAEXP", servicio, temps, legado="experimental")
+
+    preds = await _predicciones(db_session_factory, "ESP32-PREV-SOMBRAEXP")
+    assert len(preds) == len(temps) and preds[-1].modelo_sha256  # predicciones y hash guardados
+    assert all(x.riesgo_efectivo in (NivelRiesgo.NORMAL, None) for x in lecturas)
+    async with db_session_factory() as session:
+        alertas = (await session.execute(
+            select(ThermalAlertModel).where(ThermalAlertModel.device_id == "ESP32-PREV-SOMBRAEXP")
+        )).scalars().all()
+    assert alertas == []
