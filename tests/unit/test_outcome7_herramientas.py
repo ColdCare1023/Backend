@@ -304,3 +304,19 @@ async def test_probar_notificaciones_usa_el_notificador_real(monkeypatch):
     monkeypatch.setattr(probar_notificaciones, "NotificadorBienvenida", _Notificador)
     assert await probar_notificaciones.probar("yo@ejemplo.com", "+51999888777") == ("enviado", "no_configurado")
     assert llamadas == [("yo@ejemplo.com", "+51999888777")]
+
+
+def test_guardar_credenciales_reemplaza_sin_romperse_con_caracteres_especiales():
+    from scripts.guardar_credenciales import establecer, validar
+
+    texto = "A=1\nSMS_AUTH_TOKEN=\nB=2\n"
+    nuevo = establecer(texto, "SMS_AUTH_TOKEN", "a|b&c\\d$e")
+    assert nuevo == "A=1\nSMS_AUTH_TOKEN=a|b&c\\d$e\nB=2\n"
+    assert establecer("A=1\n", "SMS_FROM", "+15551234567") == "A=1\nSMS_FROM=+15551234567\n"  # la añade
+
+    assert validar("SMS_ACCOUNT_SID", "AC" + "0" * 32) is None
+    assert validar("SMS_ACCOUNT_SID", "ACbad") is not None
+    assert validar("SMS_AUTH_TOKEN", "f" * 32) is None
+    assert validar("SMS_FROM", "+15551234567") is None
+    assert validar("SMS_FROM", "5551234567") is not None
+    assert validar("SMTP_PASSWORD", "cualquiera") is None  # sin formato conocido
