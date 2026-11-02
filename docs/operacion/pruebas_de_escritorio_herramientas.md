@@ -31,8 +31,10 @@ cola del despachador no aparece. Separa las excursiones (`--pausa`) en vez de ma
 
 - **MQT-08 (`device_id` distinto del tópico):** se audita `LECTURA_RECHAZADA_SUPLANTACION` y **no hay acuse**: esa
   identidad no es confiable. Un payload de más de 5 KB deja `LECTURA_RECHAZADA_TAMANO` (una fila por minuto).
-- **SEG-01 (credencial revocada):** el acuse `rejected` sale antes de expulsar la sesión; la expulsión es una vez
-  por ventana y la auditoría tiene tope (`suprimidos_desde_anterior`).
+- **SEG-01 (credencial revocada):** el acuse sale antes de expulsar la sesión, con `status: "revoked"` y
+  `estado: "dispositivo_no_autorizado"`. El firmware no conoce `revoked`, descarta el acuse y **el nodo conserva su
+  cola** (0 lecturas perdidas; no pasa nada a cuarentena). Un dispositivo dado de baja sigue recibiendo `rejected`.
+  La expulsión es una vez por ventana y la auditoría tiene tope (`suprimidos_desde_anterior`).
 - **ALE-01:** quitar «duración» del criterio. **ALE-02:** pedir la cadena de trazabilidad del dispositivo, no
   `audit_logs`.
 - **Inferencia:** si la IA no responde en `IA_INFERENCIA_TIMEOUT_S`, la lectura queda con
