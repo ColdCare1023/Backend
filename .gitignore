@@ -15,3 +15,6 @@ htmlcov/
 # reproducen (docs/ml/), no los datos.
 data/ml/external_inputs/
 data/ml/work/
+
+# Credenciales y destinos de la prueba real de notificaciones (nunca al repo)
+*.local.env
