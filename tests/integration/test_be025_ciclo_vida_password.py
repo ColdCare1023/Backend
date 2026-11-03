@@ -193,9 +193,11 @@ class _CorreoFalso:
     def __init__(self, configurado: bool = True) -> None:
         self.configurado = configurado
         self.enviados: list[tuple[str, str, str]] = []
+        self.html: list[str | None] = []
 
-    async def enviar(self, destino: str, asunto: str, cuerpo: str) -> bool:
+    async def enviar(self, destino: str, asunto: str, cuerpo: str, html: str | None = None) -> bool:
         self.enviados.append((destino, asunto, cuerpo))
+        self.html.append(html)
         return True
 
 
@@ -221,6 +223,9 @@ async def test_recuperacion_completa_por_correo(client, token_tecnico, correo, d
     assert correo.enviados[0][0] == TECNICO
     token = _token_del_correo(correo)
     assert "http://localhost:5173/restablecer-password#token=" in correo.enviados[0][2]
+    # La versión HTML lleva el mismo enlace de un solo uso y el diseño de ColdCare.
+    assert 'href="http://localhost:5173/restablecer-password#token=' in correo.html[0]
+    assert "[ColdCare] Restablecer contraseña" == correo.enviados[0][1]
 
     assert _restablecer(client, token).status_code == 204
     assert _protegido(client, token_tecnico) == 401

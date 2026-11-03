@@ -19,6 +19,7 @@ from src.domain.entities.usuario import Usuario
 from src.domain.exceptions import CredencialesInvalidasError, DomainError, RecursoNoEncontradoError
 from src.domain.repositories.i_password_reset_repository import IPasswordResetRepository
 from src.domain.repositories.i_usuario_repository import IUsuarioRepository
+from src.infrastructure.notifications.correos_cuenta import correo_recuperar_password
 from src.infrastructure.security.password_hasher import (
     hash_password_async,
     verify_password_async,
@@ -115,6 +116,7 @@ class CorreoRecuperacion:
     destino: str
     asunto: str
     cuerpo: str
+    html: str | None = None
 
 
 class SolicitarRecuperacionPasswordUseCase:
@@ -140,17 +142,8 @@ class SolicitarRecuperacionPasswordUseCase:
         # El token va en el fragmento (#): el navegador no lo envía al servidor
         # del frontend, así que no queda en sus registros de acceso.
         enlace = f"{self._url}#token={token}"
-        return CorreoRecuperacion(
-            destino=usuario.email,
-            asunto="[ThermoTrace] Restablecer contraseña",
-            cuerpo=(
-                f"Hola {usuario.nombre}:\n\n"
-                "Recibimos una solicitud para restablecer la contraseña de tu cuenta.\n"
-                f"Usa este enlace en los próximos {minutos} minutos (solo funciona una vez):\n\n"
-                f"{enlace}\n\n"
-                "Si no lo solicitaste, ignora este mensaje: tu contraseña no cambia."
-            ),
-        )
+        correo = correo_recuperar_password(usuario.nombre, enlace, minutos)
+        return CorreoRecuperacion(destino=usuario.email, asunto=correo.asunto, cuerpo=correo.cuerpo, html=correo.html)
 
 
 class RestablecerPasswordConEnlaceUseCase:

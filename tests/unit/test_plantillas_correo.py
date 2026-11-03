@@ -65,3 +65,26 @@ def test_las_proporciones_de_la_escala_suman_100(temperatura):
     assert len(anchos) == 3 and sum(anchos) == 100 and all(a >= 0 for a in anchos)
     marcador = int(re.search(r'width:(\d+)%;">&nbsp;</td>\s*<td align="center"', html).group(1))
     assert 0 <= marcador <= 97  # el marcador no se sale de la barra
+
+
+def test_correo_de_cuenta_creada_tiene_texto_y_html_sin_la_clave():
+    from src.infrastructure.notifications.correos_cuenta import correo_cuenta_creada
+
+    c = correo_cuenta_creada("Ana <b>", "ana@prueba.pe", "https://coldcare.example/")
+    assert c.asunto == "[ColdCare] Tu cuenta fue creada"
+    assert "ana@prueba.pe" in c.cuerpo and "https://coldcare.example" in c.cuerpo
+    assert "Ana &lt;b&gt;" in c.html and "<b>" not in c.html  # nombre escapado
+    assert 'href="https://coldcare.example"' in c.html  # sin barra final
+    assert "temporal" in c.html.lower() and "contraseña:" not in c.html.lower().replace("contraseña", "contraseña:", 0)
+    sin_enlace = correo_cuenta_creada("Ana", "ana@prueba.pe", "")
+    assert "Ingresa aquí" not in sin_enlace.cuerpo and "<a href" not in sin_enlace.html
+
+
+def test_correo_de_recuperar_password_lleva_el_enlace_exacto_y_la_vigencia():
+    from src.infrastructure.notifications.correos_cuenta import correo_recuperar_password
+
+    enlace = "https://coldcare.example/restablecer#token=abc_DEF-123"
+    c = correo_recuperar_password("Ana", enlace, 30)
+    assert enlace in c.cuerpo and f'href="{enlace}"' in c.html
+    assert "30 minutos" in c.cuerpo and "30 minutos" in c.html
+    assert c.asunto == "[ColdCare] Restablecer contraseña"

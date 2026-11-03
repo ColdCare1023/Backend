@@ -10,6 +10,7 @@ import logging
 from dataclasses import dataclass
 
 from src.infrastructure.config import Settings
+from src.infrastructure.notifications.correos_cuenta import correo_cuenta_creada
 from src.infrastructure.notifications.notificacion_service import obtener_notificacion_service
 from src.infrastructure.notifications.transporte_email import (
     ErrorEnvioCorreo,
@@ -33,22 +34,13 @@ class ResultadoBienvenida:
 
 
 def componer_correo(settings: Settings, nombre: str, email: str) -> MensajeCorreo:
-    enlace = settings.frontend_url.rstrip("/") if settings.frontend_url else ""
-    lineas = [
-        f"Hola {nombre},",
-        "",
-        "Se creó tu cuenta en ColdCare, el sistema de monitoreo de la cadena de frío.",
-        f"Tu usuario es este correo: {email}.",
-        "La contraseña temporal te la entrega el administrador; el sistema te pedirá cambiarla en tu primer acceso.",
-    ]
-    if enlace:
-        lineas += ["", f"Ingresa aquí: {enlace}"]
-    lineas += ["", "Si no esperabas este mensaje, avisa al administrador."]
+    correo = correo_cuenta_creada(nombre, email, settings.frontend_url)
     return MensajeCorreo(
         remitente=settings.correo_remitente,
         destinatario=email,
-        asunto="[ColdCare] Tu cuenta fue creada",
-        cuerpo="\n".join(lineas),
+        asunto=correo.asunto,
+        cuerpo=correo.cuerpo,
+        html=correo.html,
     )
 
 

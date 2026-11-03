@@ -401,7 +401,7 @@ async def recuperar_password(
     )
     await session.commit()
     if correo is not None:
-        tareas.add_task(enviador.enviar, correo.destino, correo.asunto, correo.cuerpo)
+        tareas.add_task(enviador.enviar, correo.destino, correo.asunto, correo.cuerpo, correo.html)
     return SolicitudRecuperacionResponse(detail=_RESPUESTA_RECUPERACION)
 
 
