@@ -96,9 +96,9 @@ def _detalles(filas: list[tuple[str, str]]) -> str:
     for i, (etiqueta, valor) in enumerate(filas):
         borde = "" if i == len(filas) - 1 else "border-bottom:1px solid #e4e7ec;"
         celdas.append(
-            f'<tr><td class="cc-muted" style="padding:11px 0;{borde}font-family:{_FUENTE};font-size:13px;'
+            f'<tr><td class="cc-muted cc-linea" style="padding:11px 0;{borde}font-family:{_FUENTE};font-size:13px;'
             f'color:#667085;width:40%;vertical-align:top;">{_e(etiqueta)}</td>'
-            f'<td class="cc-texto" style="padding:11px 0;{borde}font-family:{_FUENTE};font-size:14px;'
+            f'<td class="cc-texto cc-linea" style="padding:11px 0;{borde}font-family:{_FUENTE};font-size:14px;'
             f'color:#101828;font-weight:600;vertical-align:top;">{_e(valor)}</td></tr>'
         )
     return (
@@ -141,13 +141,13 @@ def renderizar(
         for p in parrafos
     )
     bloque_escala = (
-        f'<div style="margin-top:24px;padding:16px 20px 14px 20px;border:1px solid #e4e7ec;border-radius:12px;">{escala}</div>'
+        f'<div class="cc-linea" style="margin-top:24px;padding:16px 20px 14px 20px;border:1px solid #e4e7ec;border-radius:12px;">{escala}</div>'
         if escala
         else ""
     )
     bloque_nota = (
         '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:26px;">'
-        f'<tr><td class="cc-muted" style="padding:14px 16px;background-color:{suave};border-left:4px solid {acento};'
+        f'<tr><td class="cc-nota" style="padding:14px 16px;background-color:{suave};border-left:4px solid {acento};'
         f'border-radius:6px;font-family:{_FUENTE};font-size:13px;line-height:20px;color:#475467;">{_e(nota)}</td></tr></table>'
         if nota
         else ""
@@ -169,6 +169,8 @@ def renderizar(
     .cc-caja {{ background-color:#16213a !important; border-color:#27334d !important; }}
     .cc-texto {{ color:#e5eaf3 !important; }}
     .cc-muted {{ color:#98a2b3 !important; }}
+    .cc-linea {{ border-color:#27334d !important; }}
+    .cc-nota {{ background-color:#1b2742 !important; color:#c3cde0 !important; }}
   }}
 </style>
 </head>
