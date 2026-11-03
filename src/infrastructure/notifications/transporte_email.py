@@ -36,6 +36,9 @@ class MensajeCorreo:
     destinatario: str
     asunto: str
     cuerpo: str
+    # Versión HTML opcional: el cuerpo de texto sigue siendo la alternativa para clientes
+    # que no la muestran (multipart/alternative) y es lo que ve un lector de pantalla.
+    html: str | None = None
 
 
 class TransporteEmail(Protocol):
@@ -56,6 +59,8 @@ class SmtpTransporte:
         correo["From"] = mensaje.remitente
         correo["To"] = mensaje.destinatario
         correo.set_content(mensaje.cuerpo)
+        if mensaje.html:
+            correo.add_alternative(mensaje.html, subtype="html")
         try:
             await asyncio.to_thread(self._enviar_bloqueante, correo)
         except (OSError, smtplib.SMTPException) as exc:
@@ -95,6 +100,7 @@ class HttpApiTransporte:
                         "to": [mensaje.destinatario],
                         "subject": mensaje.asunto,
                         "text": mensaje.cuerpo,
+                        **({"html": mensaje.html} if mensaje.html else {}),
                     },
                 )
                 respuesta.raise_for_status()

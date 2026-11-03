@@ -21,7 +21,7 @@ class EnviadorCorreo:
         s = self._settings
         return bool(s.smtp_enabled and s.smtp_host and s.smtp_user and s.smtp_password and s.smtp_from)
 
-    async def enviar(self, destino: str, asunto: str, cuerpo: str) -> bool:
+    async def enviar(self, destino: str, asunto: str, cuerpo: str, html: str | None = None) -> bool:
         if not self.configurado:
             logger.warning("SMTP no configurado: no se envió el correo transaccional.")
             return False
@@ -30,6 +30,8 @@ class EnviadorCorreo:
         mensaje["From"] = self._settings.smtp_from
         mensaje["To"] = destino
         mensaje.set_content(cuerpo)
+        if html:
+            mensaje.add_alternative(html, subtype="html")
         try:
             await asyncio.to_thread(self._smtp_enviar, mensaje)
         except Exception:

@@ -338,3 +338,61 @@ def test_probar_notificaciones_acepta_varios_correos_sin_repetidos():
 
     assert separar_correos("a@x.com, b@y.com,,a@x.com ") == ["a@x.com", "b@y.com"]
     assert separar_correos("") == [] and separar_correos(" , ") == []
+
+
+async def test_el_correo_html_sale_como_multipart_alternative_y_la_api_lo_recibe():
+    from src.infrastructure.notifications.transporte_email import (
+        HttpApiTransporte,
+        MensajeCorreo,
+        SmtpTransporte,
+    )
+
+    capturado = {}
+
+    class _Smtp(SmtpTransporte):
+        def _enviar_bloqueante(self, correo):
+            capturado["correo"] = correo
+
+    ajustes = Settings(environment="test", _env_file=None, jwt_secret_key="x" * 48)
+    mensaje = MensajeCorreo("a@x.pe", "b@y.pe", "Asunto", "texto plano", html="<p>hola</p>")
+    await _Smtp(ajustes).enviar(mensaje)
+    correo = capturado["correo"]
+    assert correo.get_content_type() == "multipart/alternative"
+    tipos = [parte.get_content_type() for parte in correo.iter_parts()]
+    assert tipos == ["text/plain", "text/html"]
+    assert correo.get_body(preferencelist=("html",)).get_content().strip() == "<p>hola</p>"
+
+    await _Smtp(ajustes).enviar(MensajeCorreo("a@x.pe", "b@y.pe", "Asunto", "solo texto"))
+    assert capturado["correo"].get_content_type() == "text/plain"  # sin html: igual que antes
+
+    enviados = []
+
+    class _Resp:
+        def raise_for_status(self):
+            return None
+
+    class _Cliente:
+        def __init__(self, **_kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_a):
+            return None
+
+        async def post(self, url, headers=None, json=None):
+            enviados.append(json)
+            return _Resp()
+
+    import src.infrastructure.notifications.transporte_email as modulo
+
+    original = modulo.httpx.AsyncClient
+    modulo.httpx.AsyncClient = _Cliente
+    try:
+        await HttpApiTransporte(ajustes).enviar(mensaje)
+        await HttpApiTransporte(ajustes).enviar(MensajeCorreo("a@x.pe", "b@y.pe", "S", "t"))
+    finally:
+        modulo.httpx.AsyncClient = original
+    assert enviados[0]["html"] == "<p>hola</p>" and enviados[0]["text"] == "texto plano"
+    assert "html" not in enviados[1]
