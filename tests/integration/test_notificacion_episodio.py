@@ -100,24 +100,25 @@ async def test_lecturas_sucesivas_del_mismo_episodio_no_reavisan():
 
 
 @pytest.mark.asyncio
-async def test_riesgo_preventivo_no_dispara_aviso_externo():
-    """Solo la excursión crítica justifica interrumpir al responsable fuera de
-    la aplicación; el riesgo preventivo se ve en el dashboard."""
+async def test_riesgo_preventivo_dispara_un_aviso_marcado_como_preventivo():
+    """El aviso anticipado («a punto de pasarse») también sale por correo, una sola vez por episodio."""
     use_case = GenerarAlertaUseCase(_RepoEnMemoria())
 
-    await use_case.execute(
-        reading_id=uuid4(),
-        device_id=DEVICE_ID,
-        nivel_riesgo=NivelRiesgo.RIESGO_PREVENTIVO,
-        timestamp=BASE,
-        temperatura_interna=8.4,
-    )
+    for minuto in range(4):
+        await use_case.execute(
+            reading_id=uuid4(),
+            device_id=DEVICE_ID,
+            nivel_riesgo=NivelRiesgo.RIESGO_PREVENTIVO,
+            timestamp=BASE + timedelta(minutes=minuto),
+            temperatura_interna=7.8,
+        )
 
-    assert _avisos(use_case) == []
+    assert _avisos(use_case) == [(DEVICE_ID, 7.8)]
+    assert use_case.avisos_pendientes[0].es_preventivo
 
 
 @pytest.mark.asyncio
-async def test_escalar_de_preventivo_a_critico_si_avisa():
+async def test_escalar_de_preventivo_a_critico_avisa_las_dos_veces():
     use_case = GenerarAlertaUseCase(_RepoEnMemoria())
 
     await use_case.execute(
@@ -129,7 +130,8 @@ async def test_escalar_de_preventivo_a_critico_si_avisa():
         timestamp=BASE + timedelta(minutes=1), temperatura_interna=14.9,
     )
 
-    assert _avisos(use_case) == [(DEVICE_ID, 14.9)]
+    assert _avisos(use_case) == [(DEVICE_ID, 8.4), (DEVICE_ID, 14.9)]
+    assert [a.es_preventivo for a in use_case.avisos_pendientes] == [True, False]
 
 
 @pytest.mark.asyncio

@@ -55,6 +55,7 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
 from src.infrastructure.notifications.notificacion_service import (
     NotificacionService,
     componer_correo_excursion,
+    componer_correo_preventivo,
     componer_correo_sin_datos,
 )
 from src.infrastructure.notifications.transporte_email import (
@@ -167,6 +168,7 @@ class DespachadorNotificaciones:
                         captured_at=lectura.timestamp if lectura else alerta.created_at,
                         received_at=lectura.received_at if lectura else None,
                         time_quality=lectura.time_quality if lectura else None,
+                        nivel=alerta.nivel_riesgo,
                     )
                 )
             for incidente in await SQLAlchemyIncidenteRepository(session).listar_pendientes_de_notificar(
@@ -215,7 +217,8 @@ class DespachadorNotificaciones:
                 SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
             )
             primer_intento = alerta.notificacion_intentos == 0
-            if primer_intento:
+            # Telegram y SMS son para la excursión real; el aviso preventivo va solo por correo.
+            if primer_intento and not aviso.es_preventivo:
                 await self._avisar_por_canales_opcionales(aviso, dispositivo, auditoria)
 
             if self._transporte is None:
@@ -228,7 +231,8 @@ class DespachadorNotificaciones:
                 await session.commit()
                 return ResultadoEnvio("sin_destinatario")
 
-            mensaje = componer_correo_excursion(
+            componer = componer_correo_preventivo if aviso.es_preventivo else componer_correo_excursion
+            mensaje = componer(
                 aviso,
                 remitente=self._settings.correo_remitente,
                 destinatario=destinatario,

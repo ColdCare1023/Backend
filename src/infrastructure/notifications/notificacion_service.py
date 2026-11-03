@@ -23,6 +23,7 @@ import httpx
 
 from src.application.use_cases.generar_alerta import AvisoExcursion
 from src.application.use_cases.vigilar_sin_datos import AvisoSinDatos
+from src.domain.value_objects.rango_termico import RANGO_TERMICO_BPA
 from src.infrastructure.config import Settings
 from src.infrastructure.notifications.plantillas_correo import Boton, escala_termica, renderizar
 from src.infrastructure.notifications.transporte_email import MensajeCorreo
@@ -121,6 +122,70 @@ def _html_excursion(
         boton=Boton("Ver la alerta", f"{frontend_url.rstrip('/')}/alertas?id={aviso.alerta_id}") if frontend_url else None,
         nota="Actúa como ante una excursión real: revisa el equipo, protege el lote y deja constancia de lo que hiciste.",
     )
+
+
+def componer_correo_preventivo(
+    aviso: AvisoExcursion,
+    remitente: str,
+    destinatario: str,
+    frontend_url: str = "",
+    dispositivo: dict | None = None,
+) -> MensajeCorreo:
+    """Aviso anticipado: la temperatura se acerca al límite del rango 2-8 °C, pero todavía no lo cruza."""
+    dispositivo = dispositivo or {}
+    temperatura = f"{aviso.temperatura:.1f} °C" if aviso.temperatura is not None else "sin dato de sensor"
+    margen = (
+        RANGO_TERMICO_BPA.distancia_al_limite(aviso.temperatura)
+        if aviso.temperatura is not None and RANGO_TERMICO_BPA.contiene(aviso.temperatura)
+        else None
+    )
+    equipo = dispositivo.get("nombre") or aviso.device_id
+    asunto = f"[ColdCare] RIESGO PREVENTIVO — {aviso.device_id}"
+    lineas = [
+        "RIESGO PREVENTIVO — Cadena de frío",
+        "",
+        f"Dispositivo: {aviso.device_id}",
+    ]
+    if dispositivo.get("nombre"):
+        lineas.append(f"Equipo: {dispositivo['nombre']}")
+    lineas += [
+        f"Temperatura registrada: {temperatura}",
+    ]
+    if margen is not None:
+        lineas.append(f"Margen hasta el límite: {margen:.1f} °C")
+    lineas += [
+        f"Momento de la lectura: {_formatear(aviso.captured_at)}",
+        "",
+        "La temperatura se acerca al límite del rango 2–8 °C. Todavía no es una excursión, "
+        "pero conviene revisar el refrigerador ahora, antes de que se pase.",
+    ]
+    if frontend_url:
+        lineas += ["", f"Ver la alerta: {frontend_url.rstrip('/')}/alertas?id={aviso.alerta_id}"]
+    detalles = [("Dispositivo", aviso.device_id)]
+    if dispositivo.get("nombre"):
+        detalles.append(("Equipo", dispositivo["nombre"]))
+    if dispositivo.get("ubicacion"):
+        detalles.append(("Ubicación", dispositivo["ubicacion"]))
+    detalles.append(("Temperatura registrada", temperatura))
+    if margen is not None:
+        detalles.append(("Margen hasta el límite", f"{margen:.1f} °C"))
+    detalles.append(("Momento de la lectura", _formatear(aviso.captured_at)))
+    html = renderizar(
+        asunto=asunto,
+        preheader=f"{equipo}: {temperatura}, cerca del límite del rango 2-8 °C. Revisa el refrigerador antes de que se pase.",
+        tono="aviso",
+        etiqueta="Riesgo preventivo",
+        titulo=f"{equipo} se acerca al límite",
+        parrafos=[
+            "La temperatura se acerca al límite del rango de 2 a 8 °C. Todavía no es una excursión, "
+            "pero conviene revisar el refrigerador ahora, antes de que se pase.",
+        ],
+        detalles=detalles,
+        escala=escala_termica(aviso.temperatura) if aviso.temperatura is not None else None,
+        boton=Boton("Ver la alerta", f"{frontend_url.rstrip('/')}/alertas?id={aviso.alerta_id}") if frontend_url else None,
+        nota="Si la temperatura sigue subiendo (o bajando), recibirás un segundo aviso cuando salga del rango.",
+    )
+    return MensajeCorreo(remitente=remitente, destinatario=destinatario, asunto=asunto, cuerpo="\n".join(lineas), html=html)
 
 
 def _correo_retencion(

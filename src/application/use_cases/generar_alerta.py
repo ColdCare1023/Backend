@@ -43,6 +43,12 @@ class AvisoExcursion:
     captured_at: datetime
     received_at: datetime | None = None
     time_quality: str | None = None
+    # `riesgo_preventivo` = a punto de salirse del rango; `excursion_critica` = ya se salió.
+    nivel: NivelRiesgo = NivelRiesgo.EXCURSION_CRITICA
+
+    @property
+    def es_preventivo(self) -> bool:
+        return self.nivel == NivelRiesgo.RIESGO_PREVENTIVO
 
     @property
     def diferida(self) -> bool:
@@ -105,15 +111,16 @@ class GenerarAlertaUseCase:
         received_at: datetime | None,
         time_quality: str | None,
     ) -> None:
-        """Solo al ABRIR (o reabrir) un episodio crítico, no en cada lectura del
-        mismo episodio. Una reapertura dentro de la ventana conserva el id de la
-        alerta: el despachador la descarta si ya fue notificada (P3)."""
+        """Solo al ABRIR (o reabrir) un episodio —preventivo o crítico—, no en cada
+        lectura del mismo episodio. Una reapertura dentro de la ventana conserva
+        el id de la alerta: el despachador la descarta si ya fue notificada (P3)."""
         if alerta is None or alerta.id is None:
             return
-        if alerta.nivel_riesgo != NivelRiesgo.EXCURSION_CRITICA:
+        if alerta.nivel_riesgo not in (NivelRiesgo.EXCURSION_CRITICA, NivelRiesgo.RIESGO_PREVENTIVO):
             return
-        # Ya había un episodio crítico abierto: es continuación, no un evento nuevo.
-        if episodio_previo is not None and episodio_previo.nivel_riesgo == NivelRiesgo.EXCURSION_CRITICA:
+        # Ya había un episodio del mismo nivel abierto: es continuación, no un evento nuevo.
+        # Pasar de preventivo a crítico SÍ es un evento nuevo (otra alerta, otro aviso).
+        if episodio_previo is not None and episodio_previo.nivel_riesgo == alerta.nivel_riesgo:
             return
         self.avisos_pendientes.append(
             AvisoExcursion(
@@ -123,6 +130,7 @@ class GenerarAlertaUseCase:
                 captured_at=_a_utc(timestamp),
                 received_at=received_at,
                 time_quality=time_quality,
+                nivel=alerta.nivel_riesgo,
             )
         )
 

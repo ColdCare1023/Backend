@@ -130,3 +130,20 @@ def test_el_correo_de_excursion_sin_dato_de_sensor_no_dibuja_escala():
 
     m = componer_correo_excursion(_aviso(temperatura=None), "c@x.pe", "d@y.pe", "", {})
     assert "rango seguro" not in m.html and "sin dato de sensor" in m.html
+
+
+def test_el_correo_preventivo_avisa_con_margen_y_sin_exagerar():
+    from dataclasses import replace
+
+    from src.domain.value_objects.nivel_riesgo import NivelRiesgo
+    from src.infrastructure.notifications.notificacion_service import componer_correo_preventivo
+
+    aviso = replace(_aviso(temperatura=7.6), nivel=NivelRiesgo.RIESGO_PREVENTIVO)
+    m = componer_correo_preventivo(aviso, "c@x.pe", "d@y.pe", "https://coldcare.example", {"nombre": "Refri 1"})
+    assert m.asunto == "[ColdCare] RIESGO PREVENTIVO — FARM-01"
+    assert "Margen hasta el límite: 0.4 °C" in m.cuerpo and "0.4 °C" in m.html
+    assert "Todavía no es una excursión" in m.cuerpo and "Todavía no es una excursión" in m.html
+    assert "#dc6803" in m.html  # acento ámbar, no el rojo de la excursión
+    assert "EXCURSIÓN CRÍTICA" not in m.asunto
+    assert "rango seguro" in m.html and "Refri 1 se acerca al límite" in m.html
+    assert f"/alertas?id={aviso.alerta_id}" in m.html
