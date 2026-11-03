@@ -88,3 +88,45 @@ def test_correo_de_recuperar_password_lleva_el_enlace_exacto_y_la_vigencia():
     assert enlace in c.cuerpo and f'href="{enlace}"' in c.html
     assert "30 minutos" in c.cuerpo and "30 minutos" in c.html
     assert c.asunto == "[ColdCare] Restablecer contraseña"
+
+
+def _aviso(temperatura=11.4, diferida=False):
+    from datetime import datetime, timedelta, timezone
+    from uuid import uuid4
+
+    from src.application.use_cases.generar_alerta import AvisoExcursion
+
+    captura = datetime(2026, 11, 3, 15, 0, tzinfo=timezone.utc)
+    return AvisoExcursion(
+        alerta_id=uuid4(), device_id="FARM-01", temperatura=temperatura, captured_at=captura,
+        received_at=captura + timedelta(hours=2) if diferida else captura,
+        time_quality="synced",
+    )
+
+
+def test_el_correo_de_excursion_trae_escala_boton_y_datos():
+    from src.infrastructure.notifications.notificacion_service import componer_correo_excursion
+
+    aviso = _aviso()
+    m = componer_correo_excursion(aviso, "c@x.pe", "d@y.pe", "https://coldcare.example",
+                                  {"nombre": "Refri <1>", "ubicacion": "Botica Central"})
+    assert m.asunto == "[ColdCare] EXCURSIÓN CRÍTICA — FARM-01" and "ALERTA CRÍTICA" in m.cuerpo  # texto intacto
+    assert "11.4 °C en Refri &lt;1&gt;" in m.html and "Botica Central" in m.html
+    assert "rango seguro" in m.html and "#d92d20" in m.html
+    assert f'href="https://coldcare.example/alertas?id={aviso.alerta_id}"' in m.html
+    assert "diferida" not in m.html.lower()
+
+
+def test_el_correo_de_excursion_diferida_lo_dice_y_sin_enlace_no_hay_boton():
+    from src.infrastructure.notifications.notificacion_service import componer_correo_excursion
+
+    m = componer_correo_excursion(_aviso(diferida=True), "c@x.pe", "d@y.pe", "", None)
+    assert "diferida" in m.html.lower() and "Recibida por el sistema" in m.html
+    assert "<a href" not in m.html and m.asunto.endswith("— FARM-01") and "[DIFERIDA]" in m.asunto
+
+
+def test_el_correo_de_excursion_sin_dato_de_sensor_no_dibuja_escala():
+    from src.infrastructure.notifications.notificacion_service import componer_correo_excursion
+
+    m = componer_correo_excursion(_aviso(temperatura=None), "c@x.pe", "d@y.pe", "", {})
+    assert "rango seguro" not in m.html and "sin dato de sensor" in m.html

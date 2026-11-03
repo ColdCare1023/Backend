@@ -24,6 +24,7 @@ import httpx
 from src.application.use_cases.generar_alerta import AvisoExcursion
 from src.application.use_cases.vigilar_sin_datos import AvisoSinDatos
 from src.infrastructure.config import Settings
+from src.infrastructure.notifications.plantillas_correo import Boton, escala_termica, renderizar
 from src.infrastructure.notifications.transporte_email import MensajeCorreo
 
 logger = logging.getLogger("infrastructure.notificaciones")
@@ -79,11 +80,46 @@ def componer_correo_excursion(
     ]
     if frontend_url:
         lineas += ["", f"Ver la alerta: {frontend_url.rstrip('/')}/alertas?id={aviso.alerta_id}"]
+    asunto = f"[ColdCare] EXCURSIÓN CRÍTICA{etiqueta} — {aviso.device_id}"
     return MensajeCorreo(
         remitente=remitente,
         destinatario=destinatario,
-        asunto=f"[ColdCare] EXCURSIÓN CRÍTICA{etiqueta} — {aviso.device_id}",
+        asunto=asunto,
         cuerpo="\n".join(lineas),
+        html=_html_excursion(aviso, asunto, temperatura, frontend_url, dispositivo),
+    )
+
+
+def _html_excursion(
+    aviso: AvisoExcursion, asunto: str, temperatura: str, frontend_url: str, dispositivo: dict
+) -> str:
+    detalles = [("Dispositivo", aviso.device_id)]
+    if dispositivo.get("nombre"):
+        detalles.append(("Equipo", dispositivo["nombre"]))
+    if dispositivo.get("ubicacion"):
+        detalles.append(("Ubicación", dispositivo["ubicacion"]))
+    detalles += [("Temperatura registrada", temperatura), ("Momento de la lectura", _formatear(aviso.captured_at))]
+    parrafos = [
+        "La temperatura salió del rango de 2 a 8 °C exigido para medicamentos termolábiles. "
+        "Verifica el refrigerador de inmediato y registra la acción correctiva en el sistema."
+    ]
+    if aviso.diferida:
+        detalles.append(("Recibida por el sistema", _formatear(aviso.received_at) if aviso.received_at else "—"))
+        parrafos.append(
+            "Esta lectura llegó diferida: el nodo estuvo sin conexión y la envió desde su memoria, "
+            "así que la excursión pudo haber ocurrido antes de este aviso."
+        )
+    return renderizar(
+        asunto=asunto,
+        preheader=f"{aviso.device_id}: {temperatura}, fuera del rango 2-8 °C. Verifica el refrigerador.",
+        tono="critico",
+        etiqueta="Excursión crítica · diferida" if aviso.diferida else "Excursión crítica",
+        titulo=f"{temperatura} en {dispositivo.get('nombre') or aviso.device_id}",
+        parrafos=parrafos,
+        detalles=detalles,
+        escala=escala_termica(aviso.temperatura) if aviso.temperatura is not None else None,
+        boton=Boton("Ver la alerta", f"{frontend_url.rstrip('/')}/alertas?id={aviso.alerta_id}") if frontend_url else None,
+        nota="Actúa como ante una excursión real: revisa el equipo, protege el lote y deja constancia de lo que hiciste.",
     )
 
 
