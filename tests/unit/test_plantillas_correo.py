@@ -75,7 +75,7 @@ def test_correo_de_cuenta_creada_tiene_texto_y_html_sin_la_clave():
     assert "ana@prueba.pe" in c.cuerpo and "https://coldcare.example" in c.cuerpo
     assert "Ana &lt;b&gt;" in c.html and "<b>" not in c.html  # nombre escapado
     assert 'href="https://coldcare.example"' in c.html  # sin barra final
-    assert "temporal" in c.html.lower() and "contraseña:" not in c.html.lower().replace("contraseña", "contraseña:", 0)
+    assert "temporal, te la entrega el administrador" in c.html.lower()  # no incluye la clave, solo avisa quién la da
     sin_enlace = correo_cuenta_creada("Ana", "ana@prueba.pe", "")
     assert "Ingresa aquí" not in sin_enlace.cuerpo and "<a href" not in sin_enlace.html
 

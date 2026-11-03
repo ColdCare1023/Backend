@@ -1,8 +1,8 @@
 """Plantilla HTML de los correos de ColdCare.
 
-Un solo diseño para todos los avisos (cuenta creada, contraseña, alertas): estilo sobrio de GitHub/AWS: marca pequeña
-sobre fondo blanco, banner de estado, titular, lectura térmica con su escala, tabla de datos con
-borde fino, botón de acción y pie discreto. Está hecha para clientes de correo, no para navegadores:
+Un solo diseño para todos los avisos (cuenta creada, contraseña, alertas): basado en la maqueta MIT «basic-full» de Postmark
+(github.com/ActiveCampaign/postmark-templates): fondo gris, marca centrada, tarjeta blanca, caja de
+atributos gris, botón con borde y enlace de respaldo. Se añadió la lectura térmica y el tono de estado. Está hecha para clientes de correo, no para navegadores:
 
 - tablas y estilos en línea (Gmail, Outlook y Apple Mail ignoran o recortan el CSS externo);
 - sin imágenes ni fuentes remotas: no hay nada que bloquear ni que rastree la apertura;
@@ -100,41 +100,53 @@ def escala_termica(temperatura: float, minimo: float = 2.0, maximo: float = 8.0)
 
 
 def _detalles(filas: list[tuple[str, str]]) -> str:
+    """Caja gris de atributos (como `attributes` de Postmark): etiqueta en negrita y valor."""
     if not filas:
         return ""
-    celdas = []
-    for i, (etiqueta, valor) in enumerate(filas):
-        borde = "" if i == len(filas) - 1 else "border-bottom:1px solid #d1d9e0;"
-        celdas.append(
-            f'<tr><td class="cc-muted cc-linea" style="padding:10px 16px;{borde}font-family:{_FUENTE};font-size:13px;'
-            f'color:#59636e;width:38%;vertical-align:top;">{_e(etiqueta)}</td>'
-            f'<td class="cc-texto cc-linea" style="padding:10px 16px;{borde}font-family:{_FUENTE};font-size:13px;'
-            f'color:#1f2328;font-weight:600;vertical-align:top;">{_e(valor)}</td></tr>'
-        )
+    celdas = "".join(
+        f'<tr><td class="cc-texto" style="padding:0 0 8px 0;font-family:{_FUENTE};font-size:15px;line-height:22px;color:#51545e;">'
+        f'<strong style="color:#333333;" class="cc-texto">{_e(etiqueta)}:</strong> {_e(valor)}</td></tr>'
+        for etiqueta, valor in filas
+    )
     return (
-        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" class="cc-linea" '
-        'style="margin:20px 0 0 0;border:1px solid #d1d9e0;border-radius:6px;border-collapse:separate;">'
-        f'{"".join(celdas)}</table>'
+        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 21px 0;">'
+        '<tr><td class="cc-gris" bgcolor="#f4f4f7" style="padding:16px 16px 8px 16px;background-color:#f4f4f7;">'
+        f'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">{celdas}</table>'
+        "</td></tr></table>"
     )
 
 
 def _boton(boton: Boton, color: str) -> str:
+    """Botón con borde (técnica de Postmark/Litmus): el color va también en el borde para Outlook."""
     return (
-        '<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:24px 0 0 0;">'
-        f'<tr><td align="center" bgcolor="{color}" style="border-radius:6px;background-color:{color};">'
-        f'<a href="{_url_segura(boton.url)}" target="_blank" style="display:inline-block;padding:10px 20px;'
-        f"font-family:{_FUENTE};font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;"
-        f'border-radius:6px;">{_e(boton.texto)}</a></td></tr></table>'
+        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:28px auto;">'
+        f'<tr><td align="center"><a href="{_url_segura(boton.url)}" target="_blank" '
+        f'style="display:inline-block;background-color:{color};border:solid {color};border-width:10px 18px;border-radius:3px;'
+        f"box-shadow:0 2px 3px rgba(0,0,0,.16);font-family:{_FUENTE};font-size:16px;font-weight:700;color:#ffffff;"
+        f'text-decoration:none;">{_e(boton.texto)}</a></td></tr></table>'
+    )
+
+
+def _enlace_respaldo(boton: Boton) -> str:
+    if _url_segura(boton.url) == "#":
+        return ""
+    return (
+        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" class="cc-linea" '
+        'style="margin-top:25px;border-top:1px solid #eaeaec;"><tr><td style="padding-top:20px;">'
+        f'<p class="cc-muted" style="margin:0 0 6px 0;font-family:{_FUENTE};font-size:13px;line-height:21px;color:#6b6e76;">'
+        "Si tienes problemas con el botón, copia y pega esta dirección en tu navegador:</p>"
+        f'<p class="cc-muted" style="margin:0;font-family:{_FUENTE};font-size:13px;line-height:21px;color:#6b6e76;word-break:break-all;">'
+        f"{_e(boton.url)}</p></td></tr></table>"
     )
 
 
 def _marca() -> str:
     """Logotipo hecho con una celda (sin imagen): cuadrado azul hielo con la «C» y el nombre."""
     return (
-        '<table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr>'
-        f'<td align="center" width="28" height="28" style="width:28px;height:28px;background-color:{_HIELO};'
-        f"border-radius:7px;font-family:{_FUENTE};font-size:16px;font-weight:800;color:#06202f;\">C</td>"
-        f'<td class="cc-texto" style="padding-left:10px;font-family:{_FUENTE};font-size:16px;font-weight:600;color:#1f2328;">{MARCA}</td>'
+        '<table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center"><tr>'
+        f'<td align="center" width="30" height="30" style="width:30px;height:30px;background-color:{_HIELO};'
+        f"border-radius:8px;font-family:{_FUENTE};font-size:17px;font-weight:800;color:#06202f;\">C</td>"
+        f'<td class="cc-marca" style="padding-left:10px;font-family:{_FUENTE};font-size:18px;font-weight:700;color:#a8aaaf;">{MARCA}</td>'
         "</tr></table>"
     )
 
@@ -156,69 +168,77 @@ def renderizar(
     """Devuelve el documento HTML completo. `escala` es HTML ya generado por `escala_termica`."""
     acento, suave = TONOS[tono]
     cuerpo_parrafos = "".join(
-        f'<p class="cc-texto" style="margin:12px 0 0 0;font-family:{_FUENTE};font-size:14px;line-height:22px;'
-        f'color:#1f2328;">{_e(p)}</p>'
+        f'<p class="cc-texto" style="margin:.4em 0 1.1875em 0;font-family:{_FUENTE};font-size:16px;line-height:26px;'
+        f'color:#51545e;">{_e(p)}</p>'
         for p in parrafos
     )
     bloque_escala = (
-        f'<div class="cc-linea" style="margin-top:20px;padding:16px;border:1px solid #d1d9e0;border-radius:6px;">{escala}</div>'
+        f'<div class="cc-gris" style="margin:0 0 21px 0;padding:18px 16px 14px 16px;background-color:#f4f4f7;">{escala}</div>'
         if escala
         else ""
     )
     bloque_nota = (
-        f'<p class="cc-muted" style="margin:24px 0 0 0;font-family:{_FUENTE};font-size:13px;line-height:20px;color:#59636e;">{_e(nota)}</p>'
+        f'<p class="cc-muted" style="margin:14px 0 0 0;font-family:{_FUENTE};font-size:14px;line-height:23px;color:#6b6e76;">{_e(nota)}</p>'
         if nota
         else ""
     )
     texto_pie = pie or "Recibes este mensaje porque eres parte del equipo de ColdCare. Es un aviso automático: no respondas a este correo."
-    banner = (
-        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>'
-        f'<td class="cc-banner cc-b-{tono}" style="padding:10px 14px;background-color:{suave};border:1px solid {acento};'
-        f'border-radius:6px;font-family:{_FUENTE};font-size:13px;font-weight:600;color:{acento};">'
-        f'<span style="font-size:15px;">&#9679;</span>&nbsp; {_e(etiqueta)}</td></tr></table>'
+    chip = (
+        f'<span class="cc-t-{tono}" style="display:inline-block;padding:4px 10px;background-color:{suave};border-radius:3px;'
+        f'font-family:{_FUENTE};font-size:12px;font-weight:700;letter-spacing:.8px;color:{acento};text-transform:uppercase;">{_e(etiqueta)}</span>'
     )
     return f"""<!DOCTYPE html>
 <html lang="es" xmlns="http://www.w3.org/1999/xhtml">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
 <meta name="color-scheme" content="light dark">
 <meta name="supported-color-schemes" content="light dark">
 <title>{_e(asunto)}</title>
 <style>
-  @media only screen and (max-width:620px) {{ .cc-tarjeta {{ width:100% !important; }} .cc-pad {{ padding:20px 16px !important; }} }}
+  @media only screen and (max-width:600px) {{ .cc-tarjeta {{ width:100% !important; }} .cc-celda {{ padding:24px 20px !important; }} }}
   @media (prefers-color-scheme: dark) {{
-    .cc-fondo {{ background-color:#0d1117 !important; }}
-    .cc-tarjeta {{ background-color:#0d1117 !important; }}
-    .cc-texto {{ color:#e6edf3 !important; }}
-    .cc-muted {{ color:#9198a1 !important; }}
-    .cc-linea {{ border-color:#30363d !important; }}
-    .cc-banner {{ background-color:#161b22 !important; }}
-    .cc-t-critico, .cc-b-critico {{ color:#ff7b72 !important; }}
-    .cc-t-aviso, .cc-b-aviso {{ color:#f0a24a !important; }}
-    .cc-t-ok, .cc-b-ok {{ color:#3fb950 !important; }}
-    .cc-t-info, .cc-b-info {{ color:#79c0ff !important; }}
+    .cc-fondo {{ background-color:#333333 !important; }}
+    .cc-tarjeta {{ background-color:#222222 !important; }}
+    .cc-texto, .cc-texto strong {{ color:#ffffff !important; }}
+    .cc-muted, .cc-marca {{ color:#b0b3ba !important; }}
+    .cc-gris {{ background-color:#2d2d2d !important; }}
+    .cc-linea {{ border-color:#444444 !important; }}
+    .cc-t-critico {{ color:#ff8b80 !important; }}
+    .cc-t-aviso {{ color:#ffb866 !important; }}
+    .cc-t-ok {{ color:#4cd694 !important; }}
+    .cc-t-info {{ color:#8ab4ff !important; }}
   }}
 </style>
 </head>
-<body class="cc-fondo" style="margin:0;padding:0;background-color:#ffffff;">
-<div style="display:none;max-height:0;overflow:hidden;opacity:0;font-size:1px;line-height:1px;color:#ffffff;">{_e(preheader)}&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;</div>
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" class="cc-fondo" style="background-color:#ffffff;">
-  <tr><td align="center" style="padding:24px 12px;">
-    <table role="presentation" width="560" cellspacing="0" cellpadding="0" border="0" class="cc-tarjeta" style="width:560px;max-width:560px;background-color:#ffffff;">
-      <tr><td class="cc-linea" style="padding:0 0 18px 0;border-bottom:1px solid #d1d9e0;">{_marca()}</td></tr>
-      <tr><td class="cc-pad" style="padding:24px 0 8px 0;">
-        {banner}
-        <h1 class="cc-texto" style="margin:22px 0 0 0;font-family:{_FUENTE};font-size:22px;line-height:30px;font-weight:600;color:#1f2328;">{_e(titulo)}</h1>
-        {cuerpo_parrafos}
-        {bloque_escala}
-        {_detalles(detalles or [])}
-        {_boton(boton, acento) if boton else ""}
-        {bloque_nota}
+<body class="cc-fondo" style="margin:0;padding:0;width:100%;background-color:#f4f4f7;-webkit-text-size-adjust:none;">
+<span style="display:none !important;visibility:hidden;mso-hide:all;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">{_e(preheader)}</span>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" class="cc-fondo" style="background-color:#f4f4f7;">
+  <tr><td align="center" style="padding:0 12px 32px 12px;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+      <tr><td align="center" style="padding:28px 0 24px 0;">{_marca()}</td></tr>
+      <tr><td align="center">
+        <table role="presentation" width="570" cellspacing="0" cellpadding="0" border="0" class="cc-tarjeta" style="width:570px;max-width:570px;background-color:#ffffff;border-top:4px solid {acento};border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,.08);">
+          <tr><td class="cc-celda" style="padding:35px;">
+            {chip}
+            <h1 class="cc-texto" style="margin:14px 0 14px 0;font-family:{_FUENTE};font-size:24px;line-height:32px;font-weight:700;color:#333333;text-align:left;">{_e(titulo)}</h1>
+            {cuerpo_parrafos}
+            {bloque_escala}
+            {_detalles(detalles or [])}
+            {_boton(boton, acento) if boton else ""}
+            {bloque_nota}
+            {_enlace_respaldo(boton) if boton else ""}
+          </td></tr>
+        </table>
       </td></tr>
-      <tr><td class="cc-linea" style="padding:20px 0 0 0;border-top:1px solid #d1d9e0;">
-        <p class="cc-muted" style="margin:0;font-family:{_FUENTE};font-size:12px;line-height:18px;color:#59636e;">{_e(texto_pie)}</p>
-        <p class="cc-muted" style="margin:8px 0 0 0;font-family:{_FUENTE};font-size:12px;line-height:18px;color:#59636e;">{MARCA} · {LEMA}</p>
+      <tr><td align="center" style="padding:24px 0 0 0;">
+        <table role="presentation" width="570" cellspacing="0" cellpadding="0" border="0" style="width:570px;max-width:570px;">
+          <tr><td align="center">
+            <p class="cc-muted" style="margin:0 0 6px 0;font-family:{_FUENTE};font-size:13px;line-height:20px;color:#6b6e76;">{_e(texto_pie)}</p>
+            <p class="cc-muted" style="margin:0;font-family:{_FUENTE};font-size:13px;line-height:20px;color:#6b6e76;">{MARCA} · {LEMA}</p>
+          </td></tr>
+        </table>
       </td></tr>
     </table>
   </td></tr>
