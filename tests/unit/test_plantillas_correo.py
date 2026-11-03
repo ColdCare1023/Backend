@@ -147,3 +147,56 @@ def test_el_correo_preventivo_avisa_con_margen_y_sin_exagerar():
     assert "EXCURSIÓN CRÍTICA" not in m.asunto
     assert "rango seguro" in m.html and "Refri 1 se acerca al límite" in m.html
     assert f"/alertas?id={aviso.alerta_id}" in m.html
+
+
+async def test_el_aviso_sale_a_varios_destinatarios_y_la_auditoria_los_enmascara():
+    from src.infrastructure.config import Settings
+    from src.infrastructure.notifications.transporte_email import (
+        HttpApiTransporte,
+        MensajeCorreo,
+        SmtpTransporte,
+    )
+    from src.infrastructure.security.privacidad import enmascarar_emails
+
+    capturado = {}
+
+    class _Smtp(SmtpTransporte):
+        def _enviar_bloqueante(self, correo):
+            capturado["to"] = correo["To"]
+
+    ajustes = Settings(environment="test", _env_file=None, jwt_secret_key="x" * 48)
+    await _Smtp(ajustes).enviar(MensajeCorreo("c@x.pe", "diego@gmail.com, brenda@gmail.com", "A", "t"))
+    assert "diego@gmail.com" in capturado["to"] and "brenda@gmail.com" in capturado["to"]
+
+    enviados = []
+
+    class _Resp:
+        def raise_for_status(self):
+            return None
+
+    class _Cliente:
+        def __init__(self, **_kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_a):
+            return None
+
+        async def post(self, url, headers=None, json=None):
+            enviados.append(json)
+            return _Resp()
+
+    import src.infrastructure.notifications.transporte_email as modulo
+
+    original = modulo.httpx.AsyncClient
+    modulo.httpx.AsyncClient = _Cliente
+    try:
+        await HttpApiTransporte(ajustes).enviar(MensajeCorreo("c@x.pe", "a@x.com, b@y.com,", "A", "t"))
+    finally:
+        modulo.httpx.AsyncClient = original
+    assert enviados[0]["to"] == ["a@x.com", "b@y.com"]
+
+    enmascarado = enmascarar_emails("diego@gmail.com, brenda@gmail.com")
+    assert "diego" not in enmascarado and "brenda" not in enmascarado and enmascarado.count("***") == 2

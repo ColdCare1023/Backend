@@ -296,6 +296,7 @@ class Settings(BaseSettings):
 
     @property
     def correo_destino_respaldo(self) -> str:
+        """Uno o varios correos separados por coma: todos reciben el aviso."""
         return self.email_destino_respaldo or self.smtp_to
 
     @model_validator(mode="after")

@@ -13,6 +13,11 @@ def enmascarar_telefono(telefono: str | None) -> str | None:
     return f"{telefono[:3]}{'•' * max(len(telefono) - 6, 0)}{telefono[-3:]}"
 
 
+def enmascarar_emails(destinatarios: str) -> str:
+    """Varios correos separados por coma -> cada uno enmascarado (a***@x.com, b***@y.com)."""
+    return ", ".join(enmascarar_email(c.strip()) for c in destinatarios.split(",") if c.strip())
+
+
 def enmascarar_email(email: str) -> str:
     """Reduce un correo a `p***@dominio` para la bitácora.
 

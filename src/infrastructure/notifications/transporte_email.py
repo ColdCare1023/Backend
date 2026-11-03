@@ -33,6 +33,7 @@ class ErrorEnvioCorreo(Exception):
 @dataclass(frozen=True, slots=True)
 class MensajeCorreo:
     remitente: str
+    # Uno o varios correos separados por coma (EMAIL_DESTINO_RESPALDO=a@x.com,b@y.com).
     destinatario: str
     asunto: str
     cuerpo: str
@@ -97,7 +98,7 @@ class HttpApiTransporte:
                     headers={"Authorization": f"Bearer {self._settings.email_api_key}"},
                     json={
                         "from": mensaje.remitente,
-                        "to": [mensaje.destinatario],
+                        "to": [d.strip() for d in mensaje.destinatario.split(",") if d.strip()],
                         "subject": mensaje.asunto,
                         "text": mensaje.cuerpo,
                         **({"html": mensaje.html} if mensaje.html else {}),

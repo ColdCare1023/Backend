@@ -63,7 +63,7 @@ from src.infrastructure.notifications.transporte_email import (
     TransporteEmail,
     construir_transporte,
 )
-from src.infrastructure.security.privacidad import enmascarar_email
+from src.infrastructure.security.privacidad import enmascarar_emails
 
 logger = logging.getLogger("infrastructure.notificaciones.despachador")
 
@@ -248,7 +248,7 @@ class DespachadorNotificaciones:
                     "NOTIFICACION_FALLIDA",
                     aviso,
                     {
-                        "destinatario": enmascarar_email(destinatario),
+                        "destinatario": enmascarar_emails(destinatario),
                         "intento": intentos,
                         "error": str(exc)[:200] if isinstance(exc, ErrorEnvioCorreo) else type(exc).__name__,
                     },
@@ -272,7 +272,7 @@ class DespachadorNotificaciones:
                 "NOTIFICACION_ENVIADA",
                 aviso,
                 {
-                    "destinatario": enmascarar_email(destinatario),
+                    "destinatario": enmascarar_emails(destinatario),
                     "latencia_s": latencia,
                     "diferida": aviso.diferida,
                     "intento": alerta.notificacion_intentos + 1,
@@ -327,7 +327,7 @@ class DespachadorNotificaciones:
                     "NOTIFICACION_FALLIDA",
                     aviso,
                     {
-                        "destinatario": enmascarar_email(destinatario),
+                        "destinatario": enmascarar_emails(destinatario),
                         "intento": intentos,
                         "error": str(exc)[:200] if isinstance(exc, ErrorEnvioCorreo) else type(exc).__name__,
                     },
@@ -343,7 +343,7 @@ class DespachadorNotificaciones:
                 auditoria,
                 "NOTIFICACION_ENVIADA",
                 aviso,
-                {"destinatario": enmascarar_email(destinatario), "intento": incidente.notificacion_intentos + 1},
+                {"destinatario": enmascarar_emails(destinatario), "intento": incidente.notificacion_intentos + 1},
             )
             await session.commit()
             logger.info("Aviso SIN_DATOS enviado para %s (incidente %s)", aviso.device_id, aviso.incidente_id)
