@@ -53,9 +53,9 @@ def test_el_pie_y_el_detalle_aparecen_solo_si_se_piden():
 def test_la_escala_termica_ubica_la_zona_segura_y_marca_la_lectura():
     en_rango = escala_termica(5.0)
     assert "#12b76a" in en_rango and "rango seguro" in en_rango and "2 °C" in en_rango and "8 °C" in en_rango
-    assert "#039855" in en_rango  # marcador verde dentro de 2-8
+    assert "#0e9f6e" in en_rango  # marcador verde dentro de 2-8
     fuera = escala_termica(11.4)
-    assert "#d92d20" in fuera  # marcador rojo fuera de rango
+    assert "#e5382b" in fuera  # marcador rojo fuera de rango
 
 
 @pytest.mark.parametrize("temperatura", [-30.0, 0.0, 2.0, 8.0, 14.0, 60.0])
@@ -112,7 +112,7 @@ def test_el_correo_de_excursion_trae_escala_boton_y_datos():
                                   {"nombre": "Refri <1>", "ubicacion": "Botica Central"})
     assert m.asunto == "[ColdCare] EXCURSIÓN CRÍTICA — FARM-01" and "ALERTA CRÍTICA" in m.cuerpo  # texto intacto
     assert "11.4 °C en Refri &lt;1&gt;" in m.html and "Botica Central" in m.html
-    assert "rango seguro" in m.html and "#d92d20" in m.html
+    assert "rango seguro" in m.html and "#e5382b" in m.html
     assert f'href="https://coldcare.example/alertas?id={aviso.alerta_id}"' in m.html
     assert "diferida" not in m.html.lower()
 
@@ -143,7 +143,7 @@ def test_el_correo_preventivo_avisa_con_margen_y_sin_exagerar():
     assert m.asunto == "[ColdCare] RIESGO PREVENTIVO — FARM-01"
     assert "Margen hasta el límite: 0.4 °C" in m.cuerpo and "0.4 °C" in m.html
     assert "Todavía no es una excursión" in m.cuerpo and "Todavía no es una excursión" in m.html
-    assert "#dc6803" in m.html  # acento ámbar, no el rojo de la excursión
+    assert "#e07b00" in m.html  # acento ámbar, no el rojo de la excursión
     assert "EXCURSIÓN CRÍTICA" not in m.asunto
     assert "rango seguro" in m.html and "Refri 1 se acerca al límite" in m.html
     assert f"/alertas?id={aviso.alerta_id}" in m.html
