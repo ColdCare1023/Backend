@@ -18,3 +18,6 @@ data/ml/work/
 
 # Credenciales y destinos de la prueba real de notificaciones (nunca al repo)
 *.local.env
+
+# Vista previa local de los correos
+vista_previa_correos/
