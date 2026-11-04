@@ -109,8 +109,17 @@ python scripts/smoke_test.py          # HU-09/10/14: TLS, token, CA ajena, host 
 python scripts/publicar_caso.py '{}'  # una telemetría v1.0 válida → acuse "committed"
 python scripts/hu12_hu19_carga.py     # HU-12/19: 5 nodos simultáneos, API en paralelo, latencia SSE
 python scripts/espiar_lecturas.py 3   # captura mensajes crudos de lecturas/eventos
+python scripts/nodo_virtual.py ESP32_FARMACIA_01   # nodo SIN hardware con el src/core del firmware (abajo)
 docker compose logs -f emqx           # evidencia HU-10: bad_username_or_password, authorization denied
 ```
+
+`nodo_virtual.py` hace de nodo sin un ESP32: los bytes publicados y la decisión sobre cada acuse los da el
+código real del firmware (`IoT/tools/nodo_core.cpp`, compilado según su cabecera en `IoT/.pio/gen/`), y el
+script pone la misma sesión MQTT que el nodo (usuario = `device_id`, TLS contra `BROKER_IP` validando CA y
+host, LWT). Comprueba conexión, lecturas con acuse que el firmware libera, reenvío duplicado, `estado_nodo`,
+que `/api/lecturas` las devuelve y que un corte abrupto deja el nodo `offline`. Requiere el alta previa con
+`crear_dispositivo.py` y, para la parte de API, `seed_dev` (`--aceptar-privacidad` si el técnico semilla
+aún no la aceptó).
 
 `capturar_serial.py` guarda el monitor serie con hora local sin reiniciar el nodo (abre el puerto con
 DTR/RTS bajos). Requiere `pyserial`.
