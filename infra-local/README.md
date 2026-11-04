@@ -92,6 +92,14 @@ Da de alta el dispositivo en el backend y emite su credencial, copia la CA a `da
 y el firmware, y aprovisiona Wi-Fi/host/token por la consola serie (`nvs set …`). `uploadfs` borra el
 buffer offline; `SOLO_APP=1` lo evita. Ver variables en la cabecera del script.
 
+- Instalación nueva: si el administrador aún no aceptó la privacidad (BE-014), el alta responde 403;
+  `ACEPTAR_PRIVACIDAD=1` la acepta si usted es esa persona.
+- Cada `nvs set` se confirma con la respuesta de la consola. Si alguno se rechaza (por ejemplo,
+  `device_id` distinto con lecturas pendientes sin haber pasado por `uploadfs`), el script se detiene
+  sin reiniciar el nodo: reiniciarlo con otra identidad y el token nuevo solo daría CONNACK 5.
+- En Git Bash, PlatformIO se lanza sin la variable `MSYSTEM`: con ella la primera compilación
+  (la que instala el toolchain de ESP-IDF) aborta con «MSys/Mingw is not supported».
+
 ## Verificar
 
 Con el venv del backend activo (`httpx`, `aiomqtt`):
