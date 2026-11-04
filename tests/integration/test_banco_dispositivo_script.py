@@ -2,6 +2,7 @@
 imprimirlo y se niega a rotar o dar de baja un equipo real."""
 
 import importlib
+import os
 import stat
 from pathlib import Path
 
@@ -34,7 +35,10 @@ def test_alta_crea_un_demo_y_guarda_el_token_sin_imprimirlo(client, token_admin,
     archivo = tmp_path / "secrets" / "ESP32_BANCO_01.token"
     token = archivo.read_text()
     assert token and token not in capsys.readouterr().out
-    assert stat.S_IMODE(archivo.stat().st_mode) == 0o600
+    # Windows no tiene bits de permiso POSIX: os.open ignora 0o600 (solo
+    # controla el atributo de solo lectura). Se comprueba donde existen.
+    if os.name == "posix":
+        assert stat.S_IMODE(archivo.stat().st_mode) == 0o600
     assert _dispositivo(client, cabecera, "ESP32_BANCO_01")["es_demo"] is True
 
 

@@ -55,9 +55,11 @@ def _servidor():
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as carpeta:
         servidor = pgserver.get_server(carpeta, cleanup_mode="stop")
         servidor.psql(f'CREATE DATABASE "{base}";')
-        socket = servidor.get_uri().split("host=")[1]
+        # get_uri() usa un socket Unix (`?host=/ruta`) en Linux/macOS y TCP
+        # (`@127.0.0.1:puerto`) en Windows: se cambia solo la base y se
+        # conserva el resto de la URI tal cual.
         try:
-            yield f"postgresql://postgres@/{base}?host={socket}"
+            yield _con_base(servidor.get_uri(), base)
         finally:
             servidor.cleanup()
 

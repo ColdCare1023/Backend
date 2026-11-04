@@ -83,9 +83,18 @@ class SQLAlchemyTrazabilidadRepository(ITrazabilidadRepository):
         if chain_id is not None:
             stmt = stmt.where(TraceabilityRecordModel.chain_id == chain_id)
             return stmt.order_by(TraceabilityRecordModel.chain_seq.asc(), TraceabilityRecordModel.id.asc())
-        # Orden global de inserción: mismo criterio de desempate que
-        # obtener_ultimo_eslabon(), en sentido inverso.
-        return stmt.order_by(TraceabilityRecordModel.created_at.asc(), TraceabilityRecordModel.id.asc())
+        # Orden global de inserción. Dos eslabones de una misma cadena pueden
+        # compartir created_at por resolución de reloj (~15,6 ms con Python
+        # 3.12 en Windows); desempatar solo por `id` (UUID aleatorio) los
+        # invertía y la verificación informaba un enlace roto inexistente.
+        # chain_seq desempata dentro de la cadena con el mismo criterio que
+        # obtener_ultimo_eslabon(); `id` solo ordena entre cadenas distintas,
+        # que se verifican de forma independiente.
+        return stmt.order_by(
+            TraceabilityRecordModel.created_at.asc(),
+            TraceabilityRecordModel.chain_seq.asc(),
+            TraceabilityRecordModel.id.asc(),
+        )
 
     async def listar_todos_ordenados(self, chain_id: str | None = None) -> list[RegistroTrazabilidad]:
         result = await self._session.execute(self._consulta_ordenada(chain_id))
