@@ -1,0 +1,92 @@
+{
+  "corrida": "S2_r5_20261105-1454",
+  "caso": "S2",
+  "repeticion": 5,
+  "inicio_utc": "2026-11-05T19:54:47Z",
+  "fin_utc": "2026-11-05T20:10:27Z",
+  "duracion_min": 15.7,
+  "lecturas_guardadas": 94,
+  "faltantes": 0,
+  "duplicadas_en_base": 0,
+  "diferidas": 63,
+  "fuera_de_orden": 0,
+  "sin_hora_llegadas_en_ventana": 0,
+  "corte_inferido": {
+    "ultima_en_linea_utc": "2026-11-05T19:59:22.000000Z",
+    "reconexion_utc": "2026-11-05T20:10:02.434857Z",
+    "duracion_corte_s": 640.4,
+    "diferidas": 63,
+    "vaciado_s": 12.8,
+    "vaciado_registros_por_s": 4.94,
+    "s_hasta_sin_datos": 30.8,
+    "s_hasta_sin_datos_detectado": 54.0
+  },
+  "cortes": [
+    {
+      "ultima_en_linea_utc": "2026-11-05T19:59:22.000000Z",
+      "reconexion_utc": "2026-11-05T20:10:02.434857Z",
+      "duracion_corte_s": 640.4,
+      "diferidas": 63,
+      "vaciado_s": 12.8,
+      "vaciado_registros_por_s": 4.94,
+      "s_hasta_sin_datos": 30.8,
+      "s_hasta_sin_datos_detectado": 54.0
+    }
+  ],
+  "mensajes_lectura_broker": 28,
+  "reenvios_broker": 0,
+  "vistas_en_broker_sin_guardar": 0,
+  "boots": {
+    "897": {
+      "seq_min": 395,
+      "seq_max": 488,
+      "guardadas": 94,
+      "esperadas": 94,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "synced": 94
+      }
+    }
+  },
+  "latencia_s": {
+    "n": 94,
+    "mediana": 175.016,
+    "p95": 585.027,
+    "max": 630.435,
+    "en_linea_n": 31,
+    "en_linea_mediana": 0.854,
+    "en_linea_p95": 2.245
+  },
+  "incidentes": [
+    {
+      "tipo": "sin_datos",
+      "abierto_utc": "2026-11-05T19:59:52.847990Z",
+      "resuelto_utc": "2026-11-05T20:10:02.358919Z",
+      "detectado_utc": "2026-11-05T20:00:16.024206Z",
+      "ultimo_reporte_utc": "2026-11-05T19:59:22.847990Z",
+      "s_silencio_hasta_deteccion": 53.2
+    }
+  ],
+  "alertas": [],
+  "marcas": [
+    {
+      "utc": "2026-11-05T19:59:19Z",
+      "marca": "hotspot apagado",
+      "s_hasta_incidente": 33.8,
+      "s_hasta_incidente_detectado": 57.0,
+      "s_hasta_lectura": 3.9,
+      "s_hasta_alerta": null
+    },
+    {
+      "utc": "2026-11-05T20:09:48Z",
+      "marca": "hotspot encendido",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 14.4,
+      "s_hasta_alerta": null
+    }
+  ],
+  "falla_commit": null
+}

@@ -1,0 +1,123 @@
+{
+  "corrida": "S5_r3_20261105-1833",
+  "caso": "S5",
+  "repeticion": 3,
+  "inicio_utc": "2026-11-05T23:33:56Z",
+  "fin_utc": "2026-11-05T23:45:18Z",
+  "duracion_min": 11.4,
+  "lecturas_guardadas": 68,
+  "faltantes": 0,
+  "duplicadas_en_base": 0,
+  "diferidas": 61,
+  "fuera_de_orden": 0,
+  "sin_hora_llegadas_en_ventana": 457,
+  "corte_inferido": {
+    "ultima_en_linea_utc": "2026-11-05T23:37:51.000000Z",
+    "reconexion_utc": "2026-11-05T23:44:58.613498Z",
+    "duracion_corte_s": 427.6,
+    "diferidas": 41,
+    "vaciado_s": 8.7,
+    "vaciado_registros_por_s": 4.7,
+    "s_hasta_sin_datos": 31.5,
+    "s_hasta_sin_datos_detectado": 45.4
+  },
+  "cortes": [
+    {
+      "ultima_en_linea_utc": null,
+      "reconexion_utc": "2026-11-05T23:37:30.766010Z",
+      "duracion_corte_s": null,
+      "diferidas": 20,
+      "vaciado_s": 4.4,
+      "vaciado_registros_por_s": 4.57,
+      "s_hasta_sin_datos": null,
+      "s_hasta_sin_datos_detectado": null
+    },
+    {
+      "ultima_en_linea_utc": "2026-11-05T23:37:51.000000Z",
+      "reconexion_utc": "2026-11-05T23:44:58.613498Z",
+      "duracion_corte_s": 427.6,
+      "diferidas": 41,
+      "vaciado_s": 8.7,
+      "vaciado_registros_por_s": 4.7,
+      "s_hasta_sin_datos": 31.5,
+      "s_hasta_sin_datos_detectado": 45.4
+    }
+  ],
+  "mensajes_lectura_broker": 915,
+  "reenvios_broker": 0,
+  "vistas_en_broker_sin_guardar": 847,
+  "boots": {
+    "954": {
+      "seq_min": 8,
+      "seq_max": 51,
+      "guardadas": 44,
+      "esperadas": 44,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "synced": 44
+      }
+    },
+    "955": {
+      "seq_min": 1,
+      "seq_max": 24,
+      "guardadas": 24,
+      "esperadas": 24,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "backfilled": 22,
+        "synced": 2
+      }
+    }
+  },
+  "latencia_s": {
+    "n": 68,
+    "mediana": 153.335,
+    "p95": 384.847,
+    "max": 417.613,
+    "en_linea_n": 7,
+    "en_linea_mediana": 4.658,
+    "en_linea_p95": 17.281
+  },
+  "incidentes": [
+    {
+      "tipo": "sin_datos",
+      "abierto_utc": "2026-11-05T23:38:22.457007Z",
+      "resuelto_utc": "2026-11-05T23:44:58.542289Z",
+      "detectado_utc": "2026-11-05T23:38:36.359752Z",
+      "ultimo_reporte_utc": "2026-11-05T23:37:52.457007Z",
+      "s_silencio_hasta_deteccion": 43.9
+    }
+  ],
+  "alertas": [],
+  "marcas": [
+    {
+      "utc": "2026-11-05T23:37:58Z",
+      "marca": "hotspot apagado",
+      "s_hasta_incidente": 24.5,
+      "s_hasta_incidente_detectado": 38.4,
+      "s_hasta_lectura": 420.6,
+      "s_hasta_alerta": null
+    },
+    {
+      "utc": "2026-11-05T23:41:11Z",
+      "marca": "reset",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 227.6,
+      "s_hasta_alerta": null
+    },
+    {
+      "utc": "2026-11-05T23:44:34Z",
+      "marca": "hotspot encendido",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 24.6,
+      "s_hasta_alerta": null
+    }
+  ],
+  "falla_commit": null
+}

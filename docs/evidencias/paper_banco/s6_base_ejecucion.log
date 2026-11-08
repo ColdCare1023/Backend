@@ -1,0 +1,47 @@
+Corrida S6 r1 iniciada: S6_r1_20261105-1925
+00:26:09Z marca: falla armada
+00:26:19Z marca: backend caido
+00:26:44Z marca: backend arriba
+00:27:16Z S6 r1 cerrada
+Corrida S6 r2 iniciada: S6_r2_20261105-1927
+00:27:41Z marca: falla armada
+00:27:49Z marca: backend caido
+00:28:14Z marca: backend arriba
+00:28:45Z S6 r2 cerrada
+Corrida S6 r3 iniciada: S6_r3_20261105-1928
+00:29:11Z marca: falla armada
+00:29:19Z marca: backend caido
+00:29:45Z marca: backend arriba
+00:30:16Z S6 r3 cerrada
+Corrida S6 r4 iniciada: S6_r4_20261105-1930
+00:30:42Z marca: falla armada
+00:30:49Z marca: backend caido
+00:31:14Z marca: backend arriba
+00:31:46Z S6 r4 cerrada
+Corrida S6 r5 iniciada: S6_r5_20261105-1931
+00:32:11Z marca: falla armada
+00:32:19Z marca: backend caido
+00:32:45Z marca: backend arriba
+00:33:16Z S6 r5 cerrada
+Corrida BASE r1 iniciada: BASE_r1_20261105-1933
+00:34:00Z marca: falla on
+00:36:00Z marca: falla off
+00:36:40Z BASE r1 cerrada
+Corrida BASE r2 iniciada: BASE_r2_20261105-1936
+00:37:18Z marca: falla on
+00:39:18Z marca: falla off
+00:39:58Z BASE r2 cerrada
+Corrida BASE r3 iniciada: BASE_r3_20261105-1940
+00:40:36Z marca: falla on
+00:42:36Z marca: falla off
+00:43:16Z BASE r3 cerrada
+Corrida BASE r4 iniciada: BASE_r4_20261105-1943
+00:43:55Z marca: falla on
+00:45:55Z marca: falla off
+00:46:35Z BASE r4 cerrada
+Corrida BASE r5 iniciada: BASE_r5_20261105-1946
+00:47:14Z marca: falla on
+00:49:14Z marca: falla off
+00:49:54Z BASE r5 cerrada
+Escrito C:\Users\gamio\Downloads\tesis-oficial\coldcare\resultados_pruebas_paper.md y C:\Users\gamio\Downloads\tesis-oficial\coldcare\Backend\infra-local\evidencia\paper\tabla_resultados.csv (20 corridas).
+00:49:57Z listo

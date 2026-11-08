@@ -1,0 +1,9 @@
+{
+  "caso": "S9",
+  "repeticion": 4,
+  "device_id": "ESP32_FARMACIA_01",
+  "intervalo_s": 10,
+  "inicio_utc": "2026-11-06T04:08:00Z",
+  "fin_utc": "2026-11-06T04:15:00Z",
+  "nota": "imanes del MC-38 separados 5 min con la puerta del refrigerador cerrada; WinPina 4G"
+}

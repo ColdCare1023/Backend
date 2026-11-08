@@ -1,0 +1,171 @@
+Usage: emqx ctl
+--------------------------------------------------------------------------------------------------------------
+status # Show broker status
+--------------------------------------------------------------------------------------------------------------
+broker         # Show broker version, uptime and description
+broker stats   # Show broker statistics of clients, topics, subscribers
+broker metrics # Show broker metrics
+--------------------------------------------------------------------------------------------------------------
+cluster join <Node>        # Join the cluster
+cluster leave              # Leave the cluster
+cluster force-leave <Node> # Force the node leave from cluster
+cluster status [--json]    # Cluster status
+cluster discovery enable   # Enable and run automatic cluster discovery (if configured)
+--------------------------------------------------------------------------------------------------------------
+clients list            # List all clients
+clients show <ClientId> # Show a client
+clients kick <ClientId> # Kick out a client
+--------------------------------------------------------------------------------------------------------------
+topics list         # List all topics
+topics show <Topic> # Show a topic
+--------------------------------------------------------------------------------------------------------------
+subscriptions list                         # List all subscriptions
+subscriptions show <ClientId>              # Show subscriptions of a client
+subscriptions add <ClientId> <Topic> <QoS> # Add a static subscription manually
+subscriptions del <ClientId> <Topic>       # Delete a static subscription manually
+--------------------------------------------------------------------------------------------------------------
+plugins <command> [Name-Vsn]          # e.g. 'start emqx_plugin_template-5.0-rc.1'
+plugins list                          # List all installed plugins
+plugins describe  Name-Vsn            # Describe an installed plugins
+plugins allow     Name-Vsn            # Allows installation of a plugin in the cluster from Dashboard or API
+plugins disallow  Name-Vsn            # Disallows installation of a plugin in the cluster from Dashboard or API
+plugins install   Name-Vsn            # Install a plugin package placed
+                                      # in plugin's install_dir
+plugins uninstall Name-Vsn            # Uninstall a plugin. NOTE: it deletes
+                                      # all files in install_dir/Name-Vsn
+plugins start     Name-Vsn            # Start a plugin
+plugins stop      Name-Vsn            # Stop a plugin
+plugins restart   Name-Vsn            # Stop then start a plugin
+plugins disable   Name-Vsn            # Disable auto-boot
+plugins enable    Name-Vsn [Position] # Enable auto-boot at Position in the boot list, where Position could be
+                                      # 'front', 'rear', or 'before Other-Vsn' to specify a relative position.
+                                      # The Position parameter can be used to adjust the boot order.
+                                      # If no Position is given, an already configured plugin
+                                      # will stay at is old position; a newly plugin is appended to the rear
+                                      # e.g. plugins disable foo-0.1.0 front
+                                      #      plugins enable bar-0.2.0 before foo-0.1.0
+--------------------------------------------------------------------------------------------------------------
+vm all     # Show info of Erlang VM
+vm load    # Show load of Erlang VM
+vm memory  # Show memory of Erlang VM
+vm process # Show process of Erlang VM
+vm io      # Show IO of Erlang VM
+vm ports   # Show Ports of Erlang VM
+--------------------------------------------------------------------------------------------------------------
+mnesia # Mnesia system info
+--------------------------------------------------------------------------------------------------------------
+log set-level <Level>                      # Set the overall log level
+log primary-level                          # Show the primary log level now
+log primary-level <Level>                  # Set the primary log level
+log handlers list                          # Show log handlers
+log handlers start <HandlerId>             # Start a log handler
+log handlers stop  <HandlerId>             # Stop a log handler
+log handlers set-level <HandlerId> <Level> # Set log level of a log handler
+--------------------------------------------------------------------------------------------------------------
+trace list                                                     # List all traces started on local node
+trace start client <ClientId> <File> [<Level>] [<Formatter>]   # Traces for a client on local node (Formatter=text|json)
+trace stop  client <ClientId>                                  # Stop tracing for a client on local node
+trace start topic  <Topic>    <File> [<Level>] [<Formatter>]   # Traces for a topic on local node (Formatter=text|json)
+trace stop  topic  <Topic>                                     # Stop tracing for a topic on local node
+trace start ip_address  <IP>    <File> [<Level>] [<Formatter>] # Traces for a client ip on local node (Formatter=text|json)
+trace stop  ip_address  <IP>                                   # Stop tracing for a client ip on local node
+trace start ruleid  <RuleID>    <File> [<Level>] [<Formatter>] # Traces for a rule ID on local node (Formatter=text|json)
+trace stop  ruleid  <RuleID>                                   # Stop tracing for a rule ID on local node
+--------------------------------------------------------------------------------------------------------------
+traces list                                                        # List all cluster traces started
+traces start <Name> client <ClientId> [<Duration>] [<Formatter>]   # Traces for a client in cluster (Formatter=text|json)
+traces start <Name> topic <Topic> [<Duration>] [<Formatter>]       # Traces for a topic in cluster (Formatter=text|json)
+traces start <Name> ruleid <RuleID> [<Duration>] [<Formatter>]     # Traces for a rule ID in cluster (Formatter=text|json)
+traces start <Name> ip_address <IPAddr> [<Duration>] [<Formatter>] # Traces for a client IP in cluster
+                                                                   # Trace will start immediately on all nodes, including the core and replicant,
+                                                                   # and will end after <Duration> seconds. The default value for <Duration> is 1800 seconds. (Formatter=text|json)
+traces stop <Name>                                                 # Stop trace in cluster
+traces delete <Name>                                               # Delete trace in cluster
+--------------------------------------------------------------------------------------------------------------
+listeners                                  # List listeners
+listeners stop    <Identifier>             # Stop a listener
+listeners start   <Identifier>             # Start a listener
+listeners restart <Identifier>             # Restart a listener
+listeners enable <Identifier> <true/false> # Enable or disable a listener
+--------------------------------------------------------------------------------------------------------------
+authz cache-clean all         # Clears authorization cache on all nodes
+authz cache-clean node <Node> # Clears authorization cache on given node
+authz cache-clean <ClientId>  # Clears authorization cache for given client
+--------------------------------------------------------------------------------------------------------------
+pem_cache clean all         # Clears x509 certificate cache on all nodes
+pem_cache clean node <Node> # Clears x509 certificate cache on given node
+--------------------------------------------------------------------------------------------------------------
+olp status  # Return OLP status if system is overloaded
+olp enable  # Enable overload protection
+olp disable # Disable overload protection
+--------------------------------------------------------------------------------------------------------------
+data import <File>                                                                                 # Import data from the specified tar archive file
+data export \                                                                                      # Export data
+  [--root-keys key1,key2,key3] \                                                                   # 
+  [--table-sets set1,set2,set3] \                                                                  # 
+  [--dir out_dir]                                                                                  # 
+--------------------------------------------------------------------------------------------------------------
+ds # DS CLI is not available in this edition of EMQX
+--------------------------------------------------------------------------------------------------------------
+exclusive list           # List all exclusive topics
+exclusive delete <Topic> # Delete an exclusive topic
+--------------------------------------------------------------------------------------------------------------
+observer status   # Start observer in the current console
+observer bin_leak # Force all processes to perform garbage collection and prints the top-100 processes that freed the biggest amount of binaries, potentially highlighting leaks.
+observer load Mod # Enhanced module synchronization across all cluster nodes
+--------------------------------------------------------------------------------------------------------------
+conf reload --replace|--merge              # reload etc/emqx.conf on local node
+                                           # The new configuration values will be overlaid on the existing values by default.
+                                           # use the --replace flag to replace existing values with the new ones instead.
+----------------------------------         # ------------
+conf show_keys                             # print all the currently used configuration keys.
+conf show [<key>]                          # Print in-use configs (including default values) under the given key.
+                                           # Print ALL keys if key is not provided
+conf load --replace|--merge <path>         # Load a HOCON format config file.
+                                           # The new configuration values will be overlaid on the existing values by default.
+                                           # use the --replace flag to replace existing values with the new ones instead.
+                                           # The current node will initiate a cluster wide config change
+                                           # transaction to sync the changes to other nodes in the cluster. 
+                                           # NOTE: do not make runtime config changes during rolling upgrade.
+----------------------------------         # ------------
+conf cluster_sync status                   # Show cluster config sync status summary for all nodes.
+conf cluster_sync inspect <ID>             # Inspect detailed information of the config change transaction at the given commit ID
+conf cluster_sync skip [node]              # Increment the (currently failing) commit on the given node.
+                                           # WARNING: This results in inconsistent configs among the clustered nodes.
+conf cluster_sync fast_forward [node] <ID> # Fast-forward config change to the given commit ID on the given node.
+                                           # WARNING: This results in inconsistent configs among the clustered nodes.
+conf cluster_sync fix                      # Sync the node with the most comprehensive configuration to other node.
+                                           # WARNING: typically the config leader(with the highest tnxid).
+--------------------------------------------------------------------------------------------------------------
+retainer info                   # Show the count of retained messages
+retainer topics                 # Same as retainer topic 1 1000
+retainer topics <Start> <Limit> # Show topics of retained messages by the specified range
+retainer clean                  # Clean all retained messages
+retainer clean <Topic>          # Clean retained messages by the specified topic filter
+retainer reindex status         # Show reindex status.
+                                # Only available for built-in backend.
+retainer reindex start [force]  # Generate new retainer topic indices from config settings.
+                                # Pass true as <Force> to ignore previously started reindexing.
+                                # Only available for built-in backend.
+--------------------------------------------------------------------------------------------------------------
+rules list          # List rules
+rules show <RuleID> # Show a rule
+--------------------------------------------------------------------------------------------------------------
+admins add <Username> <Password> <Description> # Add dashboard user
+admins passwd <Username> <Password>            # Reset dashboard user password
+admins del <Username>                          # Delete dashboard user
+--------------------------------------------------------------------------------------------------------------
+gateway list                     # List all gateway
+gateway lookup <Name>            # Lookup a gateway detailed information
+gateway load   <Name> <JsonConf> # Load a gateway with config
+gateway unload <Name>            # Unload the gateway
+gateway stop   <Name>            # Stop the gateway
+gateway start  <Name>            # Start the gateway
+--------------------------------------------------------------------------------------------------------------
+gateway-registry list # List all registered gateways
+--------------------------------------------------------------------------------------------------------------
+gateway-clients list   <Name>            # List all clients for a gateway
+gateway-clients lookup <Name> <ClientId> # Lookup the Client Info for specified client
+gateway-clients kick   <Name> <ClientId> # Kick out a client
+--------------------------------------------------------------------------------------------------------------
+gateway-metrics <Name> # List all metrics for a gateway

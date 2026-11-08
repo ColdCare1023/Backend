@@ -1,0 +1,85 @@
+{
+  "corrida": "S12b_r1_20261105-2341",
+  "caso": "S12b",
+  "repeticion": 1,
+  "inicio_utc": "2026-11-06T04:41:00Z",
+  "fin_utc": "2026-11-06T04:47:00Z",
+  "duracion_min": 6.0,
+  "lecturas_guardadas": 18,
+  "faltantes": 0,
+  "duplicadas_en_base": 0,
+  "diferidas": 0,
+  "fuera_de_orden": 0,
+  "sin_hora_llegadas_en_ventana": 0,
+  "corte_inferido": null,
+  "cortes": [],
+  "mensajes_lectura_broker": 18,
+  "reenvios_broker": 0,
+  "vistas_en_broker_sin_guardar": 0,
+  "boots": {
+    "964": {
+      "seq_min": 20,
+      "seq_max": 25,
+      "guardadas": 6,
+      "esperadas": 6,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "synced": 6
+      }
+    },
+    "965": {
+      "seq_min": 1,
+      "seq_max": 12,
+      "guardadas": 12,
+      "esperadas": 12,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "unsynced": 1,
+        "synced": 11
+      }
+    }
+  },
+  "latencia_s": {
+    "n": 17,
+    "mediana": 0.744,
+    "p95": 0.793,
+    "max": 0.804,
+    "en_linea_n": 17,
+    "en_linea_mediana": 0.744,
+    "en_linea_p95": 0.793
+  },
+  "incidentes": [
+    {
+      "tipo": "sin_datos",
+      "abierto_utc": "2026-11-06T04:42:23.593049Z",
+      "resuelto_utc": "2026-11-06T04:45:06.356261Z",
+      "detectado_utc": "2026-11-06T04:42:50.681693Z",
+      "ultimo_reporte_utc": "2026-11-06T04:41:53.593049Z",
+      "s_silencio_hasta_deteccion": 57.1
+    }
+  ],
+  "alertas": [],
+  "marcas": [
+    {
+      "utc": "2026-11-06T04:42:00Z",
+      "marca": "nodo desenchufado",
+      "s_hasta_incidente": 23.6,
+      "s_hasta_incidente_detectado": 50.7,
+      "s_hasta_lectura": 186.4,
+      "s_hasta_alerta": null
+    },
+    {
+      "utc": "2026-11-06T04:45:00Z",
+      "marca": "nodo enchufado",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 6.4,
+      "s_hasta_alerta": null
+    }
+  ],
+  "falla_commit": null
+}

@@ -1,0 +1,215 @@
+{
+  "corrida": "S1_r1_20261106-1010",
+  "caso": "S1",
+  "repeticion": 1,
+  "inicio_utc": "2026-11-06T15:10:59Z",
+  "fin_utc": "2026-11-07T03:11:06Z",
+  "duracion_min": 720.1,
+  "lecturas_guardadas": 4321,
+  "faltantes": 0,
+  "duplicadas_en_base": 0,
+  "diferidas": 25,
+  "fuera_de_orden": 0,
+  "sin_hora_llegadas_en_ventana": 0,
+  "corte_inferido": {
+    "ultima_en_linea_utc": "2026-11-06T21:45:51.000000Z",
+    "reconexion_utc": "2026-11-06T21:46:24.921958Z",
+    "duracion_corte_s": 33.9,
+    "diferidas": 5,
+    "vaciado_s": 43.1,
+    "vaciado_registros_por_s": 0.12,
+    "s_hasta_sin_datos": null,
+    "s_hasta_sin_datos_detectado": null
+  },
+  "cortes": [
+    {
+      "ultima_en_linea_utc": "2026-11-06T20:38:41.000000Z",
+      "reconexion_utc": "2026-11-06T20:39:12.146971Z",
+      "duracion_corte_s": 31.1,
+      "diferidas": 1,
+      "vaciado_s": 0.0,
+      "vaciado_registros_por_s": 1000.0,
+      "s_hasta_sin_datos": null,
+      "s_hasta_sin_datos_detectado": null
+    },
+    {
+      "ultima_en_linea_utc": "2026-11-06T21:37:51.000000Z",
+      "reconexion_utc": "2026-11-06T21:38:33.323824Z",
+      "duracion_corte_s": 42.3,
+      "diferidas": 2,
+      "vaciado_s": 0.5,
+      "vaciado_registros_por_s": 4.26,
+      "s_hasta_sin_datos": 32.3,
+      "s_hasta_sin_datos_detectado": 41.8
+    },
+    {
+      "ultima_en_linea_utc": "2026-11-06T21:45:51.000000Z",
+      "reconexion_utc": "2026-11-06T21:46:24.921958Z",
+      "duracion_corte_s": 33.9,
+      "diferidas": 5,
+      "vaciado_s": 43.1,
+      "vaciado_registros_por_s": 0.12,
+      "s_hasta_sin_datos": null,
+      "s_hasta_sin_datos_detectado": null
+    },
+    {
+      "ultima_en_linea_utc": "2026-11-06T21:47:31.000000Z",
+      "reconexion_utc": "2026-11-06T21:48:03.889981Z",
+      "duracion_corte_s": 32.9,
+      "diferidas": 1,
+      "vaciado_s": 0.0,
+      "vaciado_registros_por_s": 1000.0,
+      "s_hasta_sin_datos": null,
+      "s_hasta_sin_datos_detectado": null
+    },
+    {
+      "ultima_en_linea_utc": "2026-11-06T21:49:11.000000Z",
+      "reconexion_utc": "2026-11-06T21:49:56.334374Z",
+      "duracion_corte_s": 45.3,
+      "diferidas": 2,
+      "vaciado_s": 1.8,
+      "vaciado_registros_por_s": 1.12,
+      "s_hasta_sin_datos": null,
+      "s_hasta_sin_datos_detectado": null
+    },
+    {
+      "ultima_en_linea_utc": "2026-11-06T21:50:31.000000Z",
+      "reconexion_utc": "2026-11-06T21:51:02.798667Z",
+      "duracion_corte_s": 31.8,
+      "diferidas": 1,
+      "vaciado_s": 0.0,
+      "vaciado_registros_por_s": 1000.0,
+      "s_hasta_sin_datos": null,
+      "s_hasta_sin_datos_detectado": null
+    },
+    {
+      "ultima_en_linea_utc": "2026-11-06T21:51:11.000000Z",
+      "reconexion_utc": "2026-11-06T21:51:53.131004Z",
+      "duracion_corte_s": 42.1,
+      "diferidas": 2,
+      "vaciado_s": 0.6,
+      "vaciado_registros_por_s": 3.4,
+      "s_hasta_sin_datos": null,
+      "s_hasta_sin_datos_detectado": null
+    },
+    {
+      "ultima_en_linea_utc": "2026-11-06T22:22:51.000000Z",
+      "reconexion_utc": "2026-11-06T22:23:33.596595Z",
+      "duracion_corte_s": 42.6,
+      "diferidas": 3,
+      "vaciado_s": 10.1,
+      "vaciado_registros_por_s": 0.3,
+      "s_hasta_sin_datos": null,
+      "s_hasta_sin_datos_detectado": null
+    },
+    {
+      "ultima_en_linea_utc": "2026-11-06T22:30:31.000000Z",
+      "reconexion_utc": "2026-11-06T22:31:02.315915Z",
+      "duracion_corte_s": 31.3,
+      "diferidas": 1,
+      "vaciado_s": 0.0,
+      "vaciado_registros_por_s": 1000.0,
+      "s_hasta_sin_datos": null,
+      "s_hasta_sin_datos_detectado": null
+    },
+    {
+      "ultima_en_linea_utc": "2026-11-06T22:41:41.000000Z",
+      "reconexion_utc": "2026-11-06T22:42:26.469306Z",
+      "duracion_corte_s": 45.5,
+      "diferidas": 2,
+      "vaciado_s": 1.5,
+      "vaciado_registros_por_s": 1.35,
+      "s_hasta_sin_datos": null,
+      "s_hasta_sin_datos_detectado": null
+    },
+    {
+      "ultima_en_linea_utc": "2026-11-06T22:44:01.000000Z",
+      "reconexion_utc": "2026-11-06T22:44:38.917177Z",
+      "duracion_corte_s": 37.9,
+      "diferidas": 1,
+      "vaciado_s": 0.0,
+      "vaciado_registros_por_s": 1000.0,
+      "s_hasta_sin_datos": null,
+      "s_hasta_sin_datos_detectado": null
+    },
+    {
+      "ultima_en_linea_utc": "2026-11-06T22:45:21.000000Z",
+      "reconexion_utc": "2026-11-06T22:45:55.885597Z",
+      "duracion_corte_s": 34.9,
+      "diferidas": 1,
+      "vaciado_s": 0.0,
+      "vaciado_registros_por_s": 1000.0,
+      "s_hasta_sin_datos": null,
+      "s_hasta_sin_datos_detectado": null
+    },
+    {
+      "ultima_en_linea_utc": "2026-11-06T22:46:01.000000Z",
+      "reconexion_utc": "2026-11-06T22:46:36.180399Z",
+      "duracion_corte_s": 35.2,
+      "diferidas": 1,
+      "vaciado_s": 0.0,
+      "vaciado_registros_por_s": 1000.0,
+      "s_hasta_sin_datos": null,
+      "s_hasta_sin_datos_detectado": null
+    },
+    {
+      "ultima_en_linea_utc": "2026-11-06T22:48:21.000000Z",
+      "reconexion_utc": "2026-11-06T22:48:56.621907Z",
+      "duracion_corte_s": 35.6,
+      "diferidas": 1,
+      "vaciado_s": 0.0,
+      "vaciado_registros_por_s": 1000.0,
+      "s_hasta_sin_datos": null,
+      "s_hasta_sin_datos_detectado": null
+    },
+    {
+      "ultima_en_linea_utc": "2026-11-06T22:56:41.000000Z",
+      "reconexion_utc": "2026-11-06T22:57:14.375063Z",
+      "duracion_corte_s": 33.4,
+      "diferidas": 1,
+      "vaciado_s": 0.0,
+      "vaciado_registros_por_s": 1000.0,
+      "s_hasta_sin_datos": null,
+      "s_hasta_sin_datos_detectado": null
+    }
+  ],
+  "mensajes_lectura_broker": 4353,
+  "reenvios_broker": 32,
+  "vistas_en_broker_sin_guardar": 0,
+  "boots": {
+    "1061": {
+      "seq_min": 23,
+      "seq_max": 4343,
+      "guardadas": 4321,
+      "esperadas": 4321,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "synced": 4321
+      }
+    }
+  },
+  "latencia_s": {
+    "n": 4321,
+    "mediana": 0.22,
+    "p95": 1.791,
+    "max": 41.941,
+    "en_linea_n": 4296,
+    "en_linea_mediana": 0.217,
+    "en_linea_p95": 1.56
+  },
+  "incidentes": [
+    {
+      "tipo": "sin_datos",
+      "abierto_utc": "2026-11-06T21:38:23.285617Z",
+      "resuelto_utc": "2026-11-06T21:38:33.227847Z",
+      "detectado_utc": "2026-11-06T21:38:32.765563Z",
+      "ultimo_reporte_utc": "2026-11-06T21:37:53.285617Z",
+      "s_silencio_hasta_deteccion": 39.5
+    }
+  ],
+  "alertas": [],
+  "marcas": [],
+  "falla_commit": null
+}

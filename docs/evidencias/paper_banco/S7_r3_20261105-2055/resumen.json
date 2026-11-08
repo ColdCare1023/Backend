@@ -1,0 +1,92 @@
+{
+  "corrida": "S7_r3_20261105-2055",
+  "caso": "S7",
+  "repeticion": 3,
+  "inicio_utc": "2026-11-06T01:55:44Z",
+  "fin_utc": "2026-11-06T02:28:24Z",
+  "duracion_min": 32.7,
+  "lecturas_guardadas": 196,
+  "faltantes": 0,
+  "duplicadas_en_base": 0,
+  "diferidas": 188,
+  "fuera_de_orden": 0,
+  "sin_hora_llegadas_en_ventana": 0,
+  "corte_inferido": {
+    "ultima_en_linea_utc": "2026-11-06T01:56:38.000000Z",
+    "reconexion_utc": "2026-11-06T02:27:40.475792Z",
+    "duracion_corte_s": 1862.5,
+    "diferidas": 188,
+    "vaciado_s": 40.3,
+    "vaciado_registros_por_s": 4.66,
+    "s_hasta_sin_datos": 30.1,
+    "s_hasta_sin_datos_detectado": 51.1
+  },
+  "cortes": [
+    {
+      "ultima_en_linea_utc": "2026-11-06T01:56:38.000000Z",
+      "reconexion_utc": "2026-11-06T02:27:40.475792Z",
+      "duracion_corte_s": 1862.5,
+      "diferidas": 188,
+      "vaciado_s": 40.3,
+      "vaciado_registros_por_s": 4.66,
+      "s_hasta_sin_datos": 30.1,
+      "s_hasta_sin_datos_detectado": 51.1
+    }
+  ],
+  "mensajes_lectura_broker": 199,
+  "reenvios_broker": 3,
+  "vistas_en_broker_sin_guardar": 0,
+  "boots": {
+    "963": {
+      "seq_min": 593,
+      "seq_max": 788,
+      "guardadas": 196,
+      "esperadas": 196,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "synced": 196
+      }
+    }
+  },
+  "latencia_s": {
+    "n": 196,
+    "mediana": 899.368,
+    "p95": 1756.987,
+    "max": 1852.476,
+    "en_linea_n": 8,
+    "en_linea_mediana": 0.123,
+    "en_linea_p95": 9.596
+  },
+  "incidentes": [
+    {
+      "tipo": "sin_datos",
+      "abierto_utc": "2026-11-06T01:57:08.054764Z",
+      "resuelto_utc": "2026-11-06T02:27:40.393871Z",
+      "detectado_utc": "2026-11-06T01:57:29.081396Z",
+      "ultimo_reporte_utc": "2026-11-06T01:56:38.054764Z",
+      "s_silencio_hasta_deteccion": 51.0
+    }
+  ],
+  "alertas": [],
+  "marcas": [
+    {
+      "utc": "2026-11-06T01:56:46Z",
+      "marca": "broker detenido",
+      "s_hasta_incidente": 22.1,
+      "s_hasta_incidente_detectado": 43.1,
+      "s_hasta_lectura": 1854.5,
+      "s_hasta_alerta": null
+    },
+    {
+      "utc": "2026-11-06T02:27:00Z",
+      "marca": "broker arriba",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 40.5,
+      "s_hasta_alerta": null
+    }
+  ],
+  "falla_commit": null
+}

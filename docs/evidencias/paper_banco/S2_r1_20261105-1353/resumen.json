@@ -1,0 +1,75 @@
+{
+  "corrida": "S2_r1_20261105-1353",
+  "caso": "S2",
+  "repeticion": 1,
+  "inicio_utc": "2026-11-05T18:53:36Z",
+  "fin_utc": "2026-11-05T19:06:49Z",
+  "duracion_min": 13.2,
+  "lecturas_guardadas": 79,
+  "faltantes": 0,
+  "duplicadas_en_base": 0,
+  "diferidas": 63,
+  "fuera_de_orden": 0,
+  "sin_hora_llegadas_en_ventana": 0,
+  "corte_inferido": {
+    "ultima_en_linea_utc": "2026-11-05T18:55:22.000000Z",
+    "reconexion_utc": "2026-11-05T19:06:03.929617Z",
+    "duracion_corte_s": 641.9,
+    "diferidas": 63,
+    "vaciado_s": 14.4,
+    "vaciado_registros_por_s": 4.37,
+    "s_hasta_sin_datos": 31.0,
+    "s_hasta_sin_datos_detectado": 48.4
+  },
+  "cortes": [
+    {
+      "ultima_en_linea_utc": "2026-11-05T18:55:22.000000Z",
+      "reconexion_utc": "2026-11-05T19:06:03.929617Z",
+      "duracion_corte_s": 641.9,
+      "diferidas": 63,
+      "vaciado_s": 14.4,
+      "vaciado_registros_por_s": 4.37,
+      "s_hasta_sin_datos": 31.0,
+      "s_hasta_sin_datos_detectado": 48.4
+    }
+  ],
+  "mensajes_lectura_broker": 79,
+  "reenvios_broker": 0,
+  "vistas_en_broker_sin_guardar": 0,
+  "boots": {
+    "897": {
+      "seq_min": 28,
+      "seq_max": 106,
+      "guardadas": 79,
+      "esperadas": 79,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "synced": 79
+      }
+    }
+  },
+  "latencia_s": {
+    "n": 79,
+    "mediana": 250.969,
+    "p95": 594.044,
+    "max": 631.93,
+    "en_linea_n": 16,
+    "en_linea_mediana": 1.055,
+    "en_linea_p95": 9.252
+  },
+  "incidentes": [
+    {
+      "tipo": "sin_datos",
+      "abierto_utc": "2026-11-05T18:55:52.999727Z",
+      "resuelto_utc": "2026-11-05T19:06:03.846743Z",
+      "detectado_utc": "2026-11-05T18:56:10.356834Z",
+      "ultimo_reporte_utc": "2026-11-05T18:55:22.999727Z",
+      "s_silencio_hasta_deteccion": 47.4
+    }
+  ],
+  "alertas": [],
+  "marcas": [],
+  "falla_commit": null
+}

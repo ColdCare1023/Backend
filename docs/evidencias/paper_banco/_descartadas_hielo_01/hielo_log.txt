@@ -1,0 +1,21 @@
+Ya hay una corrida activa: C:\Users\gamio\Downloads\tesis-oficial\coldcare\Backend\infra-local\evidencia\paper\HIELO_r2_20261106-0157. Ciérrela con 'fin'.
+07:00:00Z marca: sonda en hielo
+07:06:00Z marca: sonda al refrigerador
+0 cambios de episodio en C:\Users\gamio\Downloads\tesis-oficial\coldcare\Backend\infra-local\evidencia\paper\HIELO_r2_20261106-0157\alertas_vistas.csv
+07:11:01Z HIELO r1 cerrada
+Corrida HIELO r2 iniciada: HIELO_r2_20261106-0211
+07:12:00Z marca: sonda en hielo
+07:18:00Z marca: sonda al refrigerador
+0 cambios de episodio en C:\Users\gamio\Downloads\tesis-oficial\coldcare\Backend\infra-local\evidencia\paper\HIELO_r2_20261106-0211\alertas_vistas.csv
+07:23:01Z HIELO r2 cerrada
+Corrida HIELO r3 iniciada: HIELO_r3_20261106-0223
+07:24:00Z marca: sonda en hielo
+07:30:00Z marca: sonda al refrigerador
+0 cambios de episodio en C:\Users\gamio\Downloads\tesis-oficial\coldcare\Backend\infra-local\evidencia\paper\HIELO_r3_20261106-0223\alertas_vistas.csv
+07:35:01Z HIELO r3 cerrada
+Corrida HIELO r4 iniciada: HIELO_r4_20261106-0235
+gamio\Downloads\tesis-oficial\coldcare\Backend\infra-local\evidencia\paper\HIELO_r4_20261106-0217\alertas_vistas.csv
+07:27:01Z HIELO r4 cerrada
+Corrida HIELO r5 iniciada: HIELO_r5_20261106-0227
+07:28:00Z marca: sonda en hielo
+07:33:00Z marca: sonda al refrigerador

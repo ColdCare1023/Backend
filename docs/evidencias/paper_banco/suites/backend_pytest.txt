@@ -1,0 +1,44 @@
+
+[notice] A new release of pip is available: 26.2.1 -> 26.3
+[notice] To update, run: pip install --upgrade pip
+Python 3.13.16
+
+tests/integration/test_ai_persistencia_version.py::test_lectura_persiste_confianza_y_version_del_modelo
+tests/unit/test_random_forest_service.py::test_modelo_entrenado_esta_disponible
+tests/unit/test_random_forest_service_validacion.py::test_modelo_oficial_actual_pasa_la_validacion_de_compatibilidad
+  /usr/local/lib/python3.13/site-packages/sklearn/base.py:525: InconsistentVersionWarning: Trying to unpickle estimator DecisionTreeClassifier from version 1.9.0 when using version 1.9.1. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
+  https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
+    warnings.warn(
+
+tests/integration/test_ai_persistencia_version.py::test_lectura_persiste_confianza_y_version_del_modelo
+tests/unit/test_random_forest_service.py::test_modelo_entrenado_esta_disponible
+tests/unit/test_random_forest_service_validacion.py::test_modelo_oficial_actual_pasa_la_validacion_de_compatibilidad
+  /usr/local/lib/python3.13/site-packages/sklearn/base.py:525: InconsistentVersionWarning: Trying to unpickle estimator RandomForestClassifier from version 1.9.0 when using version 1.9.1. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
+  https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
+    warnings.warn(
+
+tests/integration/test_be001_lecturas_manuales.py: 1 warning
+tests/integration/test_fase3_pulido_51hu.py: 1 warning
+tests/integration/test_hu37_verificacion_por_dispositivo.py: 1 warning
+tests/integration/test_hu44_hu10_credenciales_dispositivo.py: 11 warnings
+tests/integration/test_ingesta_timestamp_y_sse.py: 3 warnings
+  /usr/local/lib/python3.13/site-packages/fastapi/routing.py:372: StarletteDeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    return await dependant.call(**values)
+
+tests/integration/test_be007_inmutabilidad_postgres.py: 1 warning
+tests/integration/test_hu11_hu22_idempotencia_postgres.py: 1 warning
+tests/integration/test_migraciones.py: 8 warnings
+  /usr/local/lib/python3.13/site-packages/alembic/config.py:604: DeprecationWarning: No path_separator found in configuration; falling back to legacy splitting on spaces, commas, and colons for prepend_sys_path.  Consider adding path_separator=os to Alembic config.
+    util.warn_deprecated(
+
+tests/integration/test_reporte_pdf_api.py::test_rango_de_fechas_invertido_rechazado
+  /tmp/app/src/interface/api/reportes_router.py:132: StarletteDeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    _validar_rango(fecha_desde, fecha_hasta)
+
+tests/integration/test_reportes_rango_periodo.py::test_rango_invertido_se_rechaza_en_el_reporte_json
+tests/integration/test_reportes_rango_periodo.py::test_periodo_desmesurado_se_rechaza
+  /tmp/app/src/interface/api/reportes_router.py:72: StarletteDeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    _validar_rango(fecha_desde, fecha_hasta)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1164 passed, 37 warnings in 230.36s (0:03:50)

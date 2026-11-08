@@ -1,0 +1,108 @@
+{
+  "corrida": "S6_r3_20261105-1928",
+  "caso": "S6",
+  "repeticion": 3,
+  "inicio_utc": "2026-11-06T00:28:46Z",
+  "fin_utc": "2026-11-06T00:30:15Z",
+  "duracion_min": 1.5,
+  "lecturas_guardadas": 9,
+  "faltantes": 0,
+  "duplicadas_en_base": 0,
+  "diferidas": 1,
+  "fuera_de_orden": 0,
+  "sin_hora_llegadas_en_ventana": 0,
+  "corte_inferido": {
+    "ultima_en_linea_utc": "2026-11-06T00:29:08.000000Z",
+    "reconexion_utc": "2026-11-06T00:29:44.074958Z",
+    "duracion_corte_s": 36.1,
+    "diferidas": 1,
+    "vaciado_s": 0.0,
+    "vaciado_registros_por_s": 1000.0,
+    "s_hasta_sin_datos": 30.3,
+    "s_hasta_sin_datos_detectado": 35.9
+  },
+  "cortes": [
+    {
+      "ultima_en_linea_utc": "2026-11-06T00:29:08.000000Z",
+      "reconexion_utc": "2026-11-06T00:29:44.074958Z",
+      "duracion_corte_s": 36.1,
+      "diferidas": 1,
+      "vaciado_s": 0.0,
+      "vaciado_registros_por_s": 1000.0,
+      "s_hasta_sin_datos": 30.3,
+      "s_hasta_sin_datos_detectado": 35.9
+    }
+  ],
+  "mensajes_lectura_broker": 11,
+  "reenvios_broker": 2,
+  "vistas_en_broker_sin_guardar": 0,
+  "boots": {
+    "963": {
+      "seq_min": 71,
+      "seq_max": 79,
+      "guardadas": 9,
+      "esperadas": 9,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "synced": 9
+      }
+    }
+  },
+  "latencia_s": {
+    "n": 9,
+    "mediana": 0.368,
+    "p95": 22.151,
+    "max": 26.075,
+    "en_linea_n": 8,
+    "en_linea_mediana": 0.367,
+    "en_linea_p95": 12.827
+  },
+  "incidentes": [
+    {
+      "tipo": "sin_datos",
+      "abierto_utc": "2026-11-06T00:29:38.259341Z",
+      "resuelto_utc": "2026-11-06T00:29:43.972952Z",
+      "detectado_utc": "2026-11-06T00:29:43.903487Z",
+      "ultimo_reporte_utc": "2026-11-06T00:29:08.259341Z",
+      "s_silencio_hasta_deteccion": 35.6
+    }
+  ],
+  "alertas": [],
+  "marcas": [
+    {
+      "utc": "2026-11-06T00:29:11Z",
+      "marca": "falla armada",
+      "s_hasta_incidente": 27.3,
+      "s_hasta_incidente_detectado": 32.9,
+      "s_hasta_lectura": 33.1,
+      "s_hasta_alerta": null
+    },
+    {
+      "utc": "2026-11-06T00:29:19Z",
+      "marca": "backend caido",
+      "s_hasta_incidente": 19.3,
+      "s_hasta_incidente_detectado": 24.9,
+      "s_hasta_lectura": 25.1,
+      "s_hasta_alerta": null
+    },
+    {
+      "utc": "2026-11-06T00:29:45Z",
+      "marca": "backend arriba",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 3.4,
+      "s_hasta_alerta": null
+    }
+  ],
+  "falla_commit": {
+    "desde_utc": "2026-11-06T00:29:11Z",
+    "hasta_utc": "2026-11-06T00:29:19Z",
+    "afectadas": 1,
+    "capturadas_en_ventana": 1,
+    "afectadas_guardadas": 1,
+    "perdida_estimada_solo_puback": 1,
+    "llegadas_de_afectadas": 3
+  }
+}

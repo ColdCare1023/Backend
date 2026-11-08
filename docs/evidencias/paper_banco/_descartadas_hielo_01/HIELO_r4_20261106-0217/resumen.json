@@ -1,0 +1,71 @@
+{
+  "corrida": "HIELO_r4_20261106-0217",
+  "caso": "HIELO",
+  "repeticion": 4,
+  "inicio_utc": "2026-11-06T07:17:01Z",
+  "fin_utc": "2026-11-06T07:23:00Z",
+  "duracion_min": 6.0,
+  "lecturas_guardadas": 36,
+  "faltantes": 0,
+  "duplicadas_en_base": 0,
+  "diferidas": 0,
+  "fuera_de_orden": 0,
+  "sin_hora_llegadas_en_ventana": 0,
+  "corte_inferido": null,
+  "cortes": [],
+  "mensajes_lectura_broker": 36,
+  "reenvios_broker": 0,
+  "vistas_en_broker_sin_guardar": 0,
+  "boots": {
+    "1048": {
+      "seq_min": 14,
+      "seq_max": 49,
+      "guardadas": 36,
+      "esperadas": 36,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "synced": 36
+      }
+    }
+  },
+  "latencia_s": {
+    "n": 36,
+    "mediana": 0.122,
+    "p95": 0.227,
+    "max": 0.256,
+    "en_linea_n": 36,
+    "en_linea_mediana": 0.122,
+    "en_linea_p95": 0.227
+  },
+  "incidentes": [],
+  "alertas": [],
+  "marcas": [
+    {
+      "utc": "2026-11-06T07:18:00Z",
+      "marca": "sonda en hielo",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 7.2,
+      "s_hasta_alerta": null
+    },
+    {
+      "utc": "2026-11-06T07:18:00Z",
+      "marca": "sonda al refrigerador",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 7.2,
+      "s_hasta_alerta": null
+    },
+    {
+      "utc": "2026-11-06T07:23:00Z",
+      "marca": "sonda al refrigerador",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": null,
+      "s_hasta_alerta": null
+    }
+  ],
+  "falla_commit": null
+}

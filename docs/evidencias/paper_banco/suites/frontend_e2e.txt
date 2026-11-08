@@ -1,0 +1,39 @@
+# Playwright E2E — 2026-11-06T07:39:51Z — commit c306819 — Version 1.63.0
+
+Running 31 tests using 7 workers
+
+  -   1 [chromium] › e2e\visual.spec.ts:22:5 › login dark escritorio
+  -   2 [chromium] › e2e\visual.spec.ts:22:5 › login dark movil
+  -   3 [chromium] › e2e\visual.spec.ts:22:5 › login light escritorio
+  -   4 [chromium] › e2e\visual.spec.ts:22:5 › login light movil
+  -   5 [chromium] › e2e\visual.spec.ts:33:1 › guía de uso dentro del shell oscuro
+  ok 11 [chromium] › e2e\login.spec.ts:5:1 › login móvil mantiene formulario legible y controles operables (4.9s)
+  ok 12 [chromium] › e2e\login.spec.ts:19:1 › sesión demo vive solo en memoria y recarga exige volver a ingresar (5.8s)
+  ok  9 [chromium] › e2e\hu-coverage.spec.ts:10:1 › HU-50 registra bloqueos, resultado y exporta la bitácora filtrada (11.7s)
+  ok  6 [chromium] › e2e\core-flows.spec.ts:4:1 › sesión demo, navegación y reapertura (12.8s)
+  ok 14 [chromium] › e2e\hu-coverage.spec.ts:21:1 › HU-26 presenta inconsistencia simulada con detalle verificable (4.5s)
+  ok  8 [chromium] › e2e\accessibility.spec.ts:5:1 › monitoreo, alertas e historial sin violaciones axe WCAG 2 A/AA (17.3s)
+  ok 13 [chromium] › e2e\login.spec.ts:37:1 › login real de demo usa credenciales conocidas y limita intentos sin revelar cuenta (7.1s)
+  ok 15 [chromium] › e2e\core-flows.spec.ts:19:1 › cambiar periodo de la curva conserva monitoreo visible sin destellos (6.1s)
+  ok 18 [chromium] › e2e\login.spec.ts:57:1 › el login no ofrece acceso social simulado (1.2s)
+  ok 19 [chromium] › e2e\core-flows.spec.ts:42:1 › guardas de autenticación y permisos por rol (2.3s)
+  ok  7 [chromium] › e2e\demo-actions.spec.ts:10:1 › admin crea usuario, cambia rol y desactiva cuenta en demo (22.8s)
+  ok 16 [chromium] › e2e\hu-coverage.spec.ts:30:1 › HU-44 permite revocar credencial MQTT con confirmación y sin exponer secreto (7.2s)
+  ok 20 [chromium] › e2e\core-flows.spec.ts:53:1 › selector de roles es responsive y mantiene permisos de Técnico de Farmacia (3.5s)
+  ok 22 [chromium] › e2e\core-flows.spec.ts:83:1 › administrador puede abrir herramientas de administración en demo (3.9s)
+  ok 10 [chromium] › e2e\full-role-matrix.spec.ts:46:1 › matriz completa de permisos: 10 rutas protegidas × 4 roles (32.2s)
+  ok 17 [chromium] › e2e\accessibility.spec.ts:24:1 › 10 rutas disponibles para administración sin violaciones axe WCAG 2 A/AA (15.7s)
+  ok 23 [chromium] › e2e\core-flows.spec.ts:98:1 › farmacéutico puede consultar reportes e IA en demo (4.7s)
+  ok 24 [chromium] › e2e\full-role-matrix.spec.ts:71:1 › pantallas de administración no desbordan viewport en anchos móviles y desktop (6.0s)
+  ok 25 [chromium] › e2e\core-flows.spec.ts:113:1 › alertas permiten abrir detalle contextual (6.7s)
+  ok 26 [chromium] › e2e\full-role-matrix.spec.ts:106:1 › gráficas ECharts cargan al abrir tablero, no durante login (3.7s)
+  ok 27 [chromium] › e2e\core-flows.spec.ts:125:1 › logout elimina acceso a ruta protegida (2.1s)
+  ok 28 [chromium] › e2e\core-flows.spec.ts:135:1 › navegación móvil abre menú y permite llegar a alertas (3.9s)
+  ok 21 [chromium] › e2e\demo-actions.spec.ts:45:1 › admin actualiza dispositivo, consulta historial y registra baja de reemplazo (24.4s)
+  ok 29 [chromium] › e2e\core-flows.spec.ts:177:1 › rutas principales conservan el viewport y tablas se desplazan por teclado (7.5s)
+  ok 30 [chromium] › e2e\demo-actions.spec.ts:109:1 › farmacéutico revisa alerta y genera reporte (7.5s)
+  ok 31 [chromium] › e2e\core-flows.spec.ts:223:1 › trazabilidad explica cadena, oculta sellos y muestra verificación (2.6s)
+
+  5 skipped
+  26 passed (1.1m)
+exit=0

@@ -1,0 +1,9 @@
+{
+  "caso": "S12b",
+  "repeticion": 1,
+  "device_id": "ESP32_FARMACIA_01",
+  "intervalo_s": 10,
+  "inicio_utc": "2026-11-06T04:41:00Z",
+  "fin_utc": "2026-11-06T04:47:00Z",
+  "nota": "nodo desenchufado 3 min (cargador 5 V de pared); WinPina 4G"
+}

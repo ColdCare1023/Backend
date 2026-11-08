@@ -1,0 +1,9 @@
+{
+  "caso": "S7",
+  "repeticion": 3,
+  "device_id": "ESP32_FARMACIA_01",
+  "intervalo_s": 10,
+  "inicio_utc": "2026-11-06T01:55:44Z",
+  "fin_utc": "2026-11-06T02:28:24Z",
+  "nota": "EMQX detenido 30 min; nodo y backend vivos; WinPina 4G (192.168.18.114)"
+}

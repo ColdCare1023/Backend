@@ -1,0 +1,22 @@
+llegada_utc,topico,boot_id,seq_no,captured_at,tipo,time_quality,detalle
+2026-11-06T05:02:03.862+00:00,farmacias/ESP32_FARMACIA_01/lecturas,967,19,2026-11-06T05:02:04Z,,sntp_synced,
+2026-11-06T05:02:13.871+00:00,farmacias/ESP32_FARMACIA_01/lecturas,967,20,2026-11-06T05:02:14Z,,sntp_synced,
+2026-11-06T05:02:23.889+00:00,farmacias/ESP32_FARMACIA_01/lecturas,967,21,2026-11-06T05:02:24Z,,sntp_synced,
+2026-11-06T05:02:33.887+00:00,farmacias/ESP32_FARMACIA_01/lecturas,967,22,2026-11-06T05:02:34Z,,sntp_synced,
+2026-11-06T05:02:43.884+00:00,farmacias/ESP32_FARMACIA_01/lecturas,967,23,2026-11-06T05:02:44Z,,sntp_synced,
+2026-11-06T05:02:53.889+00:00,farmacias/ESP32_FARMACIA_01/lecturas,967,24,2026-11-06T05:02:54Z,,sntp_synced,
+2026-11-06T05:04:39.269+00:00,farmacias/ESP32_FARMACIA_01/eventos,967,,,lwt_offline,,
+2026-11-06T05:06:06.507+00:00,farmacias/ESP32_FARMACIA_01/eventos,968,,,online,unsynced,"{""rssi_dbm"": -76, ""pendientes"": 1, ""firmware_version"": ""v1.2.0""}"
+2026-11-06T05:06:06.526+00:00,farmacias/ESP32_FARMACIA_01/eventos,968,,,arranque,unsynced,"{""reset_reason"": ""POWERON"", ""firmware_version"": ""v1.2.0"", ""intervalo_s"": 10, ""mc38_instalado"": true, ""fs_formateado"": false, ""consola_protegida"": false, ""particion"": ""app0"", ""certificado_cliente"": false, ""flash_cifrada"": false, ""arranque_seguro"": false, ""imagen_a_prueba"": false, ""pendientes_recuperados"": 0, ""segmentos_con_cola_parcial"": 0, ""bytes_parciales_ignorados"": 0, ""cursor_reconstruido"": false}"
+2026-11-06T05:06:06.565+00:00,farmacias/ESP32_FARMACIA_01/lecturas,968,1,,,unsynced,
+2026-11-06T05:06:11.909+00:00,farmacias/ESP32_FARMACIA_01/lecturas,968,2,2026-11-06T05:06:11Z,,sntp_synced,
+2026-11-06T05:06:21.916+00:00,farmacias/ESP32_FARMACIA_01/lecturas,968,3,2026-11-06T05:06:21Z,,sntp_synced,
+2026-11-06T05:06:31.944+00:00,farmacias/ESP32_FARMACIA_01/lecturas,968,4,2026-11-06T05:06:31Z,,sntp_synced,
+2026-11-06T05:06:41.886+00:00,farmacias/ESP32_FARMACIA_01/lecturas,968,5,2026-11-06T05:06:41Z,,sntp_synced,
+2026-11-06T05:06:51.868+00:00,farmacias/ESP32_FARMACIA_01/lecturas,968,6,2026-11-06T05:06:51Z,,sntp_synced,
+2026-11-06T05:07:01.864+00:00,farmacias/ESP32_FARMACIA_01/lecturas,968,7,2026-11-06T05:07:01Z,,sntp_synced,
+2026-11-06T05:07:11.846+00:00,farmacias/ESP32_FARMACIA_01/lecturas,968,8,2026-11-06T05:07:11Z,,sntp_synced,
+2026-11-06T05:07:21.870+00:00,farmacias/ESP32_FARMACIA_01/lecturas,968,9,2026-11-06T05:07:21Z,,sntp_synced,
+2026-11-06T05:07:31.834+00:00,farmacias/ESP32_FARMACIA_01/lecturas,968,10,2026-11-06T05:07:31Z,,sntp_synced,
+2026-11-06T05:07:41.850+00:00,farmacias/ESP32_FARMACIA_01/lecturas,968,11,2026-11-06T05:07:41Z,,sntp_synced,
+2026-11-06T05:07:51.851+00:00,farmacias/ESP32_FARMACIA_01/lecturas,968,12,2026-11-06T05:07:51Z,,sntp_synced,

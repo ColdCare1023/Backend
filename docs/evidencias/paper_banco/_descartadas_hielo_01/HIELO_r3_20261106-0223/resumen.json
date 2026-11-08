@@ -1,0 +1,68 @@
+{
+  "corrida": "HIELO_r3_20261106-0223",
+  "caso": "HIELO",
+  "repeticion": 3,
+  "inicio_utc": "2026-11-06T07:23:02Z",
+  "fin_utc": "2026-11-06T07:27:00Z",
+  "duracion_min": 4.0,
+  "lecturas_guardadas": 24,
+  "faltantes": 0,
+  "duplicadas_en_base": 0,
+  "diferidas": 0,
+  "fuera_de_orden": 0,
+  "sin_hora_llegadas_en_ventana": 0,
+  "corte_inferido": null,
+  "cortes": [],
+  "mensajes_lectura_broker": 24,
+  "reenvios_broker": 0,
+  "vistas_en_broker_sin_guardar": 0,
+  "boots": {
+    "1048": {
+      "seq_min": 50,
+      "seq_max": 52,
+      "guardadas": 3,
+      "esperadas": 3,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "synced": 3
+      }
+    },
+    "1049": {
+      "seq_min": 1,
+      "seq_max": 21,
+      "guardadas": 21,
+      "esperadas": 21,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "unsynced": 1,
+        "synced": 20
+      }
+    }
+  },
+  "latencia_s": {
+    "n": 23,
+    "mediana": -0.386,
+    "p95": 0.127,
+    "max": 0.169,
+    "en_linea_n": 23,
+    "en_linea_mediana": -0.386,
+    "en_linea_p95": 0.127
+  },
+  "incidentes": [],
+  "alertas": [],
+  "marcas": [
+    {
+      "utc": "2026-11-06T07:24:00Z",
+      "marca": "sonda en hielo",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 2.6,
+      "s_hasta_alerta": null
+    }
+  ],
+  "falla_commit": null
+}

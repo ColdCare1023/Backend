@@ -1,0 +1,97 @@
+{
+  "corrida": "HIELO_r5_20261106-0227",
+  "caso": "HIELO",
+  "repeticion": 5,
+  "inicio_utc": "2026-11-06T07:27:01Z",
+  "fin_utc": "2026-11-06T07:35:00Z",
+  "duracion_min": 8.0,
+  "lecturas_guardadas": 49,
+  "faltantes": 0,
+  "duplicadas_en_base": 0,
+  "diferidas": 0,
+  "fuera_de_orden": 0,
+  "sin_hora_llegadas_en_ventana": 1,
+  "corte_inferido": null,
+  "cortes": [],
+  "mensajes_lectura_broker": 49,
+  "reenvios_broker": 0,
+  "vistas_en_broker_sin_guardar": 1,
+  "boots": {
+    "1049": {
+      "seq_min": 22,
+      "seq_max": 29,
+      "guardadas": 8,
+      "esperadas": 8,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "synced": 8
+      }
+    },
+    "1051": {
+      "seq_min": 1,
+      "seq_max": 36,
+      "guardadas": 36,
+      "esperadas": 36,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "backfilled": 1,
+        "synced": 35
+      }
+    },
+    "1052": {
+      "seq_min": 1,
+      "seq_max": 5,
+      "guardadas": 5,
+      "esperadas": 5,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "unsynced": 1,
+        "synced": 4
+      }
+    }
+  },
+  "latencia_s": {
+    "n": 48,
+    "mediana": -0.481,
+    "p95": 0.69,
+    "max": 5.009,
+    "en_linea_n": 48,
+    "en_linea_mediana": -0.481,
+    "en_linea_p95": 0.69
+  },
+  "incidentes": [],
+  "alertas": [],
+  "marcas": [
+    {
+      "utc": "2026-11-06T07:28:00Z",
+      "marca": "sonda en hielo",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 2.5,
+      "s_hasta_alerta": null
+    },
+    {
+      "utc": "2026-11-06T07:30:00Z",
+      "marca": "sonda al refrigerador",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 6.5,
+      "s_hasta_alerta": null
+    },
+    {
+      "utc": "2026-11-06T07:33:00Z",
+      "marca": "sonda al refrigerador",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 6.5,
+      "s_hasta_alerta": null
+    }
+  ],
+  "falla_commit": null
+}

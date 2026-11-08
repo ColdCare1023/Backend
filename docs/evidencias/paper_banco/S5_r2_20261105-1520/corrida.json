@@ -1,0 +1,9 @@
+{
+  "caso": "S5",
+  "repeticion": 2,
+  "device_id": "ESP32_FARMACIA_01",
+  "intervalo_s": 10,
+  "inicio_utc": "2026-11-05T20:20:50Z",
+  "fin_utc": "2026-11-05T20:34:02Z",
+  "nota": "corte hotspot ~6 min con reset (EN) a los 3 min; laptop y nodo en hotspot (10.68.89.175)"
+}

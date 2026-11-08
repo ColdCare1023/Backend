@@ -1,0 +1,9 @@
+{
+  "caso": "S5",
+  "repeticion": 4,
+  "device_id": "ESP32_FARMACIA_01",
+  "intervalo_s": 10,
+  "inicio_utc": "2026-11-05T23:47:34Z",
+  "fin_utc": "2026-11-06T00:00:25Z",
+  "nota": "corte hotspot ~6 min con reset (EN) a los 3 min; con log serie"
+}

@@ -1,0 +1,15 @@
+llegada_utc,topico,boot_id,seq_no,captured_at,tipo,time_quality,detalle
+2026-11-06T00:25:48.269+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,53,2026-11-06T00:25:48Z,,sntp_synced,
+2026-11-06T00:25:58.274+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,54,2026-11-06T00:25:58Z,,sntp_synced,
+2026-11-06T00:26:08.280+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,55,2026-11-06T00:26:08Z,,sntp_synced,
+2026-11-06T00:26:18.276+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,56,2026-11-06T00:26:18Z,,sntp_synced,
+2026-11-06T00:26:26.303+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:26:26Z,lectura_vigente,sntp_synced,"{""boot_id"": 963, ""seq_no"": 56, ""temperatura_interna"": 3.88, ""captured_at"": ""2026-11-06T00:26:18Z"", ""time_quality"": ""synced"", ""uptime_s"": 550}"
+2026-11-06T00:26:26.415+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,56,2026-11-06T00:26:18Z,,sntp_synced,
+2026-11-06T00:26:34.442+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:26:34Z,lectura_vigente,sntp_synced,"{""boot_id"": 963, ""seq_no"": 57, ""temperatura_interna"": 3.88, ""captured_at"": ""2026-11-06T00:26:28Z"", ""time_quality"": ""synced"", ""uptime_s"": 560}"
+2026-11-06T00:26:36.418+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,56,2026-11-06T00:26:18Z,,sntp_synced,
+2026-11-06T00:26:44.275+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,57,2026-11-06T00:26:28Z,,sntp_synced,
+2026-11-06T00:26:44.569+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,58,2026-11-06T00:26:38Z,,sntp_synced,
+2026-11-06T00:26:48.272+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,59,2026-11-06T00:26:48Z,,sntp_synced,
+2026-11-06T00:26:58.270+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,60,2026-11-06T00:26:58Z,,sntp_synced,
+2026-11-06T00:27:08.284+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,61,2026-11-06T00:27:08Z,,sntp_synced,
+2026-11-06T00:27:08.461+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:27:08Z,estado_nodo,sntp_synced,"{""pendientes"": 0, ""ocupacion_pct"": 0, ""capacidad"": 30000, ""fs_total_bytes"": 1507328, ""fs_libres_bytes"": 1478656, ""perdidas_total"": 9, ""cuarentena"": 0, ""ultimo_seq_no"": 61, ""rssi_dbm"": -70, ""heap_libre"": 129052, ""heap_minimo"": 107468, ""intervalo_s"": 10, ""pubacks_sin_ack"": 7, ""acks_huella_ajena"": 0, ""eventos_descartados"": 0, ""reloj_sntp"": true, ""saltos_reloj_rechazados"": 0}"

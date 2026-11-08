@@ -1,0 +1,9 @@
+{
+  "caso": "S2",
+  "repeticion": 4,
+  "device_id": "ESP32_FARMACIA_01",
+  "intervalo_s": 10,
+  "inicio_utc": "2026-11-05T19:37:41Z",
+  "fin_utc": "2026-11-05T19:54:11Z",
+  "nota": "hotspot S25 apagado 10 min; laptop y nodo en hotspot (10.68.89.175); sonda en refrigerador"
+}

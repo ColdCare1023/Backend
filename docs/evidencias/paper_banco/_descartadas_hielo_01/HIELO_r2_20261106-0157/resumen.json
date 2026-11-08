@@ -1,0 +1,92 @@
+{
+  "corrida": "HIELO_r2_20261106-0157",
+  "caso": "HIELO",
+  "repeticion": 2,
+  "inicio_utc": "2026-11-06T06:57:01Z",
+  "fin_utc": "2026-11-06T07:07:00Z",
+  "duracion_min": 10.0,
+  "lecturas_guardadas": 60,
+  "faltantes": 0,
+  "duplicadas_en_base": 0,
+  "diferidas": 0,
+  "fuera_de_orden": 0,
+  "sin_hora_llegadas_en_ventana": 0,
+  "corte_inferido": null,
+  "cortes": [],
+  "mensajes_lectura_broker": 60,
+  "reenvios_broker": 0,
+  "vistas_en_broker_sin_guardar": 0,
+  "boots": {
+    "1046": {
+      "seq_min": 70,
+      "seq_max": 109,
+      "guardadas": 40,
+      "esperadas": 40,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "synced": 40
+      }
+    },
+    "1047": {
+      "seq_min": 1,
+      "seq_max": 20,
+      "guardadas": 20,
+      "esperadas": 20,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "unsynced": 1,
+        "synced": 19
+      }
+    }
+  },
+  "latencia_s": {
+    "n": 59,
+    "mediana": 0.815,
+    "p95": 0.885,
+    "max": 1.196,
+    "en_linea_n": 59,
+    "en_linea_mediana": 0.815,
+    "en_linea_p95": 0.885
+  },
+  "incidentes": [],
+  "alertas": [],
+  "marcas": [
+    {
+      "utc": "2026-11-06T06:58:00Z",
+      "marca": "sonda en hielo",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 4.8,
+      "s_hasta_alerta": null
+    },
+    {
+      "utc": "2026-11-06T07:00:00Z",
+      "marca": "sonda en hielo",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 4.8,
+      "s_hasta_alerta": null
+    },
+    {
+      "utc": "2026-11-06T07:03:00Z",
+      "marca": "sonda al refrigerador",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 4.9,
+      "s_hasta_alerta": null
+    },
+    {
+      "utc": "2026-11-06T07:06:00Z",
+      "marca": "sonda al refrigerador",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 1.7,
+      "s_hasta_alerta": null
+    }
+  ],
+  "falla_commit": null
+}

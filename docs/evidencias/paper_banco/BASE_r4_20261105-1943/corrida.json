@@ -1,0 +1,9 @@
+{
+  "caso": "BASE",
+  "repeticion": 4,
+  "device_id": "ESP32_FARMACIA_01",
+  "intervalo_s": 10,
+  "inicio_utc": "2026-11-06T00:43:19Z",
+  "fin_utc": "2026-11-06T00:46:34Z",
+  "nota": "excepcion: 120 s con cada COMMIT fallando y el backend vivo; misma base; WinPina 4G (192.168.18.114)"
+}

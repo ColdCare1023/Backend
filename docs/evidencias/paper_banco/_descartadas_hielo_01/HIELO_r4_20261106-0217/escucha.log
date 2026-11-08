@@ -1,0 +1,4 @@
+time="2026-11-06T02:17:01-05:00" level=warning msg="Found orphan containers ([coldcare-develop-bd-pruebas-1]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up."
+ Container paper-escucha Creating 
+ Container paper-escucha Created 
+

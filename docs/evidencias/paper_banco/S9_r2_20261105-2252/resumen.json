@@ -1,0 +1,63 @@
+{
+  "corrida": "S9_r2_20261105-2252",
+  "caso": "S9",
+  "repeticion": 2,
+  "inicio_utc": "2026-11-06T03:52:00Z",
+  "fin_utc": "2026-11-06T03:59:00Z",
+  "duracion_min": 7.0,
+  "lecturas_guardadas": 42,
+  "faltantes": 0,
+  "duplicadas_en_base": 0,
+  "diferidas": 0,
+  "fuera_de_orden": 0,
+  "sin_hora_llegadas_en_ventana": 0,
+  "corte_inferido": null,
+  "cortes": [],
+  "mensajes_lectura_broker": 42,
+  "reenvios_broker": 0,
+  "vistas_en_broker_sin_guardar": 0,
+  "boots": {
+    "963": {
+      "seq_min": 1291,
+      "seq_max": 1332,
+      "guardadas": 42,
+      "esperadas": 42,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "synced": 42
+      }
+    }
+  },
+  "latencia_s": {
+    "n": 42,
+    "mediana": 0.849,
+    "p95": 0.902,
+    "max": 0.94,
+    "en_linea_n": 42,
+    "en_linea_mediana": 0.849,
+    "en_linea_p95": 0.902
+  },
+  "incidentes": [],
+  "alertas": [],
+  "marcas": [
+    {
+      "utc": "2026-11-06T03:53:00Z",
+      "marca": "puerta abierta",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 7.8,
+      "s_hasta_alerta": null
+    },
+    {
+      "utc": "2026-11-06T03:58:30Z",
+      "marca": "puerta cerrada",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 7.9,
+      "s_hasta_alerta": null
+    }
+  ],
+  "falla_commit": null
+}

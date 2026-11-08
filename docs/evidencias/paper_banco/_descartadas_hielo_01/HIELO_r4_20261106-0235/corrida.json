@@ -1,0 +1,9 @@
+{
+  "caso": "HIELO",
+  "repeticion": 4,
+  "device_id": "ESP32_FARMACIA_01",
+  "intervalo_s": 10,
+  "inicio_utc": "2026-11-06T07:35:01Z",
+  "fin_utc": null,
+  "nota": "sonda DS18B20 desnuda: refrigerador → baño de hielo 6 min → refrigerador; WinPina 4G; nodo en cargador de pared"
+}

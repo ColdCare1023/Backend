@@ -1,0 +1,15 @@
+llegada_utc,topico,boot_id,seq_no,captured_at,tipo,time_quality,detalle
+2026-11-06T00:31:48.192+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,89,2026-11-06T00:31:48Z,,sntp_synced,
+2026-11-06T00:31:58.206+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,90,2026-11-06T00:31:58Z,,sntp_synced,
+2026-11-06T00:32:08.196+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,91,2026-11-06T00:32:08Z,,sntp_synced,
+2026-11-06T00:32:08.494+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:32:09Z,estado_nodo,sntp_synced,"{""pendientes"": 0, ""ocupacion_pct"": 0, ""capacidad"": 30000, ""fs_total_bytes"": 1507328, ""fs_libres_bytes"": 1482752, ""perdidas_total"": 9, ""cuarentena"": 0, ""ultimo_seq_no"": 91, ""rssi_dbm"": -71, ""heap_libre"": 130752, ""heap_minimo"": 107468, ""intervalo_s"": 10, ""pubacks_sin_ack"": 13, ""acks_huella_ajena"": 0, ""eventos_descartados"": 0, ""reloj_sntp"": true, ""saltos_reloj_rechazados"": 0}"
+2026-11-06T00:32:18.202+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,92,2026-11-06T00:32:18Z,,sntp_synced,
+2026-11-06T00:32:26.222+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:32:26Z,lectura_vigente,sntp_synced,"{""boot_id"": 963, ""seq_no"": 92, ""temperatura_interna"": 3.94, ""captured_at"": ""2026-11-06T00:32:18Z"", ""time_quality"": ""synced"", ""uptime_s"": 910}"
+2026-11-06T00:32:26.329+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,92,2026-11-06T00:32:18Z,,sntp_synced,
+2026-11-06T00:32:34.367+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:32:34Z,lectura_vigente,sntp_synced,"{""boot_id"": 963, ""seq_no"": 93, ""temperatura_interna"": 3.94, ""captured_at"": ""2026-11-06T00:32:28Z"", ""time_quality"": ""synced"", ""uptime_s"": 920}"
+2026-11-06T00:32:36.337+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,92,2026-11-06T00:32:18Z,,sntp_synced,
+2026-11-06T00:32:44.232+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,93,2026-11-06T00:32:28Z,,sntp_synced,
+2026-11-06T00:32:44.472+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,94,2026-11-06T00:32:38Z,,sntp_synced,
+2026-11-06T00:32:48.202+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,95,2026-11-06T00:32:48Z,,sntp_synced,
+2026-11-06T00:32:58.206+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,96,2026-11-06T00:32:58Z,,sntp_synced,
+2026-11-06T00:33:08.254+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,97,2026-11-06T00:33:08Z,,sntp_synced,

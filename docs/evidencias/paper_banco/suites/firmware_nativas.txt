@@ -1,0 +1,1 @@
+134 Tests 0 Failures 0 Ignored (MSVC, scripts/tests_nativos_msvc.cmd, Unity de framework-espidf)

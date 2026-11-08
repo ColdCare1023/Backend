@@ -1,0 +1,14 @@
+
+ RUN  v5.0.1 C:/Users/gamio/Downloads/tesis-oficial/coldcare/Frontend
+
+Not implemented: navigation to another Document
+
+ Test Files  41 passed (41)
+      Tests  348 passed (348)
+   Start at  00:18:10
+   Duration  69.34s (environment 68%, import 17%, tests 7%, setup 5%, transform 2%, worker 1%)
+
+Environment  jsdom was created 41 times · 649.51s total, 68% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+

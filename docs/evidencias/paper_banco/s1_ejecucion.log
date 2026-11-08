@@ -1,0 +1,19 @@
+15:10:58Z sonda en rango (7.5 °C), sin alerta abierta
+Corrida S1 r1 iniciada: S1_r1_20261106-1010
+15:10:59Z S1 iniciada; cierre a las 03:10:59Z
+# S1 — repetición 1
+
+- Ventana: 2026-11-06T15:10:59Z → 2026-11-07T03:11:06Z (720.1 min)
+- Lecturas guardadas: **4321**; faltantes (huecos de seq_no): **0**; duplicadas en la base: **0**
+- Diferidas (guardadas en el nodo y reenviadas, latencia > 20 s): 25; confirmadas fuera de orden: 0; llegadas sin hora de captura (fuera del análisis, ver sin_hora.csv): 0
+- Corte visto en los datos: última en línea 2026-11-06T21:45:51.000000Z, reconexión 2026-11-06T21:46:24.921958Z (33.9 s); vaciado 43.1 s (0.12 registros/s); sin_datos a los None s de la última lectura en línea
+- Cortes en la corrida: 15 (el principal es el de más diferidas; los demás no se provocaron): 20:38:41 31.1 s, 1 diferidas; 21:37:51 42.3 s, 2 diferidas; 21:45:51 33.9 s, 5 diferidas; 21:47:31 32.9 s, 1 diferidas; 21:49:11 45.3 s, 2 diferidas; 21:50:31 31.8 s, 1 diferidas; 21:51:11 42.1 s, 2 diferidas; 22:22:51 42.6 s, 3 diferidas; 22:30:31 31.3 s, 1 diferidas; 22:41:41 45.5 s, 2 diferidas; 22:44:01 37.9 s, 1 diferidas; 22:45:21 34.9 s, 1 diferidas; 22:46:01 35.2 s, 1 diferidas; 22:48:21 35.6 s, 1 diferidas; 22:56:41 33.4 s, 1 diferidas
+- Mensajes de lectura en el broker: 4353; reenvíos (misma boot_id+seq_no): 32; vistas en el broker sin guardar: 0
+- Latencia captura→COMMIT (s): mediana 0.22, p95 1.791, máx 41.941 (n=4321); solo en línea (≤20 s): mediana 0.217, p95 1.56 (n=4296)
+
+| boot_id | seq | guardadas | esperadas | faltantes | calidad de hora |
+|---|---|---|---|---|---|
+| 1061 | 23–4343 | 4321 | 4321 | 0 | synced 4321 |
+
+Incidentes: sin_datos 2026-11-06T21:38:23.285617Z
+03:11:08Z S1 cerrada

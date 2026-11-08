@@ -1,0 +1,163 @@
+18:47:39 [CAP] boot=955 seq=39 up=380 t=2026-11-05T23:47:39Z tq=sntp ds=3.13 ds_f=- sht=26.53 hr=74.22 sht_f=- door=1 door_s=10 sim=0 g=OK q=1 ocup=0 heap=131268
+18:47:39 [Red] 1 lectura(s) con acuse logico; quedan 0.
+18:47:49 [CAP] boot=955 seq=40 up=390 t=2026-11-05T23:47:49Z tq=sntp ds=3.13 ds_f=- sht=26.53 hr=74.24 sht_f=- door=1 door_s=10 sim=0 g=OK q=1 ocup=0 heap=131268
+18:47:49 [Red] 1 lectura(s) con acuse logico; quedan 0.
+18:47:59 [CAP] boot=955 seq=41 up=400 t=2026-11-05T23:47:59Z tq=sntp ds=3.13 ds_f=- sht=26.46 hr=74.40 sht_f=- door=1 door_s=10 sim=0 g=OK q=1 ocup=0 heap=131268
+18:47:59 [Red] 1 lectura(s) con acuse logico; quedan 0.
+18:48:09 [CAP] boot=955 seq=42 up=410 t=2026-11-05T23:48:09Z tq=sntp ds=3.13 ds_f=- sht=26.46 hr=74.44 sht_f=- door=1 door_s=10 sim=0 g=OK q=1 ocup=0 heap=131268
+18:48:09 [Red] 1 lectura(s) con acuse logico; quedan 0.
+18:48:19 [CAP] boot=955 seq=43 up=420 t=2026-11-05T23:48:19Z tq=sntp ds=3.13 ds_f=- sht=26.46 hr=74.42 sht_f=- door=1 door_s=10 sim=0 g=OK q=1 ocup=0 heap=131268
+18:48:19 [Red] 1 lectura(s) con acuse logico; quedan 0.
+18:48:29 [CAP] boot=955 seq=44 up=430 t=2026-11-05T23:48:29Z tq=sntp ds=3.13 ds_f=- sht=26.46 hr=74.43 sht_f=- door=1 door_s=10 sim=0 g=OK q=1 ocup=0 heap=131268
+18:48:29 [Red] 1 lectura(s) con acuse logico; quedan 0.
+18:48:39 [CAP] boot=955 seq=45 up=440 t=2026-11-05T23:48:39Z tq=sntp ds=3.13 ds_f=- sht=26.43 hr=74.42 sht_f=- door=1 door_s=10 sim=0 g=OK q=1 ocup=0 heap=131268
+18:48:39 [Red] 1 lectura(s) con acuse logico; quedan 0.
+18:48:49 [CAP] boot=955 seq=46 up=450 t=2026-11-05T23:48:49Z tq=sntp ds=3.13 ds_f=- sht=26.48 hr=74.51 sht_f=- door=1 door_s=10 sim=0 g=OK q=1 ocup=0 heap=131268
+18:48:49 [Red] 1 lectura(s) con acuse logico; quedan 0.
+18:48:59 [CAP] boot=955 seq=47 up=460 t=2026-11-05T23:48:59Z tq=sntp ds=3.13 ds_f=- sht=26.53 hr=74.39 sht_f=- door=1 door_s=10 sim=0 g=OK q=1 ocup=0 heap=131268
+18:48:59 [Red] 1 lectura(s) con acuse logico; quedan 0.
+18:49:09 [CAP] boot=955 seq=48 up=470 t=2026-11-05T23:49:09Z tq=sntp ds=3.06 ds_f=- sht=26.51 hr=74.29 sht_f=- door=1 door_s=10 sim=0 g=OK q=1 ocup=0 heap=131268
+18:49:09 [Red] 1 lectura(s) con acuse logico; quedan 0.
+18:49:19 [CAP] boot=955 seq=49 up=480 t=2026-11-05T23:49:19Z tq=sntp ds=3.13 ds_f=- sht=26.50 hr=74.25 sht_f=- door=1 door_s=10 sim=0 g=OK q=1 ocup=0 heap=131268
+18:49:19 [Red] 1 lectura(s) con acuse logico; quedan 0.
+18:49:29 [CAP] boot=955 seq=50 up=490 t=2026-11-05T23:49:29Z tq=sntp ds=3.13 ds_f=- sht=26.51 hr=74.21 sht_f=- door=1 door_s=10 sim=0 g=OK q=1 ocup=0 heap=131268
+18:49:29 [Red] 1 lectura(s) con acuse logico; quedan 0.
+18:49:39 [CAP] boot=955 seq=51 up=500 t=2026-11-05T23:49:39Z tq=sntp ds=3.13 ds_f=- sht=26.53 hr=74.23 sht_f=- door=1 door_s=10 sim=0 g=OK q=1 ocup=0 heap=131268
+18:49:39 [Red] 1 lectura(s) con acuse logico; quedan 0.
+18:49:49 [CAP] boot=955 seq=52 up=510 t=2026-11-05T23:49:49Z tq=sntp ds=3.06 ds_f=- sht=26.54 hr=74.18 sht_f=- door=1 door_s=10 sim=0 g=OK q=1 ocup=0 heap=131268
+18:49:49 [Red] 1 lectura(s) con acuse logico; quedan 0.
+18:49:59 [CAP] boot=955 seq=53 up=520 t=2026-11-05T23:49:59Z tq=sntp ds=3.06 ds_f=- sht=26.56 hr=74.07 sht_f=- door=1 door_s=10 sim=0 g=OK q=1 ocup=0 heap=131268
+18:49:59 [Red] 1 lectura(s) con acuse logico; quedan 0.
+18:50:09 [CAP] boot=955 seq=54 up=530 t=2026-11-05T23:50:09Z tq=sntp ds=3.06 ds_f=- sht=26.58 hr=73.99 sht_f=- door=1 door_s=10 sim=0 g=OK q=1 ocup=0 heap=131268
+18:50:11 [MQTT] ERROR: Sin PUBACK (lastError=-5).
+18:50:11 [Red] ERROR: El broker no confirmo el evento 'lectura_vigente'.
+18:50:11 [WiFi] Reintento #1 (backoff 1000 ms).
+18:50:19 [CAP] boot=955 seq=55 up=540 t=2026-11-05T23:50:19Z tq=sntp ds=3.06 ds_f=- sht=26.66 hr=73.93 sht_f=- door=1 door_s=9 sim=0 g=OK q=2 ocup=0 heap=173036
+18:50:26 [WiFi] ERROR: Sin asociacion con 'S25 Ultra de Brenda' (intento 1, proximo en 2000 ms).
+18:50:26 [WiFi] Reintento #2 (backoff 2000 ms).
+18:50:29 [CAP] boot=955 seq=56 up=550 t=2026-11-05T23:50:29Z tq=sntp ds=3.06 ds_f=- sht=26.68 hr=73.33 sht_f=- door=1 door_s=10 sim=0 g=OK q=3 ocup=0 heap=173032
+18:50:39 [CAP] boot=955 seq=57 up=560 t=2026-11-05T23:50:39Z tq=sntp ds=3.06 ds_f=- sht=26.68 hr=73.30 sht_f=- door=1 door_s=10 sim=0 g=OK q=4 ocup=0 heap=173032
+18:50:41 [WiFi] ERROR: Sin asociacion con 'S25 Ultra de Brenda' (intento 2, proximo en 4000 ms).
+18:50:42 [WiFi] Reintento #3 (backoff 4000 ms).
+18:50:49 [CAP] boot=955 seq=58 up=570 t=2026-11-05T23:50:49Z tq=sntp ds=3.06 ds_f=- sht=26.66 hr=73.57 sht_f=- door=1 door_s=10 sim=0 g=OK q=5 ocup=0 heap=173032
+18:50:57 [WiFi] ERROR: Sin asociacion con 'S25 Ultra de Brenda' (intento 3, proximo en 8000 ms).
+18:50:57 [WiFi] Reintento #4 (backoff 8000 ms).
+18:50:59 [CAP] boot=955 seq=59 up=580 t=2026-11-05T23:50:59Z tq=sntp ds=3.06 ds_f=- sht=26.66 hr=73.74 sht_f=- door=1 door_s=10 sim=0 g=OK q=6 ocup=0 heap=173032
+18:51:09 [CAP] boot=955 seq=60 up=590 t=2026-11-05T23:51:09Z tq=sntp ds=3.13 ds_f=- sht=26.64 hr=73.80 sht_f=- door=1 door_s=10 sim=0 g=OK q=7 ocup=0 heap=173032
+18:51:13 [WiFi] ERROR: Sin asociacion con 'S25 Ultra de Brenda' (intento 4, proximo en 16000 ms).
+18:51:13 [WiFi] Reintento #5 (backoff 16000 ms).
+18:51:19 [CAP] boot=955 seq=61 up=600 t=2026-11-05T23:51:19Z tq=sntp ds=3.06 ds_f=- sht=26.67 hr=73.58 sht_f=- door=1 door_s=10 sim=0 g=OK q=8 ocup=0 heap=173032
+18:51:28 [WiFi] ERROR: Sin asociacion con 'S25 Ultra de Brenda' (intento 5, proximo en 32000 ms).
+18:51:28 [WiFi] ERROR: DIAGNOSTICO: 5 fallos seguidos. AP ausente o credenciales invalidas. La captura offline continua.
+18:51:29 [CAP] boot=955 seq=62 up=610 t=2026-11-05T23:51:29Z tq=sntp ds=3.13 ds_f=- sht=26.73 hr=73.63 sht_f=- door=1 door_s=10 sim=0 g=OK q=9 ocup=0 heap=173032
+18:51:39 [CAP] boot=955 seq=63 up=620 t=2026-11-05T23:51:39Z tq=sntp ds=3.13 ds_f=- sht=26.70 hr=73.49 sht_f=- door=1 door_s=10 sim=0 g=OK q=10 ocup=0 heap=173032
+18:51:45 [WiFi] Reintento #6 (backoff 32000 ms).
+18:51:49 [CAP] boot=955 seq=64 up=630 t=2026-11-05T23:51:49Z tq=sntp ds=3.13 ds_f=- sht=26.70 hr=73.57 sht_f=- door=1 door_s=10 sim=0 g=OK q=11 ocup=0 heap=173032
+18:51:59 [CAP] boot=955 seq=65 up=640 t=2026-11-05T23:51:59Z tq=sntp ds=3.13 ds_f=- sht=26.73 hr=73.42 sht_f=- door=1 door_s=10 sim=0 g=OK q=12 ocup=0 heap=173032
+18:52:01 [WiFi] ERROR: Sin asociacion con 'S25 Ultra de Brenda' (intento 6, proximo en 60000 ms).
+18:52:09 [CAP] boot=955 seq=66 up=650 t=2026-11-05T23:52:09Z tq=sntp ds=3.13 ds_f=- sht=26.67 hr=73.62 sht_f=- door=1 door_s=10 sim=0 g=OK q=13 ocup=0 heap=173032
+18:52:19 [CAP] boot=955 seq=67 up=660 t=2026-11-05T23:52:19Z tq=sntp ds=3.13 ds_f=- sht=26.73 hr=73.17 sht_f=- door=1 door_s=10 sim=0 g=OK q=14 ocup=0 heap=173064
+18:52:29 [CAP] boot=955 seq=68 up=670 t=2026-11-05T23:52:29Z tq=sntp ds=3.19 ds_f=- sht=26.73 hr=73.57 sht_f=- door=1 door_s=10 sim=0 g=OK q=15 ocup=0 heap=173064
+18:52:39 [CAP] boot=955 seq=69 up=680 t=2026-11-05T23:52:39Z tq=sntp ds=3.19 ds_f=- sht=26.71 hr=73.39 sht_f=- door=1 door_s=10 sim=0 g=OK q=16 ocup=0 heap=173064
+18:52:46 [WiFi] Reintento #7 (backoff 60000 ms).
+18:52:49 [CAP] boot=955 seq=70 up=690 t=2026-11-05T23:52:49Z tq=sntp ds=3.19 ds_f=- sht=26.67 hr=73.38 sht_f=- door=1 door_s=10 sim=0 g=OK q=17 ocup=0 heap=173036
+18:52:59 [CAP] boot=955 seq=71 up=700 t=2026-11-05T23:52:59Z tq=sntp ds=3.19 ds_f=- sht=26.67 hr=73.51 sht_f=- door=1 door_s=10 sim=0 g=OK q=18 ocup=0 heap=173036
+18:53:01 [WiFi] ERROR: Sin asociacion con 'S25 Ultra de Brenda' (intento 7, proximo en 60000 ms).
+18:53:09 [CAP] boot=955 seq=72 up=710 t=2026-11-05T23:53:09Z tq=sntp ds=3.19 ds_f=- sht=26.61 hr=73.76 sht_f=- door=1 door_s=10 sim=0 g=OK q=19 ocup=0 heap=173036
+18:53:19 [CAP] boot=955 seq=73 up=720 t=2026-11-05T23:53:19Z tq=sntp ds=3.25 ds_f=- sht=26.64 hr=73.34 sht_f=- door=1 door_s=10 sim=0 g=OK q=20 ocup=0 heap=173036
+18:53:28 ets Jul 29 2019 12:21:46
+18:53:28 rst:0x1 (POWERON_RESET),boot:0x17 (SPI_FAST_FLASH_BOOT)
+18:53:28 configsip: 0, SPIWP:0xee
+18:53:28 clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+18:53:28 mode:DIO, clock div:2
+18:53:28 load:0x3fff0030,len:4640
+18:53:28 load:0x40078000,len:15632
+18:53:28 load:0x40080400,len:3164
+18:53:28 entry 0x4008059c
+18:53:28 E (475) esp_core_dump_flash: No c���* dump partition found!
+18:53:28 E (475) esp_core_dump_flash: No core dump partition found!
+18:53:28 [WDT] Task watchdog a 30 s.
+18:53:28 [BOOT] boot_id=956 reset=POWERON fw=v1.2.0 device=ESP32_FARMACIA_01 intervalo_s=10 mc38=1 demo=0 credenciales=NVS
+18:53:28 [Buffer] Montado: 20 pendientes en 1 segmentos, 0% ocupado, 1444 KB libres.
+18:53:29 [Setup] ERROR: Flash SIN cifrar (firmware de desarrollo): el buffer de lecturas no esta protegido frente a acceso fisico. En campo usar el entorno 'produccion'.
+18:53:29 [Setup] ERROR: Consola de escritura ABIERTA: defina 'nvs set clave_servicio <clave>' para bloquearla en este nodo aprovisionado.
+18:53:29 [MQTT] CA del broker embebida en el firmware.
+18:53:29 [DS18B20] Sonda detectada en GPIO4 (12 bits).
+18:53:29 [SHT31] Detectado en 0x44 (SDA=21, SCL=22).
+18:53:29 [MC38] GPIO27, estado inicial: ABIERTA.
+18:53:29 [Evento] Encolado 'arranque'.
+18:53:29 [CAP] boot=956 seq=1 up=0 t=- tq=nosync ds=3.25 ds_f=- sht=26.63 hr=73.85 sht_f=- door=1 door_s=0 sim=0 g=OK q=21 ocup=0 heap=179564
+18:53:39 [CAP] boot=956 seq=2 up=10 t=- tq=nosync ds=3.25 ds_f=- sht=26.63 hr=73.71 sht_f=- door=1 door_s=10 sim=0 g=OK q=22 ocup=0 heap=179464
+18:53:44 ���������������������������������������������������������������� 'S25 Ultra de Brenda' (intento 1, proximo en 2000 ms).
+18:53:44 [WiFi] Reintento #2 (backoff 2000 ms).
+18:53:49 [CAP] boot=956 seq=3 up=20 t=- tq=nosync ds=3.25 ds_f=- sht=26.70 hr=73.49 sht_f=- door=1 door_s=9 sim=0 g=OK q=23 ocup=0 heap=179464
+18:53:59 [CAP] boot=956 seq=4 up=30 t=- tq=nosync ds=3.25 ds_f=- sht=26.68 hr=73.27 sht_f=- door=1 door_s=10 sim=0 g=OK q=24 ocup=0 heap=179464
+18:54:00 [WiFi] ERROR: Sin asociacion con 'S25 Ultra de Brenda' (intento 2, proximo en 4000 ms).
+18:54:00 [WiFi] Reintento #3 (backoff 4000 ms).
+18:54:09 [CAP] boot=956 seq=5 up=40 t=- tq=nosync ds=3.25 ds_f=- sht=26.73 hr=73.41 sht_f=- door=1 door_s=10 sim=0 g=OK q=25 ocup=0 heap=179464
+18:54:16 [WiFi] ERROR: Sin asociacion con 'S25 Ultra de Brenda' (intento 3, proximo en 8000 ms).
+18:54:16 [WiFi] Reintento #4 (backoff 8000 ms).
+18:54:19 [CAP] boot=956 seq=6 up=50 t=- tq=nosync ds=3.25 ds_f=- sht=26.67 hr=73.32 sht_f=- door=1 door_s=10 sim=0 g=OK q=26 ocup=0 heap=179464
+18:54:29 [CAP] boot=956 seq=7 up=60 t=- tq=nosync ds=3.25 ds_f=- sht=26.64 hr=73.27 sht_f=- door=1 door_s=10 sim=0 g=OK q=27 ocup=0 heap=179464
+18:54:31 [WiFi] ERROR: Sin asociacion con 'S25 Ultra de Brenda' (intento 4, proximo en 16000 ms).
+18:54:32 [WiFi] Reintento #5 (backoff 16000 ms).
+18:54:39 [CAP] boot=956 seq=8 up=70 t=- tq=nosync ds=3.31 ds_f=- sht=26.63 hr=73.36 sht_f=- door=1 door_s=10 sim=0 g=OK q=28 ocup=0 heap=179464
+18:54:47 [WiFi] ERROR: Sin asociacion con 'S25 Ultra de Brenda' (intento 5, proximo en 32000 ms).
+18:54:47 [WiFi] ERROR: DIAGNOSTICO: 5 fallos seguidos. AP ausente o credenciales invalidas. La captura offline continua.
+18:54:49 [CAP] boot=956 seq=9 up=80 t=- tq=nosync ds=3.31 ds_f=- sht=26.61 hr=73.44 sht_f=- door=1 door_s=10 sim=0 g=OK q=29 ocup=0 heap=179464
+18:54:59 [CAP] boot=956 seq=10 up=90 t=- tq=nosync ds=3.31 ds_f=- sht=26.58 hr=73.42 sht_f=- door=1 door_s=10 sim=0 g=OK q=30 ocup=0 heap=179464
+18:55:04 [WiFi] Reintento #6 (backoff 32000 ms).
+18:55:09 [CAP] boot=956 seq=11 up=100 t=- tq=nosync ds=3.31 ds_f=- sht=26.58 hr=73.49 sht_f=- door=1 door_s=10 sim=0 g=OK q=31 ocup=0 heap=179464
+18:55:19 [CAP] boot=956 seq=12 up=110 t=- tq=nosync ds=3.31 ds_f=- sht=26.53 hr=73.60 sht_f=- door=1 door_s=10 sim=0 g=OK q=32 ocup=0 heap=179464
+18:55:19 [WiFi] ERROR: Sin asociacion con 'S25 Ultra de Brenda' (intento 6, proximo en 60000 ms).
+18:55:29 [CAP] boot=956 seq=13 up=120 t=- tq=nosync ds=3.38 ds_f=- sht=26.50 hr=73.64 sht_f=- door=1 door_s=10 sim=0 g=OK q=33 ocup=0 heap=179464
+18:55:39 [CAP] boot=956 seq=14 up=130 t=- tq=nosync ds=3.31 ds_f=- sht=26.48 hr=73.73 sht_f=- door=1 door_s=10 sim=0 g=OK q=34 ocup=0 heap=179496
+18:55:49 [CAP] boot=956 seq=15 up=140 t=- tq=nosync ds=3.31 ds_f=- sht=26.44 hr=73.83 sht_f=- door=1 door_s=10 sim=0 g=OK q=35 ocup=0 heap=179496
+18:55:59 [CAP] boot=956 seq=16 up=150 t=- tq=nosync ds=3.38 ds_f=- sht=26.43 hr=73.92 sht_f=- door=1 door_s=10 sim=0 g=OK q=36 ocup=0 heap=179496
+18:56:04 [WiFi] Reintento #7 (backoff 60000 ms).
+18:56:09 [CAP] boot=956 seq=17 up=160 t=- tq=nosync ds=3.38 ds_f=- sht=26.37 hr=74.02 sht_f=- door=1 door_s=10 sim=0 g=OK q=37 ocup=0 heap=179456
+18:56:19 ���������������������������������������������������������������� tq=nosync ds=3.38 ds_f=- sht=26.35 hr=74.21 sht_f=- door=1 door_s=10 sim=0 g=OK q=38 ocup=0 heap=179456
+18:56:19 [WiFi] ERROR: Sin asociacion con 'S25 Ultra de Brenda' (intento 7, proximo en 60000 ms).
+18:56:29 [CAP] boot=956 seq=19 up=180 t=- tq=nosync ds=3.38 ds_f=- sht=26.26 hr=74.43 sht_f=- door=1 door_s=10 sim=0 g=OK q=39 ocup=0 heap=179456
+18:56:39 [CAP] boot=956 seq=20 up=190 t=- tq=nosync ds=3.38 ds_f=- sht=26.26 hr=74.44 sht_f=- door=1 door_s=10 sim=0 g=OK q=40 ocup=0 heap=179456
+18:56:49 ���������������������������������������������������������������� tq=nosync ds=3.38 ds_f=- sht=26.26 hr=74.51 sht_f=- door=1 door_s=10 sim=0 g=OK q=41 ocup=0 heap=179456
+18:56:59 [CAP] boot=956 seq=22 up=210 t=- tq=nosync ds=3.38 ds_f=- sht=26.23 hr=74.54 sht_f=- door=1 door_s=10 sim=0 g=OK q=42 ocup=0 heap=179456
+18:57:04 [WiFi] Reintento #8 (backoff 60000 ms).
+18:57:09 [CAP] boot=956 seq=23 up=220 t=- tq=nosync ds=3.38 ds_f=- sht=26.20 hr=74.71 sht_f=- door=1 door_s=10 sim=0 g=OK q=43 ocup=0 heap=179456
+18:57:19 [CAP] boot=956 seq=24 up=230 t=- tq=nosync ds=3.44 ds_f=- sht=26.20 hr=74.87 sht_f=- door=1 door_s=10 sim=0 g=OK q=44 ocup=0 heap=179456
+18:57:19 [WiFi] ERROR: Sin asociacion con 'S25 Ultra de Brenda' (intento 8, proximo en 60000 ms).
+18:57:29 [CAP] boot=956 seq=25 up=240 t=- tq=nosync ds=3.44 ds_f=- sht=26.25 hr=74.87 sht_f=- door=1 door_s=10 sim=0 g=OK q=45 ocup=0 heap=179456
+18:57:39 [CAP] boot=956 seq=26 up=250 t=- tq=nosync ds=3.44 ds_f=- sht=26.26 hr=74.44 sht_f=- door=1 door_s=10 sim=0 g=OK q=46 ocup=0 heap=179456
+18:57:49 [CAP] boot=956 seq=27 up=260 t=- tq=nosync ds=3.44 ds_f=- sht=26.22 hr=74.79 sht_f=- door=1 door_s=10 sim=0 g=OK q=47 ocup=0 heap=179456
+18:57:59 [CAP] boot=956 seq=28 up=270 t=- tq=nosync ds=3.44 ds_f=- sht=26.22 hr=74.84 sht_f=- door=1 door_s=10 sim=0 g=OK q=48 ocup=0 heap=179456
+18:58:04 [WiFi] Reintento #9 (backoff 60000 ms).
+18:58:09 [CAP] boot=956 seq=29 up=280 t=- tq=nosync ds=3.44 ds_f=- sht=26.25 hr=74.94 sht_f=- door=1 door_s=10 sim=0 g=OK q=49 ocup=0 heap=179436
+18:58:19 [CAP] boot=956 seq=30 up=290 t=- tq=nosync ds=3.44 ds_f=- sht=26.22 hr=74.94 sht_f=- door=1 door_s=10 sim=0 g=OK q=50 ocup=0 heap=179436
+18:58:19 [WiFi] ERROR: Sin asociacion con 'S25 Ultra de Brenda' (intento 9, proximo en 60000 ms).
+18:58:29 [CAP] boot=956 seq=31 up=300 t=- tq=nosync ds=3.44 ds_f=- sht=26.20 hr=74.93 sht_f=- door=1 door_s=10 sim=0 g=OK q=51 ocup=0 heap=179436
+18:58:39 [CAP] boot=956 seq=32 up=310 t=- tq=nosync ds=3.44 ds_f=- sht=26.19 hr=74.92 sht_f=- door=1 door_s=10 sim=0 g=OK q=52 ocup=0 heap=179436
+18:58:49 ���������������������������������������������������������������� tq=nosync ds=3.50 ds_f=- sht=26.16 hr=75.00 sht_f=- door=1 door_s=10 sim=0 g=OK q=53 ocup=0 heap=179436
+18:58:59 [CAP] boot=956 seq=34 up=330 t=- tq=nosync ds=3.44 ds_f=- sht=26.15 hr=75.09 sht_f=- door=1 door_s=10 sim=0 g=OK q=54 ocup=0 heap=179436
+18:59:04 [WiFi] Reintento #10 (backoff 60000 ms).
+18:59:09 [CAP] boot=956 seq=35 up=340 t=- tq=nosync ds=3.44 ds_f=- sht=26.12 hr=75.05 sht_f=- door=1 door_s=10 sim=0 g=OK q=55 ocup=0 heap=179436
+18:59:19 [CAP] boot=956 seq=36 up=350 t=- tq=nosync ds=3.50 ds_f=- sht=26.12 hr=75.22 sht_f=- door=1 door_s=10 sim=0 g=OK q=56 ocup=0 heap=179436
+18:59:20 [WiFi] ERROR: Sin asociacion con 'S25 Ultra de Brenda' (intento 10, proximo en 60000 ms).
+18:59:29 [CAP] boot=956 seq=37 up=360 t=- tq=nosync ds=3.50 ds_f=- sht=26.12 hr=74.88 sht_f=- door=1 door_s=10 sim=0 g=OK q=57 ocup=0 heap=179436
+18:59:39 [CAP] boot=956 seq=38 up=370 t=- tq=nosync ds=3.50 ds_f=- sht=26.12 hr=75.23 sht_f=- door=1 door_s=10 sim=0 g=OK q=58 ocup=0 heap=179436
+18:59:49 [CAP] boot=956 seq=39 up=380 t=- tq=nosync ds=3.50 ds_f=- sht=26.08 hr=75.23 sht_f=- door=1 door_s=10 sim=0 g=OK q=59 ocup=0 heap=179436
+18:59:59 [CAP] boot=956 seq=40 up=390 t=- tq=nosync ds=3.50 ds_f=- sht=26.08 hr=75.25 sht_f=- door=1 door_s=10 sim=0 g=OK q=60 ocup=0 heap=179436
+19:00:04 [WiFi] Reintento #11 (backoff 60000 ms).
+19:00:07 [WiFi] Conectado: IP 10.68.89.92, RSSI -37 dBm.
+19:00:07 [Reloj] SNTP en marcha (pool.ntp.org, time.google.com, time.cloudflare.com).
+19:00:07 [MQTT] Conectando a 10.68.89.175:8883 como 'ESP32_FARMACIA_01'...
+19:00:08 [MQTT] Conectado (TLS, QoS 1). Acuses en farmacias/ESP32_FARMACIA_01/ack.
+19:00:08 [Evento] Encolado 'wifi_reconexion_prolongada'.
+19:00:09 [CAP] boot=956 seq=41 up=400 t=- tq=nosync ds=3.50 ds_f=- sht=26.05 hr=75.37 sht_f=- door=1 door_s=10 sim=0 g=OK q=58 ocup=0 heap=133932
+19:00:12 [Red] 20 lectura(s) con acuse logico; quedan 41.
+19:00:12 [Reloj] SNTP sincronizado: 2026-11-06T00:00:11Z
+19:00:16 [Red] 20 lectura(s) con acuse logico; quedan 21.
+19:00:19 [CAP] boot=956 seq=42 up=410 t=2026-11-06T00:00:19Z tq=sntp ds=3.50 ds_f=- sht=26.08 hr=75.41 sht_f=- door=1 door_s=10 sim=0 g=OK q=9 ocup=0 heap=129872
+19:00:20 [Red] 20 lectura(s) con acuse logico; quedan 2.
+19:00:20 [Red] 2 lectura(s) con acuse logico; quedan 0.
+19:00:29 [CAP] boot=956 seq=43 up=420 t=2026-11-06T00:00:29Z tq=sntp ds=3.50 ds_f=- sht=26.06 hr=75.24 sht_f=- door=1 door_s=10 sim=0 g=OK q=1 ocup=0 heap=131200
+19:00:29 [Red] 1 lectura(s) con acuse logico; quedan 0.

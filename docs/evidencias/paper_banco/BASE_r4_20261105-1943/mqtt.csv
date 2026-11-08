@@ -1,0 +1,39 @@
+llegada_utc,topico,boot_id,seq_no,captured_at,tipo,time_quality,detalle
+2026-11-06T00:43:28.240+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,159,2026-11-06T00:43:28Z,,sntp_synced,
+2026-11-06T00:43:38.223+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,160,2026-11-06T00:43:38Z,,sntp_synced,
+2026-11-06T00:43:48.231+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,161,2026-11-06T00:43:48Z,,sntp_synced,
+2026-11-06T00:43:56.252+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:43:56Z,lectura_vigente,sntp_synced,"{""boot_id"": 963, ""seq_no"": 161, ""temperatura_interna"": 3.38, ""captured_at"": ""2026-11-06T00:43:48Z"", ""time_quality"": ""synced"", ""uptime_s"": 1600}"
+2026-11-06T00:43:56.343+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,161,2026-11-06T00:43:48Z,,sntp_synced,
+2026-11-06T00:44:04.363+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:44:04Z,lectura_vigente,sntp_synced,"{""boot_id"": 963, ""seq_no"": 162, ""temperatura_interna"": 3.38, ""captured_at"": ""2026-11-06T00:43:58Z"", ""time_quality"": ""synced"", ""uptime_s"": 1610}"
+2026-11-06T00:44:06.387+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,161,2026-11-06T00:43:48Z,,sntp_synced,
+2026-11-06T00:44:14.411+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:44:14Z,lectura_vigente,sntp_synced,"{""boot_id"": 963, ""seq_no"": 163, ""temperatura_interna"": 3.38, ""captured_at"": ""2026-11-06T00:44:08Z"", ""time_quality"": ""synced"", ""uptime_s"": 1620}"
+2026-11-06T00:44:18.234+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:44:18Z,lectura_vigente,sntp_synced,"{""boot_id"": 963, ""seq_no"": 164, ""temperatura_interna"": 3.31, ""captured_at"": ""2026-11-06T00:44:18Z"", ""time_quality"": ""synced"", ""uptime_s"": 1630}"
+2026-11-06T00:44:26.426+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,161,2026-11-06T00:43:48Z,,sntp_synced,
+2026-11-06T00:44:34.449+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:44:35Z,lectura_vigente,sntp_synced,"{""boot_id"": 963, ""seq_no"": 165, ""temperatura_interna"": 3.38, ""captured_at"": ""2026-11-06T00:44:28Z"", ""time_quality"": ""synced"", ""uptime_s"": 1640}"
+2026-11-06T00:44:38.238+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:44:38Z,lectura_vigente,sntp_synced,"{""boot_id"": 963, ""seq_no"": 166, ""temperatura_interna"": 3.31, ""captured_at"": ""2026-11-06T00:44:38Z"", ""time_quality"": ""synced"", ""uptime_s"": 1650}"
+2026-11-06T00:44:48.243+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:44:48Z,lectura_vigente,sntp_synced,"{""boot_id"": 963, ""seq_no"": 167, ""temperatura_interna"": 3.31, ""captured_at"": ""2026-11-06T00:44:48Z"", ""time_quality"": ""synced"", ""uptime_s"": 1660}"
+2026-11-06T00:44:58.240+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:44:58Z,lectura_vigente,sntp_synced,"{""boot_id"": 963, ""seq_no"": 168, ""temperatura_interna"": 3.31, ""captured_at"": ""2026-11-06T00:44:58Z"", ""time_quality"": ""synced"", ""uptime_s"": 1670}"
+2026-11-06T00:45:06.441+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,161,2026-11-06T00:43:48Z,,sntp_synced,
+2026-11-06T00:45:14.463+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:45:15Z,lectura_vigente,sntp_synced,"{""boot_id"": 963, ""seq_no"": 169, ""temperatura_interna"": 3.31, ""captured_at"": ""2026-11-06T00:45:08Z"", ""time_quality"": ""synced"", ""uptime_s"": 1680}"
+2026-11-06T00:45:18.208+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:45:18Z,lectura_vigente,sntp_synced,"{""boot_id"": 963, ""seq_no"": 170, ""temperatura_interna"": 3.31, ""captured_at"": ""2026-11-06T00:45:18Z"", ""time_quality"": ""synced"", ""uptime_s"": 1690}"
+2026-11-06T00:45:28.273+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:45:28Z,lectura_vigente,sntp_synced,"{""boot_id"": 963, ""seq_no"": 171, ""temperatura_interna"": 3.31, ""captured_at"": ""2026-11-06T00:45:28Z"", ""time_quality"": ""synced"", ""uptime_s"": 1700}"
+2026-11-06T00:45:38.210+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:45:38Z,lectura_vigente,sntp_synced,"{""boot_id"": 963, ""seq_no"": 172, ""temperatura_interna"": 3.31, ""captured_at"": ""2026-11-06T00:45:38Z"", ""time_quality"": ""synced"", ""uptime_s"": 1710}"
+2026-11-06T00:45:48.215+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:45:48Z,lectura_vigente,sntp_synced,"{""boot_id"": 963, ""seq_no"": 173, ""temperatura_interna"": 3.31, ""captured_at"": ""2026-11-06T00:45:48Z"", ""time_quality"": ""synced"", ""uptime_s"": 1720}"
+2026-11-06T00:45:58.218+00:00,farmacias/ESP32_FARMACIA_01/eventos,963,,2026-11-06T00:45:58Z,lectura_vigente,sntp_synced,"{""boot_id"": 963, ""seq_no"": 174, ""temperatura_interna"": 3.31, ""captured_at"": ""2026-11-06T00:45:58Z"", ""time_quality"": ""synced"", ""uptime_s"": 1730}"
+2026-11-06T00:46:06.463+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,161,2026-11-06T00:43:48Z,,sntp_synced,
+2026-11-06T00:46:06.687+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,162,2026-11-06T00:43:58Z,,sntp_synced,
+2026-11-06T00:46:06.916+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,163,2026-11-06T00:44:08Z,,sntp_synced,
+2026-11-06T00:46:07.128+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,164,2026-11-06T00:44:18Z,,sntp_synced,
+2026-11-06T00:46:07.326+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,165,2026-11-06T00:44:28Z,,sntp_synced,
+2026-11-06T00:46:07.518+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,166,2026-11-06T00:44:38Z,,sntp_synced,
+2026-11-06T00:46:07.723+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,167,2026-11-06T00:44:48Z,,sntp_synced,
+2026-11-06T00:46:07.931+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,168,2026-11-06T00:44:58Z,,sntp_synced,
+2026-11-06T00:46:08.279+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,169,2026-11-06T00:45:08Z,,sntp_synced,
+2026-11-06T00:46:08.466+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,170,2026-11-06T00:45:18Z,,sntp_synced,
+2026-11-06T00:46:08.623+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,171,2026-11-06T00:45:28Z,,sntp_synced,
+2026-11-06T00:46:08.790+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,172,2026-11-06T00:45:38Z,,sntp_synced,
+2026-11-06T00:46:08.974+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,173,2026-11-06T00:45:48Z,,sntp_synced,
+2026-11-06T00:46:09.162+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,174,2026-11-06T00:45:58Z,,sntp_synced,
+2026-11-06T00:46:09.357+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,175,2026-11-06T00:46:08Z,,sntp_synced,
+2026-11-06T00:46:18.221+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,176,2026-11-06T00:46:18Z,,sntp_synced,
+2026-11-06T00:46:28.231+00:00,farmacias/ESP32_FARMACIA_01/lecturas,963,177,2026-11-06T00:46:28Z,,sntp_synced,

@@ -1,0 +1,9 @@
+{
+  "caso": "S1",
+  "repeticion": 1,
+  "device_id": "ESP32_FARMACIA_01",
+  "intervalo_s": 10,
+  "inicio_utc": "2026-11-06T15:10:59Z",
+  "fin_utc": "2026-11-07T03:11:06Z",
+  "nota": "operación normal 12 h sin intervención; puerta cerrada, sonda en el refrigerador; WinPina; nodo en cargador de pared"
+}

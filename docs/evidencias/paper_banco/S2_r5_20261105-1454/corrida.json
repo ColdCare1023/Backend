@@ -1,0 +1,9 @@
+{
+  "caso": "S2",
+  "repeticion": 5,
+  "device_id": "ESP32_FARMACIA_01",
+  "intervalo_s": 10,
+  "inicio_utc": "2026-11-05T19:54:47Z",
+  "fin_utc": "2026-11-05T20:10:27Z",
+  "nota": "hotspot S25 apagado 10 min; laptop y nodo en hotspot (10.68.89.175); sonda en refrigerador. El cierre automático se adelantó al vaciado (el nodo aún no reconectaba); se reexportó la base tras el vaciado. mqtt.csv no incluye los mensajes del vaciado: reenvíos sin medir en esta repetición."
+}

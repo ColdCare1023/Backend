@@ -1,0 +1,204 @@
+{
+  "corrida": "S5_r2_20261105-1520",
+  "caso": "S5",
+  "repeticion": 2,
+  "inicio_utc": "2026-11-05T20:20:50Z",
+  "fin_utc": "2026-11-05T20:34:02Z",
+  "duracion_min": 13.2,
+  "lecturas_guardadas": 83,
+  "faltantes": 0,
+  "duplicadas_en_base": 0,
+  "diferidas": 59,
+  "fuera_de_orden": 0,
+  "sin_hora_llegadas_en_ventana": 0,
+  "corte_inferido": {
+    "ultima_en_linea_utc": "2026-11-05T20:24:25.000000Z",
+    "reconexion_utc": "2026-11-05T20:33:47.287289Z",
+    "duracion_corte_s": 562.3,
+    "diferidas": 59,
+    "vaciado_s": 12.5,
+    "vaciado_registros_por_s": 4.71,
+    "s_hasta_sin_datos": 31.0,
+    "s_hasta_sin_datos_detectado": 53.3
+  },
+  "cortes": [
+    {
+      "ultima_en_linea_utc": "2026-11-05T20:24:25.000000Z",
+      "reconexion_utc": "2026-11-05T20:33:47.287289Z",
+      "duracion_corte_s": 562.3,
+      "diferidas": 59,
+      "vaciado_s": 12.5,
+      "vaciado_registros_por_s": 4.71,
+      "s_hasta_sin_datos": 31.0,
+      "s_hasta_sin_datos_detectado": 53.3
+    }
+  ],
+  "mensajes_lectura_broker": 83,
+  "reenvios_broker": 0,
+  "vistas_en_broker_sin_guardar": 0,
+  "boots": {
+    "898": {
+      "seq_min": 27,
+      "seq_max": 78,
+      "guardadas": 52,
+      "esperadas": 52,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "synced": 52
+      }
+    },
+    "899": {
+      "seq_min": 1,
+      "seq_max": 4,
+      "guardadas": 4,
+      "esperadas": 4,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "unsynced": 1,
+        "synced": 3
+      }
+    },
+    "900": {
+      "seq_min": 1,
+      "seq_max": 4,
+      "guardadas": 4,
+      "esperadas": 4,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "unsynced": 1,
+        "synced": 3
+      }
+    },
+    "901": {
+      "seq_min": 1,
+      "seq_max": 4,
+      "guardadas": 4,
+      "esperadas": 4,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "unsynced": 1,
+        "synced": 3
+      }
+    },
+    "902": {
+      "seq_min": 1,
+      "seq_max": 4,
+      "guardadas": 4,
+      "esperadas": 4,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "unsynced": 1,
+        "synced": 3
+      }
+    },
+    "903": {
+      "seq_min": 1,
+      "seq_max": 4,
+      "guardadas": 4,
+      "esperadas": 4,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "unsynced": 1,
+        "synced": 3
+      }
+    },
+    "904": {
+      "seq_min": 1,
+      "seq_max": 4,
+      "guardadas": 4,
+      "esperadas": 4,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "unsynced": 1,
+        "synced": 3
+      }
+    },
+    "905": {
+      "seq_min": 1,
+      "seq_max": 4,
+      "guardadas": 4,
+      "esperadas": 4,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "unsynced": 1,
+        "synced": 3
+      }
+    },
+    "906": {
+      "seq_min": 1,
+      "seq_max": 3,
+      "guardadas": 3,
+      "esperadas": 3,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "backfilled": 1,
+        "synced": 2
+      }
+    }
+  },
+  "latencia_s": {
+    "n": 76,
+    "mediana": 166.697,
+    "p95": 515.553,
+    "max": 552.287,
+    "en_linea_n": 24,
+    "en_linea_mediana": 1.046,
+    "en_linea_p95": 3.819
+  },
+  "incidentes": [
+    {
+      "tipo": "sin_datos",
+      "abierto_utc": "2026-11-05T20:24:56.048480Z",
+      "resuelto_utc": "2026-11-05T20:33:47.205869Z",
+      "detectado_utc": "2026-11-05T20:25:18.328261Z",
+      "ultimo_reporte_utc": "2026-11-05T20:24:26.048480Z",
+      "s_silencio_hasta_deteccion": 52.3
+    }
+  ],
+  "alertas": [],
+  "marcas": [
+    {
+      "utc": "2026-11-05T20:24:33Z",
+      "marca": "hotspot apagado",
+      "s_hasta_incidente": 23.0,
+      "s_hasta_incidente_detectado": 45.3,
+      "s_hasta_lectura": 554.3,
+      "s_hasta_alerta": null
+    },
+    {
+      "utc": "2026-11-05T20:29:42Z",
+      "marca": "reset",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 245.3,
+      "s_hasta_alerta": null
+    },
+    {
+      "utc": "2026-11-05T20:33:52Z",
+      "marca": "hotspot encendido",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 0.1,
+      "s_hasta_alerta": null
+    }
+  ],
+  "falla_commit": null
+}

@@ -1,0 +1,92 @@
+{
+  "corrida": "S7_r1_20261105-1951",
+  "caso": "S7",
+  "repeticion": 1,
+  "inicio_utc": "2026-11-06T00:51:01Z",
+  "fin_utc": "2026-11-06T01:22:59Z",
+  "duracion_min": 32.0,
+  "lecturas_guardadas": 192,
+  "faltantes": 0,
+  "duplicadas_en_base": 0,
+  "diferidas": 184,
+  "fuera_de_orden": 0,
+  "sin_hora_llegadas_en_ventana": 0,
+  "corte_inferido": {
+    "ultima_en_linea_utc": "2026-11-06T00:51:58.000000Z",
+    "reconexion_utc": "2026-11-06T01:22:19.356636Z",
+    "duracion_corte_s": 1821.4,
+    "diferidas": 184,
+    "vaciado_s": 39.1,
+    "vaciado_registros_por_s": 4.7,
+    "s_hasta_sin_datos": 30.2,
+    "s_hasta_sin_datos_detectado": 54.6
+  },
+  "cortes": [
+    {
+      "ultima_en_linea_utc": "2026-11-06T00:51:58.000000Z",
+      "reconexion_utc": "2026-11-06T01:22:19.356636Z",
+      "duracion_corte_s": 1821.4,
+      "diferidas": 184,
+      "vaciado_s": 39.1,
+      "vaciado_registros_por_s": 4.7,
+      "s_hasta_sin_datos": 30.2,
+      "s_hasta_sin_datos_detectado": 54.6
+    }
+  ],
+  "mensajes_lectura_broker": 192,
+  "reenvios_broker": 0,
+  "vistas_en_broker_sin_guardar": 0,
+  "boots": {
+    "963": {
+      "seq_min": 205,
+      "seq_max": 396,
+      "guardadas": 192,
+      "esperadas": 192,
+      "faltantes": 0,
+      "faltantes_seq": [],
+      "duplicadas_en_base": 0,
+      "calidad_hora": {
+        "synced": 192
+      }
+    }
+  },
+  "latencia_s": {
+    "n": 192,
+    "mediana": 877.387,
+    "p95": 1718.0,
+    "max": 1811.357,
+    "en_linea_n": 8,
+    "en_linea_mediana": 0.312,
+    "en_linea_p95": 7.289
+  },
+  "incidentes": [
+    {
+      "tipo": "sin_datos",
+      "abierto_utc": "2026-11-06T00:52:28.202555Z",
+      "resuelto_utc": "2026-11-06T01:22:19.288900Z",
+      "detectado_utc": "2026-11-06T00:52:52.573322Z",
+      "ultimo_reporte_utc": "2026-11-06T00:51:58.202555Z",
+      "s_silencio_hasta_deteccion": 54.4
+    }
+  ],
+  "alertas": [],
+  "marcas": [
+    {
+      "utc": "2026-11-06T00:52:03Z",
+      "marca": "broker detenido",
+      "s_hasta_incidente": 25.2,
+      "s_hasta_incidente_detectado": 49.6,
+      "s_hasta_lectura": 1816.4,
+      "s_hasta_alerta": null
+    },
+    {
+      "utc": "2026-11-06T01:22:17Z",
+      "marca": "broker arriba",
+      "s_hasta_incidente": null,
+      "s_hasta_incidente_detectado": null,
+      "s_hasta_lectura": 2.4,
+      "s_hasta_alerta": null
+    }
+  ],
+  "falla_commit": null
+}
