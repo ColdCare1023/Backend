@@ -116,6 +116,8 @@ class RandomForestRiesgoService:
         self._modelo = None
         self._metadata: dict | None = None
         self._lock = Lock()
+        # HU-46 esc. 3: hash de la versión activa registrada en base de datos.
+        self._hash_aprobado: str | None = None
 
     def _validar_compatibilidad(self, modelo, metadata: dict | None) -> None:
         """Comprueba, al cargar, que el artefacto declara el checksum, las
@@ -166,10 +168,34 @@ class RandomForestRiesgoService:
                 "se rechaza antes de deserializarlo."
             )
 
+    def hash_artefacto(self) -> str | None:
+        """SHA-256 del archivo desplegado, o None si no existe."""
+        if not self._model_path.exists():
+            return None
+        return hashlib.sha256(self._model_path.read_bytes()).hexdigest()
+
+    def fijar_hash_aprobado(self, model_hash: str | None) -> None:
+        """HU-46/HU-16: fija el hash de la versión activa y fuerza a reverificar
+        el artefacto antes de volver a deserializarlo."""
+        with self._lock:
+            self._hash_aprobado = model_hash
+            self._modelo = None
+            self._metadata = None
+
+    def _validar_hash_aprobado(self) -> None:
+        if self._hash_aprobado is None:
+            return
+        if self.hash_artefacto() != self._hash_aprobado:
+            logger.critical("El artefacto no coincide con la versión activa registrada; no se carga.")
+            raise RuntimeError(
+                "El artefacto del modelo no coincide con el hash de la versión activa aprobada."
+            )
+
     def _cargar_modelo(self):
         if self._modelo is None:
             with self._lock:
                 if self._modelo is None and self._model_path.exists():
+                    self._validar_hash_aprobado()
                     metadata_externa = None
                     if self._metadata_path.exists():
                         metadata_externa = json.loads(self._metadata_path.read_text(encoding="utf-8"))

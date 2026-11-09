@@ -16,3 +16,6 @@ class AccionCorrectiva:
     corrige_accion_id: UUID | None = None
     # HU-28 (P6): motivo obligatorio de una rectificación; None en la original.
     motivo_rectificacion: str | None = None
+    # HU-27: decisión adoptada y justificación; `descripcion` es la acción ejecutada.
+    decision: str | None = None
+    justificacion: str | None = None

@@ -31,7 +31,10 @@ class RegistrarAccionCorrectivaUseCase:
         self._alerta_repository = alerta_repository
         self._registrar_hash = RegistrarHashEncadenadoUseCase(trazabilidad_repository)
 
-    async def execute(self, alert_id: UUID, usuario_id: UUID, descripcion: str) -> AccionCorrectiva:
+    async def execute(
+        self, alert_id: UUID, usuario_id: UUID, descripcion: str,
+        decision: str | None = None, justificacion: str | None = None,
+    ) -> AccionCorrectiva:
         alerta = await self._alerta_repository.obtener_por_id(alert_id)
         if alerta is None:
             raise RecursoNoEncontradoError(f"Alerta {alert_id} no encontrada")
@@ -43,7 +46,10 @@ class RegistrarAccionCorrectivaUseCase:
                 f"La alerta {alert_id} ya no está vigente: otra acción correctiva la atendió primero."
             )
 
-        accion = AccionCorrectiva(alert_id=alert_id, usuario_id=usuario_id, descripcion=descripcion)
+        accion = AccionCorrectiva(
+            alert_id=alert_id, usuario_id=usuario_id, descripcion=descripcion,
+            decision=decision, justificacion=justificacion,
+        )
         accion_creada = await self._accion_repository.agregar(accion)
 
         await self._registrar_hash.execute(
@@ -54,7 +60,9 @@ class RegistrarAccionCorrectivaUseCase:
                 "accion_id": str(accion_creada.id),
                 "alert_id": str(alert_id),
                 "usuario_id": str(usuario_id),
+                "decision": decision,
                 "descripcion": descripcion,
+                "justificacion": justificacion,
             },
             device_id=alerta.device_id,
             usuario_id=usuario_id,

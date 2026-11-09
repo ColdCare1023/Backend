@@ -63,6 +63,7 @@ from src.infrastructure.database.repositories.device_repository import SQLAlchem
 from src.infrastructure.database.repositories.firmware_repository import SQLAlchemyFirmwareRepository
 from src.infrastructure.database.repositories.incidente_repository import SQLAlchemyIncidenteRepository
 from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
+from src.infrastructure.database.repositories.modelo_ia_repository import SQLAlchemyModeloIARepository
 from src.infrastructure.database.repositories.prediccion_preventiva_repository import (
     SQLAlchemyPrediccionPreventivaRepository,
 )
@@ -1254,6 +1255,14 @@ async def _auditar_modelos_rechazados(settings) -> None:
         await session.commit()
 
 
+async def _aplicar_version_activa() -> None:
+    """HU-46 esc. 3: la versión activa de la base decide qué artefacto se acepta."""
+    async with _session_factory() as session:
+        activa = await SQLAlchemyModeloIARepository(session).obtener_activa()
+    if activa is not None:
+        get_random_forest_service().fijar_hash_aprobado(activa.model_hash)
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
@@ -1275,6 +1284,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # resultado queda en /health/detalle.
     app.state.broker_api = await BrokerAdmin(settings).verificar_api()
     if settings.environment != "test":
+        try:
+            await _aplicar_version_activa()
+        except Exception:
+            logger.exception("No se pudo leer la versión activa del modelo.")
         try:
             await _auditar_modelos_rechazados(settings)
         except Exception:  # el arranque no depende de poder auditar

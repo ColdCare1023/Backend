@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.entities.prediccion_preventiva import PrediccionPreventiva
@@ -80,6 +81,7 @@ class PredecirRiesgoPreventivoUseCase:
             lectura.nivel_riesgo = prediccion.clase
             lectura.origen_clasificacion = ORIGEN_MODELO
             lectura.estado_inferencia = ESTADO_COMPLETADA
+            lectura.inferido_en = datetime.now(tz=timezone.utc)
             lectura.motivo_no_inferencia = None
             lectura.modelo_version = prediccion.modelo_version
             lectura.vector_features_ia = prediccion.vector_features

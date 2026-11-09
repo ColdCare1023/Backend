@@ -71,6 +71,7 @@ class IDeviceRepository(ABC):
         numero_certificado: str,
         fecha_proxima: date,
         observaciones: str | None,
+        margen_aviso_dias: int = 30,
     ) -> dict: ...
 
     @abstractmethod

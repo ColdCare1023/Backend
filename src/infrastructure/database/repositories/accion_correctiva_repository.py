@@ -14,6 +14,8 @@ def _to_entity(model: CorrectiveActionModel) -> AccionCorrectiva:
         alert_id=model.alert_id,
         usuario_id=model.usuario_id,
         descripcion=model.descripcion,
+        decision=model.decision,
+        justificacion=model.justificacion,
         created_at=model.created_at,
         corrige_accion_id=model.corrige_accion_id,
         motivo_rectificacion=model.motivo_rectificacion,
@@ -29,6 +31,8 @@ class SQLAlchemyAccionCorrectivaRepository(IAccionCorrectivaRepository):
             alert_id=accion.alert_id,
             usuario_id=accion.usuario_id,
             descripcion=accion.descripcion,
+            decision=accion.decision,
+            justificacion=accion.justificacion,
             corrige_accion_id=accion.corrige_accion_id,
             motivo_rectificacion=accion.motivo_rectificacion,
         )
@@ -47,6 +51,19 @@ class SQLAlchemyAccionCorrectivaRepository(IAccionCorrectivaRepository):
         )
         result = await self._session.execute(stmt)
         return [_to_entity(m) for m in result.scalars().all()]
+
+    async def listar_por_alertas(self, alert_ids: list[UUID]) -> list[AccionCorrectiva]:
+        """HU-38: acciones de varias alertas, en lotes para no exceder los parámetros."""
+        acciones: list[AccionCorrectiva] = []
+        for i in range(0, len(alert_ids), 500):
+            stmt = (
+                select(CorrectiveActionModel)
+                .where(CorrectiveActionModel.alert_id.in_(alert_ids[i:i + 500]))
+                .order_by(CorrectiveActionModel.created_at.asc())
+            )
+            result = await self._session.execute(stmt)
+            acciones.extend(_to_entity(m) for m in result.scalars().all())
+        return acciones
 
     async def obtener_por_id(self, accion_id: UUID) -> AccionCorrectiva | None:
         model = await self._session.get(CorrectiveActionModel, accion_id)

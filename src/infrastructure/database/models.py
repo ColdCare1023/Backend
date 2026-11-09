@@ -73,6 +73,10 @@ class DeviceModel(Base):
     fecha_ultima_calibracion: Mapped[date | None] = mapped_column(Date, nullable=True)
     numero_certificado_calibracion: Mapped[str | None] = mapped_column(String(100), nullable=True)
     fecha_proxima_calibracion: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # HU-30: margen de aviso por equipo, en días antes del vencimiento.
+    margen_aviso_calibracion_dias: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=30, server_default=sa_text("30")
+    )
     observaciones_calibracion: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # HU-44/HU-10: credencial MQTT por dispositivo. Se guarda el HASH del
@@ -281,6 +285,8 @@ class ThermalReadingModel(Base):
     # AIV-07 (fase de corrección): estado real de la inferencia y motivo breve
     # cuando no fue "completada". NULL en registros anteriores a esta migración.
     estado_inferencia: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # HU-22: hora real de la inferencia, distinta de la de captura.
+    inferido_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     motivo_no_inferencia: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # HU-05: identificador lógico generado por el firmware (None en payloads
     # de dispositivos aún no actualizados) y versión del contrato de payload.
@@ -380,6 +386,9 @@ class CorrectiveActionModel(Base):
     alert_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("thermal_alerts.id"), nullable=False)
     usuario_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"), nullable=False)
     descripcion: Mapped[str] = mapped_column(Text, nullable=False)
+    # HU-27: decisión adoptada y justificación; `descripcion` es la acción ejecutada.
+    decision: Mapped[str | None] = mapped_column(Text, nullable=True)
+    justificacion: Mapped[str | None] = mapped_column(Text, nullable=True)
     # HU-28: referencia a la acción que esta rectifica (None si es original).
     corrige_accion_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("corrective_actions.id"), nullable=True

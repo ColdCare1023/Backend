@@ -118,7 +118,7 @@ async def test_registrar_accion_correctiva_sobre_alerta(client, token_tecnico):
 
     response = client.post(
         f"/api/alertas/{alerta['id']}/acciones-correctivas",
-        json={"descripcion": "Se trasladó el medicamento a refrigerador de respaldo."},
+        json={"decision": "Trasladar el lote", "justificacion": "Lectura fuera de rango", "descripcion": "Se trasladó el medicamento a refrigerador de respaldo."},
         headers=auth_header(token_tecnico),
     )
 
@@ -143,7 +143,7 @@ async def test_listar_acciones_correctivas_devuelve_ciclo_cronologico_con_rectif
 
     original = client.post(
         f"/api/alertas/{alerta['id']}/acciones-correctivas",
-        json={"descripcion": "Justificación inicial."},
+        json={"decision": "Trasladar el lote", "justificacion": "Lectura fuera de rango", "descripcion": "Justificación inicial."},
         headers=auth_header(token_tecnico),
     ).json()
 
@@ -179,7 +179,7 @@ async def test_listar_acciones_correctivas_de_alerta_inexistente_devuelve_404(cl
 async def test_accion_correctiva_sobre_alerta_inexistente_devuelve_404(client, token_tecnico):
     response = client.post(
         "/api/alertas/00000000-0000-0000-0000-000000000000/acciones-correctivas",
-        json={"descripcion": "No debería aplicar"},
+        json={"decision": "Trasladar el lote", "justificacion": "Lectura fuera de rango", "descripcion": "No debería aplicar"},
         headers=auth_header(token_tecnico),
     )
     assert response.status_code == 404

@@ -68,6 +68,7 @@ class LecturaTermica:
     # modelo_no_disponible) y motivo breve cuando no fue "completada" — nunca
     # contiene trazas de pila ni secretos, solo un código corto.
     estado_inferencia: str | None = None
+    inferido_en: datetime | None = None
     motivo_no_inferencia: str | None = None
     # HU-05: identificador lógico de la lectura generado por el firmware
     # (None en payloads antiguos sin este campo) y versión del contrato de

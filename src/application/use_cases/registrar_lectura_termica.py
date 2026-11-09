@@ -25,6 +25,7 @@ from src.domain.repositories.i_trazabilidad_repository import ITrazabilidadRepos
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 from src.domain.value_objects.rango_termico import RANGO_TERMICO_BPA
 from src.infrastructure.ai.random_forest_service import (
+    ESTADO_COMPLETADA,
     ESTADO_FALLIDA,
     ORIGEN_REGLA_SALVAGUARDA,
     ResultadoInferencia,
@@ -297,6 +298,10 @@ class RegistrarLecturaTermicaUseCase:
         lectura.confianza_ia = None if clasificacion.confianza is None else round(clasificacion.confianza, 4)
         lectura.origen_clasificacion = clasificacion.origen
         lectura.estado_inferencia = clasificacion.estado_inferencia
+        # HU-22 esc. 2: hora real de la inferencia; solo si hubo modelo.
+        lectura.inferido_en = (
+            datetime.now(tz=timezone.utc) if clasificacion.estado_inferencia == ESTADO_COMPLETADA else None
+        )
         lectura.motivo_no_inferencia = clasificacion.motivo_no_inferencia
         # HU-47: evidencia completa de la inferencia (probabilidad por clase
         # y vector de features), para la vista de auditoría por lectura.
@@ -448,6 +453,12 @@ class RegistrarLecturaTermicaUseCase:
                         "modelo_version": lectura_guardada.modelo_version,
                         "confianza_ia": lectura_guardada.confianza_ia,
                         "episodio_abierto": alerta.episodio_abierto,
+                        # HU-20 esc. 4: transición y proceso que la originó.
+                        "estado_anterior": (
+                            None if alerta.lectura_inicial_id == lectura_guardada.id else alerta.estado.value
+                        ),
+                        "estado_nuevo": alerta.estado.value,
+                        "origen_transicion": "motor_riesgo",
                     },
                     device_id=lectura_guardada.device_id,
                 )
@@ -464,6 +475,9 @@ class RegistrarLecturaTermicaUseCase:
                     "duracion_s": cerrada.duracion_s,
                     "temperatura_pico": cerrada.temperatura_pico,
                     "historica": cerrada.historica,
+                    "estado_anterior": "episodio_abierto",
+                    "estado_nuevo": "episodio_cerrado",
+                    "origen_transicion": "motor_riesgo",
                 },
                 device_id=cerrada.device_id,
             )
