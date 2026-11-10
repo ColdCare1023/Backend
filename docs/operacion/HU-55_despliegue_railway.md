@@ -8,7 +8,7 @@ despliegue y la evidencia se hacen en la cuenta de Railway del equipo.
 
 | Requisito | Dónde |
 |---|---|
-| Imagen con Python 3.13 y `postgresql-client` | `infra-local/backend/Dockerfile` |
+| Imagen con Python 3.12 y `postgresql-client` | `infra-local/backend/Dockerfile` |
 | `alembic upgrade head` antes de arrancar | `railway.json` → `preDeployCommand` |
 | 1 réplica, 1 worker, healthcheck `/health` | `railway.json`, `CMD` del Dockerfile |
 | Sin suspensión por inactividad | `railway.json` → `sleepApplication: false` |
@@ -57,3 +57,17 @@ BACKEND_URL=https://<servicio>.up.railway.app EVIDENCIA_TOKEN=<JWT admin> \
 Sale con 0 solo si: HTTPS, `/health` 200, base de datos ok, migraciones
 aplicadas, MQTT conectado, el proxy entrega `https` y `/docs` no está publicado.
 Adjunte también la captura de *Settings → Deploy* con «Serverless» desactivado.
+
+## Primer administrador (H9)
+
+En una base nueva no hay usuarios y `seed_dev` no puede correr con
+`ENVIRONMENT=production`. Con el servicio ya desplegado y migrado, ejecute una
+sola vez dentro del contenedor (`railway ssh`, o `railway connect` como túnel):
+
+```bash
+python -m scripts.crear_admin
+```
+
+Pide nombre, correo y contraseña (sin eco, con confirmación), aplica la política
+de contraseñas de la API y se niega si ya existe un administrador activo. El
+resto de cuentas (químico farmacéutico, auditor) se crean desde la interfaz.

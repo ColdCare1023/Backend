@@ -12,12 +12,12 @@ on:
 jobs:
   pruebas:
     runs-on: ubuntu-latest
-    # B-7: el contenedor usa 3.13 (Dockerfile) y el lockfile se compila con
-    # 3.13; 3.12 se mantiene mientras haya entornos de desarrollo en esa versión.
+    # B-7: el contenedor usa 3.12 (Dockerfile) y el lockfile se compila con 3.12;
+    # 3.12 es la única versión soportada.
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.13', '3.12']
+        python-version: ['3.12']
     # B-7/B-9: PostgreSQL real para los triggers de solo anexado (BE-007) y la
     # idempotencia/concurrencia de la ingesta (HU-11/HU-22). Con
     # TEST_POSTGRES_URL definida esas pruebas nunca se omiten.
