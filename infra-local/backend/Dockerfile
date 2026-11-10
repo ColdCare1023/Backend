@@ -1,7 +1,7 @@
-# BE-022: imagen base fijada por digest (python:3.13-slim, multi-arquitectura),
+# BE-022: imagen base fijada por digest (python:3.12-slim, multi-arquitectura),
 # no por etiqueta: la etiqueta se mueve y cada build podría usar otra imagen.
 # Para actualizarla, obtener el digest nuevo del índice y revisar el cambio.
-FROM python:3.13-slim@sha256:98ce6fb13b3803744fbca11434f00818f1e300e4e48a4f204e07b2c928b6218e
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 # HU-29: pg_dump/pg_restore para el respaldo programado (scripts.respaldo_postgres)
