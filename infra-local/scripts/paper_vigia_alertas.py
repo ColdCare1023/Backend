@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from paper_corrida import DEVICE, ISO, PG, psql_csv  # noqa: E402
+from paper_corrida import DEVICE, ISO, PG, psql_csv
 
 
 def episodio_abierto(dev: str) -> tuple[str, str, str] | None:
