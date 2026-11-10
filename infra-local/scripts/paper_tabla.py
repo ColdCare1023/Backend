@@ -2,7 +2,7 @@
 
 Lee evidencia/paper/<CASO>_r<rep>_*/resumen.json y escribe:
     evidencia/paper/tabla_resultados.csv   una fila por corrida (todas las cifras)
-    <salida>.md                            tabla por caso (N, media ± DE, mín–máx), lista de
+    <salida>.md                            tabla por caso (N, media ± DE, mín-máx), lista de
                                            corridas y, al final, evidencia/paper/hallazgos.md
 
 Uso (desde infra-local/):
@@ -115,7 +115,9 @@ def puerta(carpeta: Path) -> dict:
         return {}
     filas = sorted(csv.DictReader((carpeta / "lecturas.csv").open(encoding="utf-8")),
                    key=lambda f: f["captured_utc"])
-    racha = lambda f: float(f["puerta_racha_s"] or 0)
+    def racha(f):
+        return float(f["puerta_racha_s"] or 0)
+
     abierta = next((f for f in filas if _t(f["captured_utc"]) >= ap and f["puerta_abierta"] == "t"), None)
     prolong = next((f for f in filas if _t(f["captured_utc"]) >= ap and racha(f) >= 60), None)
     cierre = next((f for f in filas if _t(f["captured_utc"]) >= ci and racha(f) == 0), None)
@@ -146,7 +148,9 @@ def hielo(carpeta: Path) -> dict:
         return {}
     filas = sorted((f for f in csv.DictReader((carpeta / "lecturas.csv").open(encoding="utf-8"))
                     if f["temp_ds18b20"]), key=lambda f: f["captured_utc"])
-    temp = lambda f: float(f["temp_ds18b20"])
+    def temp(f):
+        return float(f["temp_ds18b20"])
+
     estable = [temp(f) for f in filas if 0 <= (sal - _t(f["captured_utc"])).total_seconds() <= 180]
     out: dict = {"hielo_n": len(estable)}
     if estable:
@@ -192,8 +196,8 @@ def main() -> None:
         alertas = ruta.parent / "alertas.csv"
         fila["alertas_en_ventana"] = (max(0, sum(1 for _ in alertas.open(encoding="utf-8")) - 1)
                                       if alertas.exists() and alertas.stat().st_size else 0)
-        fila.update({k: None for k in ("puerta_deteccion_s", "puerta_prolongada_s", "puerta_cierre_s",
-                                       "puerta_error_duracion_s")})
+        fila.update(dict.fromkeys(("puerta_deteccion_s", "puerta_prolongada_s", "puerta_cierre_s",
+                                   "puerta_error_duracion_s")))
         fila.update({k: None for k, _ in METRICAS if k.startswith("hielo_")})
         if fila["caso"] == "S9":
             fila.update(puerta(ruta.parent))

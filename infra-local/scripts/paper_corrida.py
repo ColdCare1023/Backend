@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import csv
 import io
+import itertools
 import json
 import statistics
 import subprocess
@@ -261,7 +262,7 @@ def resumir(carpeta: Path) -> None:
                        "calidad_hora": dict(Counter(f["time_quality"] for f in lecturas if f["boot_id"] == boot))}
 
     # FIFO (S2): recorridas por (boot_id, seq_no), las confirmaciones no retroceden.
-    fuera_de_orden = sum(1 for a, b in zip(lecturas, lecturas[1:]) if b["commit_utc"] < a["commit_utc"])
+    fuera_de_orden = sum(1 for a, b in itertools.pairwise(lecturas) if b["commit_utc"] < a["commit_utc"])
     diferidas = sum(1 for f in lecturas if f["latencia_s"] and float(f["latencia_s"]) > 2 * INTERVALO_S)
 
     # Cortes vistos en los datos (no dependen de las marcas). Cada tramo seguido de diferidos es un
