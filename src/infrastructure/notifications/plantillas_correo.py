@@ -424,7 +424,9 @@ def renderizar(
         "Recibes este mensaje porque eres parte del equipo de ColdCare. "
         "¿Dudas? Responde a este correo o habla con el administrador de tu farmacia."
     )
-    relleno = "&#847;&zwnj;&nbsp;" * 40  # evita que Gmail rellene la vista previa con el cuerpo
+    # Sin relleno de caracteres invisibles tras el preheader: es una técnica de
+    # correo masivo que los filtros de spam penalizan en remitentes nuevos.
+    relleno = ""
     return f"""<!DOCTYPE html>
 {_ATRIBUCION}
 <html lang="es" dir="ltr" xmlns="http://www.w3.org/1999/xhtml">
