@@ -27,6 +27,7 @@ def _to_dict(model: DeviceModel) -> dict:
         "fecha_ultima_calibracion": model.fecha_ultima_calibracion,
         "numero_certificado_calibracion": model.numero_certificado_calibracion,
         "fecha_proxima_calibracion": model.fecha_proxima_calibracion,
+        "margen_aviso_calibracion_dias": model.margen_aviso_calibracion_dias,
         "observaciones_calibracion": model.observaciones_calibracion,
         "mqtt_token_activo": model.mqtt_token_activo,
         "mqtt_credencial_actualizada_en": model.mqtt_credencial_actualizada_en,
@@ -170,6 +171,7 @@ class SQLAlchemyDeviceRepository(IDeviceRepository):
         numero_certificado: str,
         fecha_proxima: date,
         observaciones: str | None,
+        margen_aviso_dias: int = 30,
     ) -> dict:
         model = await self._session.get(DeviceModel, device_id)
         if model is None:
@@ -178,6 +180,7 @@ class SQLAlchemyDeviceRepository(IDeviceRepository):
         model.numero_certificado_calibracion = numero_certificado
         model.fecha_proxima_calibracion = fecha_proxima
         model.observaciones_calibracion = observaciones
+        model.margen_aviso_calibracion_dias = margen_aviso_dias
         await self._session.flush()
         return _to_dict(model)
 

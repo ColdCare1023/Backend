@@ -384,7 +384,7 @@ async def listar_incidentes_operativos(
 async def consultar_estado_calibracion(
     session: DbSessionDep,
     _usuario=Depends(_roles_calibracion),
-    dias_preaviso: int = Query(default=30, ge=1, le=365),
+    dias_preaviso: int | None = Query(default=None, ge=1, le=365),
 ) -> dict:
     """HU-30: dispositivos con certificado vencido o próximo a vencer.
 
@@ -423,6 +423,8 @@ async def registrar_calibracion(
             observaciones=body.observaciones,
             meses_vigencia=body.meses_vigencia,
             usuario_id=usuario.id,
+            fecha_vencimiento=body.fecha_vencimiento,
+            margen_aviso_dias=body.margen_aviso_dias,
         )
     except RecursoNoEncontradoError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

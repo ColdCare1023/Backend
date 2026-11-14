@@ -12,11 +12,15 @@ from src.application.use_cases.verificar_integridad_registro import (
 )
 from src.domain.value_objects.device_id import PATRON_DEVICE_ID
 from src.domain.value_objects.rol import Rol
+from src.infrastructure.database.repositories.accion_correctiva_repository import (
+    SQLAlchemyAccionCorrectivaRepository,
+)
 from src.infrastructure.database.repositories.alerta_repository import SQLAlchemyAlertaRepository
 from src.infrastructure.database.repositories.audit_log_repository import SQLAlchemyAuditLogRepository
 from src.infrastructure.database.repositories.checklist_repository import (
     SQLAlchemyChecklistRepository,
 )
+from src.infrastructure.database.repositories.device_repository import SQLAlchemyDeviceRepository
 from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
 from src.infrastructure.database.repositories.reporte_repository import SQLAlchemyReporteRepository
 from src.infrastructure.database.repositories.trazabilidad_repository import (
@@ -145,6 +149,8 @@ async def exportar_reporte_bpa_pdf(
         SQLAlchemyReporteRepository(session),
         SQLAlchemyChecklistRepository(session),
         verificar_integridad,
+        accion_repository=SQLAlchemyAccionCorrectivaRepository(session),
+        device_repository=SQLAlchemyDeviceRepository(session),
     )
     pdf_bytes = await use_case.execute(
         usuario_id=usuario.id,

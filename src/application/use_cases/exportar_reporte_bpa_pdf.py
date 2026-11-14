@@ -12,8 +12,10 @@ from src.application.use_cases.verificar_integridad_registro import (
     VerificarIntegridadRegistroUseCase,
 )
 from src.domain.entities.lectura_termica import LecturaTermica
+from src.domain.repositories.i_accion_correctiva_repository import IAccionCorrectivaRepository
 from src.domain.repositories.i_alerta_repository import IAlertaRepository
 from src.domain.repositories.i_checklist_repository import IChecklistRepository
+from src.domain.repositories.i_device_repository import IDeviceRepository
 from src.domain.repositories.i_lectura_repository import ILecturaRepository
 from src.domain.repositories.i_reporte_repository import IReporteRepository
 from src.domain.repositories.i_trazabilidad_repository import ITrazabilidadRepository
@@ -23,6 +25,10 @@ from src.infrastructure.pdf.generador_pdf import GeneradorReporteBPAPDF
 # (Manual de BPA, RM N.º 132-2015/MINSA).
 TEMP_MIN_RANGO = 2.0
 TEMP_MAX_RANGO = 8.0
+
+
+def _como_utc(valor: datetime) -> datetime:
+    return valor if valor.tzinfo else valor.replace(tzinfo=timezone.utc)
 
 
 def _riesgo_mostrado(lectura: LecturaTermica) -> str | None:
@@ -86,6 +92,8 @@ class ExportarReporteBPAPDFUseCase:
         checklist_repository: IChecklistRepository,
         verificar_integridad: VerificarIntegridadRegistroUseCase,
         generador: GeneradorReporteBPAPDF | None = None,
+        accion_repository: IAccionCorrectivaRepository | None = None,
+        device_repository: IDeviceRepository | None = None,
     ) -> None:
         self._lectura_repository = lectura_repository
         self._alerta_repository = alerta_repository
@@ -94,6 +102,46 @@ class ExportarReporteBPAPDFUseCase:
         self._checklist_repository = checklist_repository
         self._verificar_integridad = verificar_integridad
         self._generador = generador or GeneradorReporteBPAPDF()
+        self._accion_repository = accion_repository
+        self._device_repository = device_repository
+
+    async def _acciones_de(self, alertas: list) -> list[dict]:
+        if self._accion_repository is None or not alertas:
+            return []
+        por_alerta = {a.id: a for a in alertas}
+        acciones = await self._accion_repository.listar_por_alertas(list(por_alerta))
+        rectificadas = {a.corrige_accion_id for a in acciones if a.corrige_accion_id}
+        return [
+            {
+                "created_at": a.created_at,
+                "device_id": por_alerta[a.alert_id].device_id,
+                "decision": a.decision,
+                "descripcion": a.descripcion,
+                "justificacion": a.justificacion,
+                "motivo_rectificacion": a.motivo_rectificacion,
+                "vigente": a.id not in rectificadas,
+            }
+            for a in acciones
+        ]
+
+    async def _equipos_del_reporte(self, device_id: str | None, desde: datetime, hasta: datetime) -> list[dict]:
+        """HU-51 esc. 4: ubicación vigente y sus cambios durante el periodo."""
+        if self._device_repository is None:
+            return []
+        if device_id:
+            uno = await self._device_repository.obtener(device_id)
+            dispositivos = [uno] if uno else []
+        else:
+            dispositivos = await self._device_repository.listar()
+        equipos = []
+        for d in dispositivos:
+            historial = await self._device_repository.listar_historial_configuracion(d["id"])
+            cambios = [
+                h for h in historial
+                if h["campo"] == "ubicacion" and desde <= _como_utc(h["created_at"]) <= hasta
+            ]
+            equipos.append({**d, "cambios_ubicacion": cambios})
+        return equipos
 
     async def execute(
         self,
@@ -128,6 +176,10 @@ class ExportarReporteBPAPDFUseCase:
         checklists = await self._checklist_repository.listar_por_rango_fechas(
             fecha_desde.date().isoformat(), fecha_hasta.date().isoformat()
         )
+
+        # HU-38 esc. 1: acciones de las alertas del periodo y datos del equipo.
+        acciones = await self._acciones_de(alertas)
+        equipos = await self._equipos_del_reporte(device_id, fecha_desde, fecha_hasta)
 
         # HU-38 criterio 2: cuando el reporte es de un dispositivo concreto,
         # la verificación se acota a SU cadena (HU-25) — un digest específico
@@ -206,6 +258,8 @@ class ExportarReporteBPAPDFUseCase:
                 usuario=usuario_nombre,
                 device_id=device_id,
                 truncamiento=truncamiento,
+                acciones=acciones,
+                equipos=equipos,
             )
         )
 

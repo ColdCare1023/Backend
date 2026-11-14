@@ -72,6 +72,11 @@ class DarDeBajaDispositivoUseCase:
             # anterior para lectura de histórico; inicia su propia cadena hash
             # de lecturas independiente (no se copian ni migran registros).
             await self._device_repository.vincular_reemplazo(device_id_reemplazo, device_id)
+            # HU-49 esc. 1: el reemplazo también consta en el historial de configuración.
+            await self._device_repository.registrar_evento_config(
+                device_id, campo="reemplazado_por", valor_anterior=None,
+                valor_nuevo=device_id_reemplazo, actor_id=None,
+            )
 
         await self._registrar_hash.execute(
             tipo_evento="BAJA_HARDWARE",
@@ -120,8 +125,10 @@ class RegistrarCalibracionUseCase:
         fecha_calibracion: date,
         numero_certificado: str,
         observaciones: str | None,
-        meses_vigencia: int,
+        meses_vigencia: int | None = None,
         usuario_id: UUID | None = None,
+        fecha_vencimiento: date | None = None,
+        margen_aviso_dias: int = 30,
     ) -> dict:
         dispositivo = await self._device_repository.obtener(device_id)
         if dispositivo is None:
@@ -129,10 +136,16 @@ class RegistrarCalibracionUseCase:
         if not dispositivo["activo"]:
             raise DomainError("No se puede calibrar un dispositivo dado de baja")
 
-        fecha_proxima = _sumar_meses(fecha_calibracion, meses_vigencia)
+        # HU-30 esc. 1 y 4: manda la fecha del certificado; no se impone periodicidad.
+        if fecha_vencimiento is not None:
+            fecha_proxima = fecha_vencimiento
+        elif meses_vigencia is not None:
+            fecha_proxima = _sumar_meses(fecha_calibracion, meses_vigencia)
+        else:
+            raise DomainError("Indique la fecha de vencimiento del certificado")
         anterior = dispositivo.get("fecha_ultima_calibracion")
         actualizado = await self._device_repository.registrar_calibracion(
-            device_id, fecha_calibracion, numero_certificado, fecha_proxima, observaciones
+            device_id, fecha_calibracion, numero_certificado, fecha_proxima, observaciones, margen_aviso_dias
         )
         # HU-49: historial de configuración también cubre calibración.
         await self._device_repository.registrar_evento_config(
@@ -151,6 +164,7 @@ class RegistrarCalibracionUseCase:
                 "numero_certificado": numero_certificado,
                 "fecha_proxima_calibracion": fecha_proxima.isoformat(),
                 "meses_vigencia": meses_vigencia,
+                "margen_aviso_dias": margen_aviso_dias,
                 "observaciones": observaciones,
             },
             device_id=device_id,
@@ -166,11 +180,19 @@ class ConsultarEstadoCalibracionUseCase:
     def __init__(self, device_repository: IDeviceRepository) -> None:
         self._device_repository = device_repository
 
-    async def execute(self, hoy: date, dias_preaviso: int = 30) -> dict:
+    async def execute(self, hoy: date, dias_preaviso: int | None = None) -> dict:
         vencidos = await self._device_repository.listar_calibracion_vencida(hoy)
-        proximos = await self._device_repository.listar_calibracion_proxima(
-            hoy, hoy + timedelta(days=dias_preaviso)
-        )
+        if dias_preaviso is not None:
+            proximos = await self._device_repository.listar_calibracion_proxima(
+                hoy, hoy + timedelta(days=dias_preaviso)
+            )
+        else:
+            # HU-30 esc. 2: sin un valor explícito, cada equipo usa su propio margen.
+            candidatos = await self._device_repository.listar_calibracion_proxima(hoy, hoy + timedelta(days=365))
+            proximos = [
+                d for d in candidatos
+                if d["fecha_proxima_calibracion"] <= hoy + timedelta(days=d["margen_aviso_calibracion_dias"])
+            ]
         return {"vencidos": vencidos, "proximos_a_vencer": proximos}
 
 
@@ -327,6 +349,17 @@ class ActualizarUbicacionYMetadatosInstalacionUseCase:
                 valor_nuevo=ubicacion,
                 actor_id=instalado_por,
             )
+        # HU-49 esc. 1: también fecha y observaciones de la instalación.
+        for campo, nuevo in (
+            ("fecha_instalacion", fecha_instalacion.isoformat() if fecha_instalacion else None),
+            ("observaciones_instalacion", observaciones),
+        ):
+            previo = anterior.get(campo)
+            previo = previo.isoformat() if hasattr(previo, "isoformat") else previo
+            if previo != nuevo:
+                await self._device_repository.registrar_evento_config(
+                    device_id, campo=campo, valor_anterior=previo, valor_nuevo=nuevo, actor_id=instalado_por
+                )
 
         await self._registrar_hash.execute(
             tipo_evento="INSTALACION_DISPOSITIVO_ACTUALIZADA",
