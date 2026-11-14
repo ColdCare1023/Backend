@@ -541,6 +541,8 @@ async def _procesar_evento_v1(
                 ip_origen=None,
                 device_id=evento.device_id,
             )
+            if evento.event_type == "arranque":
+                await _registrar_version_arranque(device_repository, evento)
         # IOT-004: el resultado de un despliegue OTA lo informa el propio nodo.
         await RegistrarResultadoOtaUseCase(
             device_repository,
@@ -552,6 +554,21 @@ async def _procesar_evento_v1(
     await broadcaster.publicar(sse, evento.event_type)
     if cambio is not None:
         await broadcaster.publicar(cambio.como_evento_sse(), "conectividad")
+
+
+async def _registrar_version_arranque(device_repository, evento: contrato_v1.EventoV1) -> None:
+    """La versión que corre el nodo llega en cada `arranque`. Es la única vía
+    para un firmware grabado por USB, que no emite eventos de OTA: sin ella la
+    ficha conservaría el valor por defecto de la columna."""
+    version = (evento.detail or {}).get("firmware_version")
+    if not isinstance(version, str) or not version:
+        return
+    try:
+        normalizada = normalizar_version(version)
+    except DomainError:
+        logger.warning("firmware_version ilegible en el arranque de %s", evento.device_id)
+        return
+    await device_repository.actualizar_firmware_version(evento.device_id, normalizada)
 
 
 async def _registrar_estado_nodo(evento: contrato_v1.EventoV1) -> bool:
