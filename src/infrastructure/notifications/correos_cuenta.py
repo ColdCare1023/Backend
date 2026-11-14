@@ -5,7 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
-from src.infrastructure.notifications.plantillas_correo import Boton, renderizar, url_logo
+from src.infrastructure.notifications.plantillas_correo import (
+    Boton,
+    con_codigo_en_fragmento,
+    renderizar,
+    url_copiar_codigo,
+    url_logo,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,7 +93,12 @@ def correo_recuperar_password(nombre: str, enlace: str, minutos: int, *, logo_ur
 # ── Códigos de verificación de un solo uso ────────────────────────────────
 #
 # El código nunca va en el asunto ni en el preheader: ambos se ven en la
-# notificación del teléfono bloqueado.
+# notificación del teléfono bloqueado. El HTML lleva además el botón «Copiar
+# código» (ver `plantillas_correo.url_copiar_codigo`): el código viaja en el
+# fragmento del enlace (#), que el navegador no envía al servidor. En la
+# recuperación y la activación, el botón de la pantalla lleva `#codigo=…` para
+# que la pantalla lo rellene sola (`plantillas_correo.con_codigo_en_fragmento`);
+# la dirección que se muestra en texto y la del texto plano van sin él.
 
 
 def _vigencia(minutos: int) -> str:
@@ -103,8 +114,11 @@ def enlace_codigo(url_codigo: str, email: str, modo: str) -> str:
     return f"{url_codigo}?{urlencode({'email': email, 'modo': modo})}"
 
 
-def correo_codigo_login(nombre: str, codigo: str, minutos: int, *, logo_url: str | None = None) -> CorreoComposto:
-    """Segundo factor del inicio de sesión con contraseña. `logo_url`: ver `plantillas_correo.url_logo`."""
+def correo_codigo_login(
+    nombre: str, codigo: str, minutos: int, *, logo_url: str | None = None, base_frontend: str | None = None
+) -> CorreoComposto:
+    """Segundo factor del inicio de sesión con contraseña. `logo_url`: ver `plantillas_correo.url_logo`.
+    `base_frontend`: origen del frontend (Settings.base_frontend) para el botón «Copiar código»."""
     asunto = "Tu código de acceso a ColdCare"
     vigencia = _vigencia(minutos)
     cuerpo = (
@@ -118,7 +132,7 @@ def correo_codigo_login(nombre: str, codigo: str, minutos: int, *, logo_url: str
     )
     html = renderizar(
         asunto=asunto,
-        logo_url=logo_url,
+        logo_url=logo_url or url_logo(base_frontend),
         preheader=f"Tu código para entrar a ColdCare vence en {vigencia}.",
         tono="marca",
         etiqueta="Verificación de acceso",
@@ -129,6 +143,7 @@ def correo_codigo_login(nombre: str, codigo: str, minutos: int, *, logo_url: str
         ],
         codigo=codigo,
         codigo_vigencia=f"Vence en {vigencia} · funciona una sola vez",
+        codigo_copiar_url=url_copiar_codigo(base_frontend, codigo),
         nota="¿No fuiste tú? Alguien conoce tu contraseña. No compartas este código con nadie (ColdCare nunca "
         "te lo pedirá), cambia tu contraseña y avisa al administrador.",
     )
@@ -144,12 +159,14 @@ def correo_codigo_recuperacion(
     minutos_enlace: int | None = None,
     *,
     logo_url: str | None = None,
+    base_frontend: str | None = None,
 ) -> CorreoComposto:
     """«Olvidé mi contraseña»: código de un solo uso para elegir una contraseña
     nueva. El botón del HTML lleva a la pantalla donde se escribe el código
     (como en la activación). Si se pasa `enlace_legado`, el enlace de un solo uso
     de la versión anterior (sigue funcionando) va solo en el texto plano: en el
-    HTML el código es la única vigencia que se lee primero."""
+    HTML el código es la única vigencia que se lee primero. `base_frontend` (por
+    defecto, el origen de `enlace_pagina`) es el del botón «Copiar código»."""
     asunto = "Restablece tu contraseña de ColdCare"
     vigencia = _vigencia(minutos)
     lineas = [
@@ -183,7 +200,8 @@ def correo_codigo_recuperacion(
         ],
         codigo=codigo,
         codigo_vigencia=f"Vence en {vigencia} · funciona una sola vez",
-        boton=Boton("Escribir el código", enlace_pagina),
+        codigo_copiar_url=url_copiar_codigo(base_frontend or enlace_pagina, codigo),
+        boton=Boton("Escribir el código", con_codigo_en_fragmento(enlace_pagina, codigo), respaldo=enlace_pagina),
         nota="¿No lo solicitaste? Ignora este mensaje: tu contraseña no cambia y nadie puede usar el código sin "
         "acceso a tu correo. Si te preocupa tu cuenta, avisa al administrador.",
     )
@@ -199,10 +217,13 @@ def correo_activacion_cuenta(
     frontend_url: str = "",
     *,
     logo_url: str | None = None,
+    base_frontend: str | None = None,
 ) -> CorreoComposto:
     """Bienvenida de una cuenta creada por un administrador: explica cómo
     elegir la contraseña con el código de activación. Nunca lleva una contraseña ni filas
-    tipo «Usuario: …»: el correo de acceso va dentro de una frase."""
+    tipo «Usuario: …»: el correo de acceso va dentro de una frase. El botón
+    «Copiar código» usa `base_frontend`, o el origen de `frontend_url` o de
+    `enlace_activacion`."""
     asunto = "Activa tu cuenta de ColdCare"
     vigencia = _vigencia(horas * 60)
     inicio = frontend_url.rstrip("/") if frontend_url else ""
@@ -241,7 +262,9 @@ def correo_activacion_cuenta(
         ],
         codigo=codigo,
         codigo_vigencia=f"Vence en {vigencia} · funciona una sola vez",
-        boton=Boton("Activar mi cuenta", enlace_activacion),
+        codigo_copiar_url=url_copiar_codigo(base_frontend or inicio or enlace_activacion, codigo),
+        codigo_rotulo="Tu código de activación",
+        boton=Boton("Activar mi cuenta", con_codigo_en_fragmento(enlace_activacion, codigo), respaldo=enlace_activacion),
         nota="¿No esperabas este mensaje? Avisa al administrador: alguien pudo escribir tu correo por error. "
         "No compartas este código: ColdCare nunca te lo pedirá.",
     )

@@ -225,7 +225,7 @@ async def login(
         _limitar_emision_codigo_login(request, cuenta)
         try:
             desafio = await IniciarLoginConCodigoUseCase(
-                servicio_codigos(session, settings), url_logo(settings.base_frontend)
+                servicio_codigos(session, settings), url_logo(settings.base_frontend), settings.base_frontend
             ).execute(usuario, ip)
         except CodigosBloqueadosError as exc:
             raise _429_codigos_bloqueados(exc) from exc
@@ -350,7 +350,10 @@ async def reenviar_codigo_login(
     if not enviador.configurado:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=_CORREO_NO_DISPONIBLE)
     use_case = ReenviarCodigoLoginUseCase(
-        servicio_codigos(session, settings), SQLAlchemyUsuarioRepository(session), url_logo(settings.base_frontend)
+        servicio_codigos(session, settings),
+        SQLAlchemyUsuarioRepository(session),
+        url_logo(settings.base_frontend),
+        settings.base_frontend,
     )
     try:
         registro, usuario = await use_case.localizar(body.desafio)
