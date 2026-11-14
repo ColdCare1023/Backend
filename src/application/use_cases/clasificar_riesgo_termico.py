@@ -63,7 +63,13 @@ class ClasificarRiesgoTermicoUseCase:
         clasificó cada registro histórico)."""
         if self._modo_legado == "desactivado":
             return None
-        metadata = self._ai_service.metadata
+        try:
+            metadata = self._ai_service.metadata
+        except Exception:
+            # Artefacto rechazado al cargar (checksum o compatibilidad): no hay
+            # versión que registrar. La lectura sigue su curso con la regla
+            # directa; el rechazo ya se audita al arrancar.
+            return None
         return metadata.get("model_version") if metadata else None
 
     def _construir_features(

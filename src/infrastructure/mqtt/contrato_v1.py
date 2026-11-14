@@ -175,7 +175,6 @@ def a_lectura_interna(t: TelemetriaV1, recibido: datetime) -> dict:
     arranque (ver `SQLAlchemyLecturaRepository.reanclar_no_sincronizadas`).
     """
     ds_ok = t.ds18b20_status == "OK"
-    sht_ok = t.sht31_status == "OK"
     return {
         "device_id": t.device_id,
         "timestamp": t.captured_at or recibido,
@@ -188,9 +187,11 @@ def a_lectura_interna(t: TelemetriaV1, recibido: datetime) -> dict:
         "temperatura_interna": t.temp_ds18b20,
         "estado_temperatura_interna": "ok" if ds_ok else "sensor_error",
         "temperatura_ambiental": t.temp_sht31,
-        "estado_temperatura_ambiental": "ok" if sht_ok else "sensor_error",
+        # El estado es por magnitud: el SHT31 puede fallar solo en humedad (o
+        # solo en temperatura) y la otra sigue siendo una medición válida.
+        "estado_temperatura_ambiental": "ok" if t.temp_sht31 is not None else "sensor_error",
         "humedad_ambiental": t.humedad_sht31,
-        "estado_humedad_ambiental": "ok" if sht_ok else "sensor_error",
+        "estado_humedad_ambiental": "ok" if t.humedad_sht31 is not None else "sensor_error",
         "apertura_refrigerador": t.door_open,
         "mc38_status": "ok" if t.mc38_status == "installed" else "not_installed",
         "duracion_apertura_segundos": t.door_open_s or 0,
