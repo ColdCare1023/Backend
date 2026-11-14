@@ -5,9 +5,17 @@ el entorno desplegado (docs/operacion/HU-29_respaldo_y_restauracion.md)."""
 import logging
 from datetime import datetime, timezone
 
+import pytest
+
 from scripts import respaldo_postgres
 from src.infrastructure.database.models import AuditLogModel, DeviceModel, ThermalReadingModel
-from src.infrastructure.respaldo.huellas import comparar_huellas, huellas_evidencia
+from src.infrastructure.respaldo.huellas import (
+    TABLAS_EVIDENCIA,
+    TABLAS_EVIDENCIA_LEGADO,
+    columnas_de_manifiesto,
+    comparar_huellas,
+    huellas_evidencia,
+)
 
 
 async def _poblar(session_factory, temperatura: float = 5.0) -> None:
@@ -66,3 +74,48 @@ def test_la_url_asyncpg_se_traduce_para_pg_dump():
     assert respaldo_postgres.url_libpq("postgresql+asyncpg://u:p@h:5432/db?ssl=require") == (
         "postgresql://u:p@h:5432/db?sslmode=require"
     )
+
+
+async def test_la_huella_de_la_bitacora_incluye_el_resultado(db_session_factory):
+    """HU-42/HU-29 (P2 de la re-auditoría): `audit_logs.resultado` es evidencia;
+    una restauración que lo altere no puede dar una huella idéntica."""
+    await _poblar(db_session_factory)
+    async with db_session_factory() as session:
+        antes = await huellas_evidencia(session)
+        await session.execute(AuditLogModel.__table__.update().values(resultado="denegado"))
+        await session.commit()
+        despues = await huellas_evidencia(session)
+
+    assert "resultado" in TABLAS_EVIDENCIA["audit_logs"]
+    resultado = comparar_huellas(antes, despues)
+    assert resultado["coincide"] is False
+    assert resultado["tablas"]["audit_logs"]["coincide_huella"] is False
+    assert resultado["tablas"]["thermal_readings"]["coincide_huella"] is True
+
+
+async def test_un_manifiesto_anterior_se_verifica_con_sus_columnas(db_session_factory):
+    """Un manifiesto generado antes de declarar `columnas` se calculó sin
+    `resultado`: verificarlo con las columnas actuales fallaría aunque la
+    restauración fuera exacta."""
+    await _poblar(db_session_factory)
+    async with db_session_factory() as session:
+        legado = await huellas_evidencia(session, TABLAS_EVIDENCIA_LEGADO)
+        actual = await huellas_evidencia(session)
+        manifiesto_antiguo = {"huellas": legado}
+        manifiesto_nuevo = {
+            "huellas": actual, "columnas": {t: list(c) for t, c in TABLAS_EVIDENCIA.items()},
+        }
+        restaurada_antigua = await huellas_evidencia(session, columnas_de_manifiesto(manifiesto_antiguo))
+        restaurada_nueva = await huellas_evidencia(session, columnas_de_manifiesto(manifiesto_nuevo))
+
+    assert legado["audit_logs"]["sha256"] != actual["audit_logs"]["sha256"]
+    assert comparar_huellas(manifiesto_antiguo["huellas"], restaurada_antigua)["coincide"] is True
+    assert comparar_huellas(manifiesto_nuevo["huellas"], restaurada_nueva)["coincide"] is True
+
+
+async def test_columnas_desconocidas_en_un_manifiesto_se_rechazan(db_session_factory):
+    async with db_session_factory() as session:
+        with pytest.raises(ValueError):
+            await huellas_evidencia(session, {"audit_logs": ("id", "1; DROP TABLE audit_logs")})
+        with pytest.raises(ValueError):
+            await huellas_evidencia(session, {"users": ("id",)})

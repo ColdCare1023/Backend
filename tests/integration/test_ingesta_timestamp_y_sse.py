@@ -131,6 +131,38 @@ def test_lectura_rechazada_no_se_persiste_ni_encadena(client, token_tecnico, tok
     assert not any(r.get("device_id") == "ESP32-TS-01" for r in registros)
 
 
+def test_rechazo_por_timestamp_se_encadena_en_la_cadena_de_sistema(client, token_tecnico, token_admin):
+    """HU-42 esc. 2 (P2 de la re-auditoría): el rechazo queda bajo el hash
+    como eslabón AUDIT_LOG de la cadena de sistema, con el autor de la lectura
+    manual; la cadena del dispositivo no recibe nada (la lectura no existe)."""
+    respuesta = client.post(
+        "/api/lecturas",
+        json=_payload(AHORA + timedelta(hours=6)),
+        headers=auth_header(token_tecnico),
+    )
+    assert respuesta.status_code == 422
+
+    eslabones = client.get(
+        "/api/trazabilidad", params={"tipo_evento": "AUDIT_LOG", "limite": 1000}, headers=auth_header(token_admin)
+    ).json()
+    rechazos = [e for e in eslabones if e["payload"].get("accion") == "LECTURA_RECHAZADA_TIMESTAMP"]
+    assert len(rechazos) == 1
+    eslabon = rechazos[0]
+    assert eslabon["device_id"] is None
+    assert eslabon["payload"]["resultado"] == "fallido"
+    assert eslabon["payload"]["detalle"]["motivo"] == "timestamp_futuro"
+    tecnico = next(
+        u["id"] for u in client.get("/api/usuarios", headers=auth_header(token_admin)).json()
+        if u["email"] == "tecnico@farmacia.example.org"
+    )
+    assert eslabon["payload"]["usuario_id"] == tecnico
+    [fila] = [
+        e for e in client.get("/api/auditoria", headers=auth_header(token_admin)).json()
+        if e["accion"] == "LECTURA_RECHAZADA_TIMESTAMP"
+    ]
+    assert fila["usuario_id"] == tecnico
+
+
 def test_api_acepta_lectura_reciente(client, token_tecnico):
     respuesta = client.post(
         "/api/lecturas",

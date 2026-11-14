@@ -351,6 +351,17 @@ class GeneradorReporteBPAPDF:
                     e["nota"],
                 ),
             ]
+        sin_hora = est.get("lecturas_sin_hora") or 0
+        if sin_hora:
+            # HU-38/HU-31: el periodo se mide con la hora de captura, igual que la curva.
+            bloques += [
+                Spacer(1, 4),
+                Paragraph(
+                    f"{sin_hora} lectura(s) del período llegaron sin hora de captura (el nodo aún no había "
+                    "sincronizado su reloj) y no se incluyen en estas cifras.",
+                    e["nota"],
+                ),
+            ]
         return bloques
 
     def _seccion_integridad(self, veredicto: dict) -> list:
@@ -393,13 +404,13 @@ class GeneradorReporteBPAPDF:
             detalle = (
                 f"<b>{veredicto.get('total_no_verificables', 0)}</b> eslabón(es) HMAC-SHA256 (v3) no se pudieron "
                 "verificar porque la clave de trazabilidad no estaba disponible. El resultado no se informa como "
-                "íntegro ni como alterado (HU-26).<br/>" + referencia
+                "íntegro ni como alterado.<br/>" + referencia
             )
         elif estado == "ruptura_aislada":
             titulo = "◐ Cadena con ruptura aislada"
             detalle = (
                 f"La cadena registra <b>{veredicto.get('total_rupturas', 0)}</b> alteración(es) histórica(s), "
-                "todas aisladas por un administrador (HU-26). Los registros alterados no son verificables; "
+                "todas aisladas por un administrador. Los registros alterados no son verificables; "
                 f"la cadena vuelve a ser verificable desde <b>{_texto(veredicto.get('integra_desde'))}</b>.<br/>"
                 + referencia
             )
@@ -410,7 +421,7 @@ class GeneradorReporteBPAPDF:
                 f"La verificación detectó una inconsistencia en la posición <b>{_texto(posicion)}</b> de la cadena, "
                 f"con <b>{veredicto.get('registros_posteriores_afectados', 0)}</b> registros posteriores afectados. "
                 "El contenido de este reporte debe considerarse NO verificable hasta que un administrador "
-                "aísle el registro corrupto y restaure la cadena (HU-26).<br/>" + referencia
+                "aísle el registro corrupto y restaure la cadena.<br/>" + referencia
             )
 
         contenido = [
@@ -424,7 +435,7 @@ class GeneradorReporteBPAPDF:
             contenido.append(
                 [
                     Paragraph(
-                        f"Última verificación por dispositivo y periodo (HU-37): <b>{_texto(ultima.get('resultado'))}</b>"
+                        f"Última verificación por dispositivo y periodo: <b>{_texto(ultima.get('resultado'))}</b>"
                         f", realizada el {_texto(ultima.get('realizada_en'))} sobre "
                         f"{_texto(ultima.get('device_id'))} del {_texto(ultima.get('desde'))} al "
                         f"{_texto(ultima.get('hasta'))} ({_texto(ultima.get('total_bloques_verificados'))} bloques). "
@@ -437,7 +448,7 @@ class GeneradorReporteBPAPDF:
             contenido.append(
                 [
                     Paragraph(
-                        "No consta una verificación por dispositivo y periodo (HU-37) que cubra este período.",
+                        "No consta una verificación por dispositivo y periodo que cubra este período.",
                         e["nota"],
                     )
                 ]

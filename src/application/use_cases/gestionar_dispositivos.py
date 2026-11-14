@@ -20,6 +20,8 @@ def _contacto_minimizado(email: str | None, telefono: str | None) -> str:
     return f"{correo} / {fono}"
 
 _MOTIVOS_BAJA = frozenset({"falla_hardware", "mantenimiento", "reemplazo", "fin_de_servicio"})
+# HU-49: origen de las filas del historial que registran la configuración inicial.
+ORIGEN_ALTA = "alta"
 
 class DarDeBajaDispositivoUseCase:
     """HU-43: retira un ESP32/sensor de operación sin corromper la trazabilidad
@@ -314,6 +316,23 @@ class RegistrarAltaDispositivoUseCase:
 
         creado = await self._device_repository.crear(
             device_id, nombre, ubicacion, sensores_habilitados, admin_id, es_demo=es_demo
+        )
+        # HU-49 esc. 1 y 2: la configuración INICIAL también consta en el
+        # historial, para saber desde cuándo rige. Sin estas filas, la ubicación
+        # y los sensores del alta solo se deducían del valor anterior del primer
+        # cambio, y los sensores (que ningún endpoint modifica) no constaban.
+        # El origen «(alta)» los distingue de una modificación posterior.
+        if ubicacion is not None:
+            await self._device_repository.registrar_evento_config(
+                device_id, campo=f"ubicacion ({ORIGEN_ALTA})", valor_anterior=None, valor_nuevo=ubicacion,
+                actor_id=admin_id,
+            )
+        await self._device_repository.registrar_evento_config(
+            device_id,
+            campo=f"sensores_habilitados ({ORIGEN_ALTA})",
+            valor_anterior=None,
+            valor_nuevo=", ".join(sensores_habilitados) if sensores_habilitados else "ninguno",
+            actor_id=admin_id,
         )
 
         await self._registrar_hash.execute(

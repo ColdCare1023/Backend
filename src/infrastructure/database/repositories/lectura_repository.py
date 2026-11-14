@@ -98,9 +98,26 @@ def _to_entity(model: ThermalReadingModel) -> LecturaTermica:
     )
 
 
+def _retraso_llegada_por_defecto() -> timedelta:
+    """Mayor demora admitida entre la captura y la llegada al backend: la
+    antigüedad máxima de HU-07 (LECTURA_ANTIGUEDAD_MAX_HORAS). Una lectura del
+    nodo más vieja que eso al llegar se rechaza, así que ninguna fila con hora
+    de captura dentro de un periodo pudo LLEGAR más tarde que `hasta` + ese
+    margen."""
+    from src.infrastructure.config import Settings, get_settings
+
+    try:
+        horas = get_settings().lectura_antiguedad_max_horas
+    except Exception:  # configuración incompleta (scripts, pruebas aisladas)
+        horas = Settings.model_fields["lectura_antiguedad_max_horas"].default
+    return timedelta(hours=horas)
+
+
 class SQLAlchemyLecturaRepository(ILecturaRepository):
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, retraso_llegada_maximo: timedelta | None = None) -> None:
         self._session = session
+        # HU-31: cota superior de `timestamp` en los filtros por hora de captura.
+        self._retraso_llegada_maximo = retraso_llegada_maximo
 
     async def _asegurar_device(self, device_id: str) -> None:
         existente = await self._session.get(DeviceModel, device_id)
@@ -334,15 +351,14 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
         minimo_celsius: float,
         maximo_celsius: float,
     ) -> dict:
-        """HU-38: agregados SQL sobre el periodo completo, con los mismos
-        filtros que `listar` (por `timestamp` de captura) pero sin su tope."""
-        filtros = []
-        if device_id:
-            filtros.append(ThermalReadingModel.device_id == device_id)
-        if desde:
-            filtros.append(ThermalReadingModel.timestamp >= desde)
-        if hasta:
-            filtros.append(ThermalReadingModel.timestamp <= hasta)
+        """HU-38: agregados SQL sobre el periodo completo, sin el tope del
+        detalle. El periodo se mide con la HORA DE CAPTURA, el mismo criterio
+        que la serie (HU-31): `timestamp_estimado` si el backend la reconstruyó,
+        `timestamp` si no. Las lecturas `unsynced` sin reanclar no tienen hora
+        de captura (su `timestamp` es la llegada): no entran en las cifras y se
+        cuentan aparte en `lecturas_sin_hora`. Las manuales sí cuentan: su hora
+        es la que declaró la persona."""
+        en_periodo = self._filtro_captura(device_id, desde, hasta)
         temperatura = ThermalReadingModel.temperatura_interna
         en_rango = func.coalesce(
             func.sum(case((and_(temperatura >= minimo_celsius, temperatura <= maximo_celsius), 1), else_=0)), 0
@@ -356,7 +372,7 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
                     func.min(temperatura),
                     func.max(temperatura),
                     func.avg(temperatura),
-                ).where(*filtros)
+                ).where(*en_periodo, _CON_HORA)
             )
         ).one()
         # Mismo criterio que el detalle: riesgo efectivo, o la clase del modelo
@@ -364,10 +380,16 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
         nivel = func.coalesce(
             ThermalReadingModel.riesgo_efectivo, ThermalReadingModel.nivel_riesgo, "sin_clasificar"
         )
-        consulta_niveles = select(nivel, func.count(ThermalReadingModel.id)).where(*filtros).group_by(nivel)
+        consulta_niveles = (
+            select(nivel, func.count(ThermalReadingModel.id)).where(*en_periodo, _CON_HORA).group_by(nivel)
+        )
         por_nivel = {
             str(clave): int(cantidad) for clave, cantidad in (await self._session.execute(consulta_niveles)).all()
         }
+        # Sin hora de captura: `_HORA_CAPTURA` es su `timestamp` (la llegada).
+        sin_hora = (
+            await self._session.execute(select(func.count(ThermalReadingModel.id)).where(*en_periodo, _SIN_HORA))
+        ).scalar_one()
         return {
             "total_lecturas": int(total),
             "lecturas_con_temperatura": int(con_temperatura),
@@ -376,6 +398,7 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
             "temp_maxima": maxima,
             "temp_promedio": float(promedio) if promedio is not None else None,
             "por_nivel": por_nivel,
+            "lecturas_sin_hora": int(sin_hora or 0),
         }
 
     # ── HU-31 / HU-36: serie agregada ─────────────────────────────────────
@@ -400,17 +423,33 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
             return cast(func.floor(epoca / bucket_segundos), BigInteger)
         return epoca // bucket_segundos
 
+    def _retraso_llegada(self) -> timedelta:
+        if self._retraso_llegada_maximo is None:
+            self._retraso_llegada_maximo = _retraso_llegada_por_defecto()
+        return self._retraso_llegada_maximo
+
+    def _filtro_captura(self, device_id: str | None, desde: datetime | None, hasta: datetime | None) -> list:
+        """Filtro por hora de captura con ambas cotas sobre `timestamp`, que
+        usan el índice (device_id, timestamp):
+
+        - `timestamp >= desde`: la hora reconstruida nunca es posterior a la de
+          llegada (`timestamp` de una `unsynced`).
+        - `timestamp <= hasta + retraso`: una lectura capturada dentro del
+          periodo llega, como mucho, la antigüedad máxima de HU-07 después
+          (`LECTURA_ANTIGUEDAD_MAX_HORAS`, 168 h). Sin esta cota, la serie de
+          un periodo antiguo recorría todas las filas hasta hoy (HU-31).
+        """
+        filtros = []
+        if device_id:
+            filtros.append(_T.device_id == device_id)
+        if desde:
+            filtros += [_T.timestamp >= desde, _HORA_CAPTURA >= desde]
+        if hasta:
+            filtros += [_T.timestamp <= hasta + self._retraso_llegada(), _HORA_CAPTURA <= hasta]
+        return filtros
+
     def _en_periodo(self, device_id: str, desde: datetime, hasta: datetime) -> list:
-        """Filtro por hora de captura. La hora reconstruida nunca es posterior
-        a la de llegada (`timestamp` de una `unsynced`), así que
-        `timestamp >= desde` es una condición necesaria que sí usa el índice
-        (device_id, timestamp)."""
-        return [
-            _T.device_id == device_id,
-            _T.timestamp >= desde,
-            _HORA_CAPTURA >= desde,
-            _HORA_CAPTURA <= hasta,
-        ]
+        return self._filtro_captura(device_id, desde, hasta)
 
     async def contar(
         self,

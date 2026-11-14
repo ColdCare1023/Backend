@@ -92,6 +92,8 @@ def _estadisticas_de_agregados(agregados: dict) -> dict:
         "temp_minima": agregados["temp_minima"],
         "temp_maxima": agregados["temp_maxima"],
         "temp_promedio": agregados["temp_promedio"],
+        # Lecturas `unsynced` sin reanclar: sin hora de captura, fuera de las cifras.
+        "lecturas_sin_hora": agregados.get("lecturas_sin_hora", 0),
         "fuente": "periodo_completo",
     }
 

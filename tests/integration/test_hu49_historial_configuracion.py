@@ -91,6 +91,31 @@ def test_esc1_cada_tipo_de_cambio_con_actor(client, token_admin, token_auditor, 
     assert all(f["categoria"] == "responsable" for f in por_campo["responsable_nombre"])
 
 
+def test_esc1_el_alta_registra_la_configuracion_inicial(client, token_admin, token_auditor):
+    """P2 (re-auditoría): la ubicación y los sensores del alta constan en el
+    historial con su actor; ningún endpoint posterior cambia los sensores, así
+    que sin esta fila no había desde cuándo rigen."""
+    _alta(client, token_admin)
+    sin_ubicacion = client.post(
+        "/api/dispositivos", json={"device_id": NUEVO, "sensores_habilitados": []}, headers=auth_header(token_admin)
+    )
+    assert sin_ubicacion.status_code == 201, sin_ubicacion.text
+    admin_id = _admin_id(client, token_admin)
+
+    filas = {f["campo"]: f for f in _historial(client, token_auditor)}
+    assert set(filas) == {"ubicacion (alta)", "sensores_habilitados (alta)"}
+    sensores = filas["sensores_habilitados (alta)"]
+    assert (sensores["valor_anterior"], sensores["valor_nuevo"]) == (None, "ds18b20")
+    assert sensores["campo_base"] == "sensores_habilitados" and sensores["categoria"] == "sensores"
+    assert sensores["origen"] == "alta" and sensores["actor_id"] == admin_id
+    assert sensores["vigente_hasta"] is None
+    assert filas["ubicacion (alta)"]["valor_nuevo"] == "Estante 1"
+    assert filas["ubicacion (alta)"]["categoria"] == "instalacion"
+    # Sin ubicación declarada no se inventa una fila; los sensores sí constan.
+    del_nuevo = _historial(client, token_auditor, NUEVO)
+    assert [(f["campo"], f["valor_nuevo"]) for f in del_nuevo] == [("sensores_habilitados (alta)", "ninguno")]
+
+
 def test_esc1_la_baja_queda_encadenada_con_su_actor(client, token_admin, token_auditor):
     _alta(client, token_admin)
     client.post(f"/api/dispositivos/{DEVICE}/baja", json={"motivo": "falla_hardware"}, headers=auth_header(token_admin))
@@ -113,11 +138,14 @@ def test_esc2_desde_cuando_estuvo_vigente_cada_cambio(client, token_admin, token
 
     ubicaciones = _historial(client, token_auditor, campo="ubicacion")
 
-    assert [f["valor_nuevo"] for f in ubicaciones] == ["Estante 3", "Estante 2"]
-    actual, previa = ubicaciones
+    # La ubicación del alta también consta, con su origen (desde cuándo rige).
+    assert [f["valor_nuevo"] for f in ubicaciones] == ["Estante 3", "Estante 2", "Estante 1"]
+    actual, previa, inicial = ubicaciones
     assert actual["vigente_hasta"] is None  # sigue vigente
     assert previa["vigente_desde"] == previa["created_at"]
     assert previa["vigente_hasta"] == actual["vigente_desde"]
+    assert inicial["origen"] == "alta" and inicial["valor_anterior"] is None
+    assert inicial["vigente_hasta"] == previa["vigente_desde"]
     # Filtros por categoría y periodo.
     assert {f["categoria"] for f in _historial(client, token_auditor, categoria="intervalo")} == {"intervalo"}
     futuro = (datetime.now(tz=timezone.utc) + timedelta(days=1)).isoformat()

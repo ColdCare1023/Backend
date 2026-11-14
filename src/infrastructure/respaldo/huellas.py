@@ -26,6 +26,17 @@ TABLAS_EVIDENCIA: dict[str, tuple[str, ...]] = {
         "riesgo_efectivo", "excursion_confirmada", "origen",
     ),
     "traceability_records": ("id", "tipo_evento", "device_id", "chain_id", "previous_hash", "hash_actual"),
+    # HU-42: `resultado` (exitoso/fallido/denegado/bloqueado, migración 0039)
+    # es parte de la evidencia de la bitácora: una restauración que lo pierda
+    # o lo altere debe notarse.
+    "audit_logs": ("id", "usuario_id", "accion", "recurso", "detalle", "resultado", "created_at"),
+}
+# Columnas con las que se calcularon las huellas de los manifiestos generados
+# antes de que el manifiesto declarara las suyas (`columnas`): sin `resultado`.
+# La verificación de un respaldo antiguo usa estas, o la comparación fallaría
+# aunque la restauración fuera exacta.
+TABLAS_EVIDENCIA_LEGADO: dict[str, tuple[str, ...]] = {
+    **TABLAS_EVIDENCIA,
     "audit_logs": ("id", "usuario_id", "accion", "recurso", "detalle", "created_at"),
 }
 LOTE = 5_000
@@ -78,8 +89,26 @@ async def huella_tabla(session: AsyncSession, tabla: str, columnas: tuple[str, .
     return {"filas": int(total), "sha256": digest.hexdigest()}
 
 
-async def huellas_evidencia(session: AsyncSession) -> dict[str, dict]:
-    return {tabla: await huella_tabla(session, tabla, cols) for tabla, cols in TABLAS_EVIDENCIA.items()}
+async def huellas_evidencia(
+    session: AsyncSession, columnas: dict[str, tuple[str, ...] | list[str]] | None = None
+) -> dict[str, dict]:
+    """Huella por tabla. `columnas` (por omisión, TABLAS_EVIDENCIA) permite
+    recalcularla con las columnas que declara un manifiesto anterior."""
+    tablas = columnas if columnas is not None else TABLAS_EVIDENCIA
+    for tabla, cols in tablas.items():
+        if tabla not in TABLAS_EVIDENCIA or not set(cols) <= set(TABLAS_EVIDENCIA[tabla]):
+            # Los nombres se interpolan en SQL: solo los conocidos.
+            raise ValueError(f"Columnas de huella no reconocidas para {tabla}")
+    return {tabla: await huella_tabla(session, tabla, tuple(cols)) for tabla, cols in tablas.items()}
+
+
+def columnas_de_manifiesto(manifiesto: dict) -> dict[str, tuple[str, ...]]:
+    """Columnas con las que se calculó la huella de un manifiesto: las que
+    declara, o las del formato anterior si no declara ninguna."""
+    declaradas = manifiesto.get("columnas")
+    if not declaradas:
+        return TABLAS_EVIDENCIA_LEGADO
+    return {tabla: tuple(cols) for tabla, cols in declaradas.items()}
 
 
 def comparar_huellas(origen: dict[str, dict], restaurada: dict[str, dict]) -> dict:

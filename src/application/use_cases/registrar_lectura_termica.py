@@ -248,8 +248,12 @@ class RegistrarLecturaTermicaUseCase:
         )
         if not timestamp_valido:
             if self._audit_log_repository is not None:
-                await self._audit_log_repository.registrar(
-                    usuario_id=None,
+                # HU-42 esc. 2: el rechazo también se encadena (eslabón
+                # AUDIT_LOG de la cadena de SISTEMA, como las anomalías de
+                # reloj): la lectura no existe, así que la cadena del
+                # dispositivo no recibe nada que aparente una lectura.
+                await AuditarAccionCriticaUseCase(self._audit_log_repository, self._trazabilidad).execute(
+                    usuario_id=lectura.registrado_por if lectura.es_manual else None,
                     accion="LECTURA_RECHAZADA_TIMESTAMP",
                     recurso=f"lecturas/{lectura.device_id}",
                     detalle={
