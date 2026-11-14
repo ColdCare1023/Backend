@@ -7,6 +7,7 @@ from src.domain.entities.version_modelo_ia import VersionModeloIA
 from src.domain.exceptions import DomainError, RecursoNoEncontradoError
 from src.domain.repositories.i_lectura_repository import ILecturaRepository
 from src.domain.repositories.i_modelo_ia_repository import IModeloIARepository
+from src.infrastructure.ai.random_forest_service import ESTADO_COMPLETADA
 
 # HU-46 / HU-18 Escenario 4: los dos juegos de criterios que figuran en la
 # documentación. El principal lo fija IA_CRITERIO_PRINCIPAL (decisión con el
@@ -217,9 +218,18 @@ class ConsultarInferenciaLecturaUseCase:
 
         version_vigente_en_ese_momento = None
         coincide_con_version_activa_historica = None
-        if lectura.modelo_version is not None:
+        # HU-47 esc. 2: «en el momento de la clasificación» es la hora de la
+        # inferencia, no la de captura: una lectura del buffer del nodo puede
+        # capturarse antes de activar la versión y clasificarse después.
+        momento_clasificacion = lectura.inferido_en or lectura.timestamp
+        # La lectura guarda la versión cargada aunque el modelo no llegara a
+        # ejecutarse (historial insuficiente, regla directa...). Sin inferencia
+        # no hay clasificación que cruzar con el versionado: se responde None,
+        # no «no aprobada».
+        hubo_inferencia = lectura.modelo_version is not None and lectura.estado_inferencia == ESTADO_COMPLETADA
+        if hubo_inferencia:
             version_vigente_en_ese_momento = await self._modelo_repository.obtener_version_activa_en(
-                lectura.timestamp
+                momento_clasificacion
             )
             coincide_con_version_activa_historica = (
                 version_vigente_en_ese_momento is not None
@@ -227,7 +237,7 @@ class ConsultarInferenciaLecturaUseCase:
             )
 
         experimental = bool((lectura.payload or {}).get("ia_experimental"))
-        if lectura.modelo_version is None:
+        if not hubo_inferencia:
             politica = None
         elif experimental:
             politica = "experimental"
@@ -245,9 +255,15 @@ class ConsultarInferenciaLecturaUseCase:
             "confianza": lectura.confianza_ia,
             "origen_clasificacion": lectura.origen_clasificacion,
             "version_era_activa_y_aprobada_en_ese_momento": coincide_con_version_activa_historica,
+            # Con qué versión registrada se cruzó (None si ninguna estaba activa).
+            "version_activa_en_ese_momento": (
+                version_vigente_en_ese_momento.version if version_vigente_en_ese_momento else None
+            ),
             "estado_inferencia": lectura.estado_inferencia,
             "excursion_confirmada": lectura.excursion_confirmada,
             "riesgo_efectivo": lectura.riesgo_efectivo,
+            # HU-34 esc. 4: el mismo estado que muestra el tablero.
+            "estado_riesgo": lectura.estado_riesgo(),
             "ia_experimental": experimental,
             # HU-18 esc. 4: horizonte, esquema de características y política vigentes.
             "horizonte_min": version_vigente_en_ese_momento.horizonte_min if version_vigente_en_ese_momento else None,

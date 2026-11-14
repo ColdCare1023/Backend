@@ -429,6 +429,9 @@ class ThermalAlertModel(Base):
     iniciada_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     temperatura_pico: Mapped[float | None] = mapped_column(Float, nullable=True)
     historica: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa_text("false"))
+    # Migración 0039 (HU-20 esc. 3): inicio de la ventana de normalización de
+    # un episodio preventivo (NULL = no se está normalizando).
+    normalizacion_desde: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = _created_at_column()
 
     lectura: Mapped[ThermalReadingModel] = relationship(back_populates="alertas", foreign_keys=[reading_id])

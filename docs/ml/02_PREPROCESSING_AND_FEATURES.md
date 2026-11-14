@@ -65,3 +65,23 @@ deslizantes de la rejilla; en producción, `features_en_instante()` remuestrea e
 anclando la rejilla en el instante de la lectura. La prueba
 `test_paridad_entre_entrenamiento_e_inferencia` compara ambos caminos punto a punto (muestreo de 5,
 30 y 60 s, con fluctuación del reloj y huecos), con tolerancia 1e-9.
+
+## 6. Modelo legado (Random Forest de 10 variables): historial causal (HU-17)
+
+El clasificador legado (`ClasificarRiesgoTermicoUseCase._construir_features`) también usa una sola
+función en entrenamiento (`train_model_v3`) y en servicio:
+
+- Solo entran lecturas capturadas **antes** de t. El repositorio corta en `timestamp < t`
+  (`listar_recientes_por_device(..., hasta=t)`), así que una lectura reenviada desde el buffer
+  LittleFS no ve las que llegaron antes que ella pero se capturaron después.
+- El historial se lleva a una rejilla de 1 min hacia atrás desde t (la cadencia con que se genera el
+  entrenamiento), tomando en cada punto la lectura válida más cercana, dentro de una ventana de
+  35 min (el episodio de entrenamiento más largo). La pendiente se calcula en °C/min por tiempo real;
+  antes se calculaba por índice y a 10 s salía 6 veces menor que en entrenamiento.
+- Con menos de 2 puntos de rejilla la lectura queda `historial_insuficiente_para_tendencia`.
+
+Las pruebas `tests/unit/test_hu17_features_causales.py` comprueban que las lecturas futuras no cambian
+el vector, que la misma serie a 10 s, 30 s y 60 s da el mismo vector y que el camino de entrenamiento y el
+de servicio coinciden tick a tick. El artefacto 4.0.0-binario no se reentrenó: con un tick por minuto sus
+features solo cambian en la pendiente de los episodios con mensajes perdidos.
+

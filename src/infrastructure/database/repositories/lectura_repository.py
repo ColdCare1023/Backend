@@ -164,7 +164,7 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
         return _to_entity(model) if model else None
 
     async def listar_recientes_por_device(
-        self, device_id: str, limite: int, solo_dispositivo: bool = True
+        self, device_id: str, limite: int, solo_dispositivo: bool = True, hasta: datetime | None = None
     ) -> list[LecturaTermica]:
         stmt = select(ThermalReadingModel).where(ThermalReadingModel.device_id == device_id)
         if solo_dispositivo:
@@ -172,6 +172,11 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
             # la telemetría del nodo: una carga manual no debe poder sesgar la
             # clasificación de las lecturas reales.
             stmt = stmt.where(ThermalReadingModel.origen == ORIGEN_DISPOSITIVO)
+        if hasta is not None:
+            # HU-17 esc. 1: estrictamente anterior. Al reenviar el buffer
+            # LittleFS llegan lecturas viejas cuando ya hay otras más nuevas
+            # persistidas; sin este tope, sus features usarían el futuro.
+            stmt = stmt.where(ThermalReadingModel.timestamp < hasta)
         stmt = stmt.order_by(ThermalReadingModel.timestamp.desc()).limit(limite)
         result = await self._session.execute(stmt)
         return [_to_entity(m) for m in result.scalars().all()]

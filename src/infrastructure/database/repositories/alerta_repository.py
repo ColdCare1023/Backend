@@ -34,6 +34,7 @@ def _to_entity(model: ThermalAlertModel) -> AlertaTermica:
         iniciada_en=model.iniciada_en,
         temperatura_pico=model.temperatura_pico,
         historica=bool(model.historica),
+        normalizacion_desde=model.normalizacion_desde,
     )
 
 
@@ -60,6 +61,7 @@ class SQLAlchemyAlertaRepository(IAlertaRepository):
             iniciada_en=alerta.iniciada_en,
             temperatura_pico=alerta.temperatura_pico,
             historica=alerta.historica,
+            normalizacion_desde=alerta.normalizacion_desde,
         )
         self._session.add(model)
         await self._session.flush()
@@ -113,6 +115,7 @@ class SQLAlchemyAlertaRepository(IAlertaRepository):
         model.iniciada_en = alerta.iniciada_en
         model.temperatura_pico = alerta.temperatura_pico
         model.historica = alerta.historica
+        model.normalizacion_desde = alerta.normalizacion_desde
         await self._session.flush()
         await self._session.refresh(model)
         return _to_entity(model)

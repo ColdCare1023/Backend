@@ -77,6 +77,7 @@ def lectura_to_response(lectura: LecturaTermica) -> LecturaResponse:
         schema_version=lectura.schema_version,
         excursion_confirmada=lectura.excursion_confirmada,
         riesgo_efectivo=lectura.riesgo_efectivo,
+        estado_riesgo=lectura.estado_riesgo(),
         time_quality=lectura.time_quality,
         timestamp_estimado=lectura.timestamp_estimado,
         origen=lectura.origen,
@@ -137,6 +138,7 @@ def alerta_to_response(alerta: AlertaTermica, revisada_por_nombre: str | None = 
         temperatura_pico=alerta.temperatura_pico,
         duracion_s=alerta.duracion_s,
         historica=alerta.historica,
+        normalizacion_desde=alerta.normalizacion_desde,
     )
 
 

@@ -962,6 +962,7 @@ async def _procesar_lectura_mqtt(
             registro_dispositivos_estricto=settings.device_registry_estricto,
             audit_log_repository=SQLAlchemyAuditLogRepository(session),
             ventana_normalizacion_alerta_minutos=settings.alerta_ventana_normalizacion_minutos,
+            minutos_normales_preventiva=settings.alerta_preventiva_minutos_normales,
             antiguedad_maxima_horas=settings.lectura_antiguedad_max_horas,
             ia_legado_modo=settings.ia_legado_modo,
             ia_timeout_s=settings.ia_inferencia_timeout_s,
@@ -1232,6 +1233,10 @@ async def _procesar_lectura_mqtt(
                 "alerta_abierta": episodio_actual.episodio_abierto,
                 "lectura_inicial_id": str(episodio_actual.lectura_inicial_id),
                 "lectura_mas_reciente_id": str(episodio_actual.lectura_mas_reciente_id),
+                "normalizacion_desde": (
+                    episodio_actual.normalizacion_desde.isoformat()
+                    if episodio_actual.normalizacion_desde else None
+                ),
             },
             tipo_episodio,
         )
@@ -1270,6 +1275,30 @@ async def _auditar_modelos_rechazados(settings) -> None:
                 detalle=rechazo, ip_origen=None,
             )
         await session.commit()
+
+
+def _estado_modelos_ia(settings) -> dict:
+    """HU-16: estado de los modelos de IA para /health/detalle. Nunca lanza:
+    un modelo alterado se informa como no disponible con su motivo."""
+    if settings.ia_legado_modo == "desactivado":
+        legado = {"disponible": False, "version": None, "motivo_rechazo": None}
+    else:
+        try:
+            legado = get_random_forest_service().estado()
+        except Exception as exc:  # defensa en profundidad: el estado no tumba el endpoint
+            legado = {"disponible": False, "version": None, "motivo_rechazo": f"error_al_consultar:{type(exc).__name__}"}
+    try:
+        preventivo = obtener_servicio_preventivo(
+            settings.ia_preventivo_modo, settings.ia_preventivo_version, settings.ia_preventivo_sha256
+        )
+        motivo_preventivo = preventivo.motivo_rechazo()
+    except Exception as exc:
+        motivo_preventivo = f"error_al_consultar:{type(exc).__name__}"
+    return {
+        **legado,
+        "modo_legado": settings.ia_legado_modo,
+        "preventivo": {"modo": settings.ia_preventivo_modo, "motivo_rechazo": motivo_preventivo},
+    }
 
 
 async def _aplicar_version_activa() -> None:
@@ -1477,8 +1506,13 @@ def create_app() -> FastAPI:
         vigilante = getattr(request.app.state, "vigilante_sin_datos", None)
         api_broker = getattr(request.app.state, "broker_api", None)
         broker_api = "sin_configurar" if api_broker is None else ("ok" if api_broker else "error")
+        # HU-16: la carga del modelo es CPU y disco; fuera del bucle de eventos.
+        modelo_ia = await asyncio.to_thread(_estado_modelos_ia, get_settings())
+        # Un artefacto rechazado (alterado o distinto del aprobado) degrada el
+        # estado; uno simplemente ausente, no: la ingesta no depende de la IA.
+        modelo_rechazado = bool(modelo_ia["motivo_rechazo"] or modelo_ia["preventivo"]["motivo_rechazo"])
         return {
-            "status": "ok" if db == "ok" and broker_api != "error" else "degradado",
+            "status": "ok" if db == "ok" and broker_api != "error" and not modelo_rechazado else "degradado",
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             "db": db,
             "alembic_revision": revision,
@@ -1507,6 +1541,8 @@ def create_app() -> FastAPI:
                 "activa": vigilante is not None and vigilante.activo,
                 "ultima_pasada": vigilante.ultima_pasada.isoformat() if vigilante and vigilante.ultima_pasada else None,
             },
+            # HU-16 esc. 2: modelo no disponible y por qué (sin rutas ni secretos).
+            "modelo_ia": modelo_ia,
         }
 
     return app

@@ -269,6 +269,14 @@ class LecturaResponse(BaseModel):
     # confirmada a partir de nivel_riesgo=excursion_critica por sí solo.
     excursion_confirmada: bool = False
     riesgo_efectivo: NivelRiesgo | None = None
+    # HU-34 esc. 4: estado de riesgo que el tablero debe rotular. A diferencia
+    # de `riesgo_efectivo` (que vale "normal" para cualquier lectura válida en
+    # rango), distingue la lectura sin clasificación del modelo
+    # ("sin_clasificacion_ia") y la del DS18B20 en falla ("falla_sensor"), que
+    # no deben presentarse como Normal, Riesgo Preventivo ni Excursión Crítica.
+    estado_riesgo: Literal[
+        "normal", "riesgo_preventivo", "excursion_critica", "sin_clasificacion_ia", "falla_sensor"
+    ] | None = None
     # HU-01/HU-06: calidad del reloj del nodo al capturar y, para lecturas
     # `unsynced`, la hora reconstruida (None hasta que el arranque sincroniza).
     # Para graficar, usar `timestamp_estimado` cuando exista.
@@ -313,6 +321,9 @@ class AlertaResponse(BaseModel):
     temperatura_pico: float | None = None
     duracion_s: float | None = None
     historica: bool = False
+    # HU-20 esc. 3: alerta preventiva abierta que ya volvió a Normal y espera
+    # completar la ventana de normalización para resolverse (None = no).
+    normalizacion_desde: datetime | None = None
 
 
 class AccionCorrectivaCreateRequest(_PeticionEstricta):
@@ -702,10 +713,15 @@ class InferenciaLecturaResponse(BaseModel):
     confianza: float | None
     origen_clasificacion: str | None
     version_era_activa_y_aprobada_en_ese_momento: bool | None
+    # HU-47 esc. 2: versión registrada que estaba activa al clasificar (None si
+    # ninguna). Si difiere de `modelo_version`, la clase no salió del modelo aprobado.
+    version_activa_en_ese_momento: str | None = None
     # B-13: lo que el panel de evidencia muestra junto a la clase del modelo.
     estado_inferencia: str | None = None
     excursion_confirmada: bool = False
     riesgo_efectivo: NivelRiesgo | None = None
+    # HU-34 esc. 4: ver LecturaResponse.estado_riesgo.
+    estado_riesgo: str | None = None
     # HU-18 esc. 4: contexto de la inferencia.
     horizonte_min: int | None = None
     feature_schema_version: str | None = None

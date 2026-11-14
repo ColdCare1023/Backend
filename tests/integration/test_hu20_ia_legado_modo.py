@@ -178,7 +178,7 @@ async def test_con_el_legado_activo_manda_el_modelo_y_la_preventiva_se_abre(db_s
     assert [a.nivel_riesgo for a in await _alertas(db_session_factory)] == [NivelRiesgo.RIESGO_PREVENTIVO.value]
 
 
-async def test_una_preventiva_abierta_se_cierra_con_la_siguiente_lectura_en_rango_y_deja_alerta_cerrada(
+async def test_una_preventiva_abierta_se_cierra_tras_la_ventana_de_normalizacion_y_deja_alerta_cerrada(
     db_session_factory,
 ):
     from src.infrastructure.database.models import TraceabilityRecordModel
@@ -190,9 +190,17 @@ async def test_una_preventiva_abierta_se_cierra_con_la_siguiente_lectura_en_rang
         await session.commit()
     assert len(await _alertas(db_session_factory)) == 1
 
-    async with db_session_factory() as session:  # ahora sin modelo aprobado
+    async with db_session_factory() as session:  # ahora sin modelo aprobado: Normal
         uc = _use_case(session, _ModeloQueSiempreAnticipa(), "experimental")
         await uc.execute(_lectura(3, 5.0))
+        await session.commit()
+    # HU-20 esc. 3: la primera lectura Normal no la resuelve; empieza la ventana.
+    (alerta,) = await _alertas(db_session_factory)
+    assert alerta.episodio_abierto == 1 and alerta.normalizacion_desde is not None
+
+    async with db_session_factory() as session:  # 10 min seguidos en Normal (valor por defecto)
+        uc = _use_case(session, _ModeloQueSiempreAnticipa(), "experimental")
+        await uc.execute(_lectura(13, 5.0))
         await session.commit()
 
     (alerta,) = await _alertas(db_session_factory)

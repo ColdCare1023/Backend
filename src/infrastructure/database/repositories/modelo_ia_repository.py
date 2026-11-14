@@ -92,6 +92,9 @@ class SQLAlchemyModeloIARepository(IModeloIARepository):
             (ModeloIAVersionModel.desactivada_en.is_(None))
             | (ModeloIAVersionModel.desactivada_en > momento),
         )
+        # Defensa: aunque activar() no deja periodos solapados, la consulta de
+        # auditoría nunca debe responder 500 por MultipleResultsFound.
+        stmt = stmt.order_by(ModeloIAVersionModel.activada_en.desc()).limit(1)
         result = await self._session.execute(stmt)
-        model = result.scalar_one_or_none()
+        model = result.scalars().first()
         return _to_entity(model) if model else None
