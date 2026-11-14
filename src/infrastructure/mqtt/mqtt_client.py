@@ -22,6 +22,11 @@ TOPIC_EVENTOS = "farmacias/+/eventos"
 RECONEXION_ESPERA_INICIAL_SEGUNDOS = 1.0
 RECONEXION_ESPERA_MAXIMA_SEGUNDOS = 60.0
 
+# HU-12: colas por equipo. Topes para que la memoria no crezca sin límite.
+MAX_COLAS_DISPOSITIVO = 256
+CAPACIDAD_COLA_DISPOSITIVO = 200
+SEGUNDOS_VACIADO_COLAS = 10.0
+
 # HU-07: el manejador recibe también el cliente activo, no solo el mensaje.
 # El buffer offline del ESP32 (LittleFS) solo debe borrar un bloque cuando el
 # backend confirma que la lectura hizo COMMIT en PostgreSQL — un PUBACK de
@@ -89,22 +94,72 @@ def build_client(settings: Settings) -> aiomqtt.Client:
     )
 
 
+async def _atender_mensaje(client: aiomqtt.Client, message: aiomqtt.Message, manejador: MensajeHandler) -> None:
+    try:
+        await manejador(client, message)
+    except Exception:
+        # No se propaga (un mensaje malformado o un error inesperado del
+        # pipeline —incluida la inferencia de IA— no debe tumbar el
+        # consumidor MQTT), pero SÍ se audita en logs (corrige el hallazgo
+        # AI-02: antes este descarte era completamente silencioso, sin
+        # distinguir un fallo de inferencia de un bug de programación).
+        logger.exception(
+            "Error no controlado procesando mensaje MQTT en topic %s; descartado.",
+            message.topic,
+        )
+
+
+def _clave_dispositivo(topic: str) -> str:
+    """`farmacias/<device_id>/...`: la clave de la cola por equipo."""
+    partes = topic.split("/")
+    return partes[1] if len(partes) > 1 else ""
+
+
 async def consumir_mensajes(client: aiomqtt.Client, manejador: MensajeHandler) -> None:
-    # En aiomqtt 2.x `messages` es una propiedad, no un método.
-    async for message in client.messages:
-        try:
-            await manejador(client, message)
-        except Exception:
-            # No se propaga (un mensaje malformado o un error inesperado del
-            # pipeline —incluida la inferencia de IA— no debe tumbar el
-            # consumidor MQTT), pero SÍ se audita en logs (corrige el hallazgo
-            # AI-02: antes este descarte era completamente silencioso, sin
-            # distinguir un fallo de inferencia de un bug de programación).
-            logger.exception(
-                "Error no controlado procesando mensaje MQTT en topic %s; descartado.",
-                message.topic,
-            )
-            continue
+    """HU-12 esc. 2: una cola por equipo. Los mensajes de un mismo nodo conservan
+    su orden (FIFO, HU-07) y un equipo lento no retrasa a los demás. Cada cola es
+    acotada: si se llena, la lectura del broker espera en vez de crecer sin límite.
+    """
+    colas: dict[str, asyncio.Queue] = {}
+    trabajadores: list[asyncio.Task] = []
+
+    async def trabajar(cola: asyncio.Queue) -> None:
+        while True:
+            message = await cola.get()
+            try:
+                await _atender_mensaje(client, message, manejador)
+            finally:
+                cola.task_done()
+
+    try:
+        # En aiomqtt 2.x `messages` es una propiedad, no un método.
+        async for message in client.messages:
+            clave = _clave_dispositivo(str(message.topic))
+            if clave not in colas and len(colas) >= MAX_COLAS_DISPOSITIVO:
+                clave = ""  # topología inesperada: comparten una cola, no crecen sin tope
+            if clave not in colas:
+                colas[clave] = asyncio.Queue(maxsize=CAPACIDAD_COLA_DISPOSITIVO)
+                trabajadores.append(asyncio.create_task(trabajar(colas[clave])))
+            await colas[clave].put(message)
+        await _vaciar(colas)
+    except aiomqtt.MqttError:
+        # La sesión cayó: lo ya recibido se termina de persistir antes de reconectar.
+        await _vaciar(colas)
+        raise
+    finally:
+        for tarea in trabajadores:
+            tarea.cancel()
+        await asyncio.gather(*trabajadores, return_exceptions=True)
+
+
+async def _vaciar(colas: dict[str, asyncio.Queue]) -> None:
+    pendientes = [cola.join() for cola in colas.values()]
+    if not pendientes:
+        return
+    try:
+        await asyncio.wait_for(asyncio.gather(*pendientes), SEGUNDOS_VACIADO_COLAS)
+    except TimeoutError:
+        logger.warning("Quedaron mensajes MQTT sin procesar al cerrar la sesión; el nodo los reenviará.")
 
 
 async def suscribir_o_fallar(client: aiomqtt.Client, topic: str) -> None:

@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -159,10 +160,12 @@ class ActivarVersionModeloUseCase:
         modelo_repository: IModeloIARepository,
         registrar_hash: RegistrarHashEncadenadoUseCase,
         criterio_principal: str = CRITERIO_POR_INCIDENTE,
+        hash_artefacto: Callable[[], str | None] | None = None,
     ) -> None:
         self._modelo_repository = modelo_repository
         self._registrar_hash = registrar_hash
         self._criterio = criterio_principal
+        self._hash_artefacto = hash_artefacto
 
     async def execute(self, version: str, admin_id: UUID) -> VersionModeloIA:
         objetivo = await self._modelo_repository.obtener_por_version(version)
@@ -173,6 +176,9 @@ class ActivarVersionModeloUseCase:
         # HU-46 / HU-18 Escenario 4: sin métricas, H y particiones, o sin
         # cumplir el criterio principal, la versión no entra en producción.
         motivos = motivos_bloqueo_activacion(objetivo, self._criterio)
+        # HU-16 esc. 4: no se activa una versión cuyo artefacto no es el desplegado.
+        if self._hash_artefacto is not None and self._hash_artefacto() != objetivo.model_hash:
+            motivos.append("el artefacto desplegado no coincide con el hash registrado")
         if motivos:
             raise ActivacionBloqueadaError(version, motivos)
 
@@ -220,10 +226,18 @@ class ConsultarInferenciaLecturaUseCase:
                 and version_vigente_en_ese_momento.version == lectura.modelo_version
             )
 
+        experimental = bool((lectura.payload or {}).get("ia_experimental"))
+        if lectura.modelo_version is None:
+            politica = None
+        elif experimental:
+            politica = "experimental"
+        else:
+            politica = "aprobada" if coincide_con_version_activa_historica else "sin_aprobacion_registrada"
+
         return {
             "lectura_id": lectura.id,
             "device_id": lectura.device_id,
-            "timestamp_inferencia": lectura.timestamp,
+            "timestamp_inferencia": lectura.inferido_en or lectura.timestamp,
             "modelo_version": lectura.modelo_version,
             "vector_features": lectura.vector_features_ia,
             "probabilidades_por_clase": lectura.probabilidades_ia,
@@ -234,5 +248,11 @@ class ConsultarInferenciaLecturaUseCase:
             "estado_inferencia": lectura.estado_inferencia,
             "excursion_confirmada": lectura.excursion_confirmada,
             "riesgo_efectivo": lectura.riesgo_efectivo,
-            "ia_experimental": bool((lectura.payload or {}).get("ia_experimental")),
+            "ia_experimental": experimental,
+            # HU-18 esc. 4: horizonte, esquema de características y política vigentes.
+            "horizonte_min": version_vigente_en_ese_momento.horizonte_min if version_vigente_en_ese_momento else None,
+            "feature_schema_version": (
+                version_vigente_en_ese_momento.feature_schema_version if version_vigente_en_ese_momento else None
+            ),
+            "politica_operativa": politica,
         }

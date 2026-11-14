@@ -522,8 +522,16 @@ class GeneradorReporteBPAPDF:
             )
             return bloques
 
+        # HU-38 esc. 3: ninguna excursión crítica se omite; el tope solo recorta
+        # las alertas preventivas más antiguas.
+        criticas = [a for a in alertas if a.get("nivel_riesgo") == "excursion_critica"]
+        otras = [a for a in alertas if a.get("nivel_riesgo") != "excursion_critica"]
+        visibles = criticas + otras[: max(0, MAX_FILAS_ALERTAS - len(criticas))]
+        ids_visibles = {id(a) for a in visibles}
+        en_orden = [a for a in alertas if id(a) in ids_visibles]
+
         filas = [["Fecha de apertura", "Dispositivo", "Nivel", "Mensaje", "Estado", "Revisada"]]
-        for alerta in alertas[:MAX_FILAS_ALERTAS]:
+        for alerta in en_orden:
             filas.append(
                 [
                     _fmt_dt(alerta.get("created_at")),
@@ -539,14 +547,68 @@ class GeneradorReporteBPAPDF:
         )
         tabla.setStyle(_estilo_tabla_base([("ALIGN", (1, 1), (2, -1), "CENTER"), ("ALIGN", (4, 1), (-1, -1), "CENTER")]))
         bloques.append(tabla)
-        if len(alertas) > MAX_FILAS_ALERTAS:
+        if len(visibles) < len(alertas):
             bloques.append(Spacer(1, 4))
             bloques.append(
                 Paragraph(
-                    f"Se muestran las {MAX_FILAS_ALERTAS} alertas más recientes de {len(alertas)} en el período.",
+                    f"Se muestran todas las excursiones críticas ({len(criticas)}) y las alertas preventivas "
+                    f"más recientes hasta completar {MAX_FILAS_ALERTAS}, de {len(alertas)} en el período.",
                     e["nota"],
                 )
             )
+        return bloques
+
+    def _seccion_acciones(self, acciones: list[dict]) -> list:
+        """HU-38 esc. 1: decisión, acción y justificación de cada alerta atendida."""
+        e = self._estilos
+        bloques = [Spacer(1, 10), Paragraph("Acciones correctivas registradas", e["seccion"])]
+        if not acciones:
+            bloques.append(Paragraph("No se registraron acciones correctivas en el período.", e["cuerpo"]))
+            return bloques
+        filas = [["Fecha", "Dispositivo", "Decisión", "Acción ejecutada", "Justificación", "Estado"]]
+        for a in acciones:
+            filas.append(
+                [
+                    _fmt_dt(a.get("created_at")),
+                    str(a.get("device_id") or "—"),
+                    Paragraph(_texto(a.get("decision")), e["celda"]),
+                    Paragraph(_texto(a.get("descripcion")), e["celda"]),
+                    Paragraph(_texto(a.get("justificacion") or a.get("motivo_rectificacion")), e["celda"]),
+                    "Vigente" if a.get("vigente") else "Rectificada",
+                ]
+            )
+        tabla = Table(filas, colWidths=[28 * mm, 26 * mm, 36 * mm, 36 * mm, 28 * mm, 18 * mm], repeatRows=1)
+        tabla.setStyle(_estilo_tabla_base([("ALIGN", (1, 1), (1, -1), "CENTER")]))
+        bloques.append(tabla)
+        return bloques
+
+    def _seccion_equipos(self, equipos: list[dict]) -> list:
+        """HU-38 esc. 1 y HU-51 esc. 4: identificación e instalación del equipo."""
+        if not equipos:
+            return []
+        e = self._estilos
+        filas = [["Equipo", "Ubicación vigente", "Instalación", "Observaciones"]]
+        for d in equipos:
+            filas.append(
+                [
+                    Paragraph(_texto(d.get("id")), e["celda"]),
+                    Paragraph(_texto(d.get("ubicacion")), e["celda"]),
+                    Paragraph(_texto(d.get("fecha_instalacion")), e["celda"]),
+                    Paragraph(_texto(d.get("observaciones_instalacion")), e["celda"]),
+                ]
+            )
+        tabla = Table(filas, colWidths=[40 * mm, 50 * mm, 26 * mm, 56 * mm], repeatRows=1)
+        tabla.setStyle(_estilo_tabla_base([]))
+        bloques = [Paragraph("Identificación del equipo e instalación", e["seccion"]), tabla]
+        for d in equipos:
+            for c in d.get("cambios_ubicacion", []):
+                bloques.append(
+                    Paragraph(
+                        f"{_texto(d.get('id'))}: la ubicación cambió de «{_texto(c.get('valor_anterior'))}» a "
+                        f"«{_texto(c.get('valor_nuevo'))}» el {_fmt_dt(c.get('created_at'))}.",
+                        e["nota"],
+                    )
+                )
         return bloques
 
     def _seccion_trazabilidad(self, registros: list[dict]) -> list:
@@ -659,6 +721,8 @@ class GeneradorReporteBPAPDF:
         usuario: str,
         device_id: str | None = None,
         truncamiento: dict | None = None,
+        acciones: list[dict] | None = None,
+        equipos: list[dict] | None = None,
     ) -> bytes:
         self._generado_en = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
@@ -687,6 +751,7 @@ class GeneradorReporteBPAPDF:
         # Antes del resumen: si el documento está recortado, hay que saberlo
         # antes de leer ninguna cifra.
         historia += self._aviso_truncamiento(truncamiento)
+        historia += self._seccion_equipos(equipos or [])
         historia += self._seccion_resumen(estadisticas)
         historia += [KeepTogether(self._seccion_integridad(veredicto_integridad))]
         historia += self._seccion_checklist(checklists)
@@ -694,6 +759,7 @@ class GeneradorReporteBPAPDF:
         historia += self._seccion_lecturas(lecturas)
         historia.append(PageBreak())
         historia += self._seccion_alertas(alertas)
+        historia += self._seccion_acciones(acciones or [])
         historia += self._seccion_trazabilidad(trazabilidad)
         historia += self._cierre()
 

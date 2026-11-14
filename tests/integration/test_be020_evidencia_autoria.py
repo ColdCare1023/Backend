@@ -41,7 +41,7 @@ def _accion_de(client, token) -> dict:
     alerta = client.get("/api/alertas", params={"device_id": DEVICE_ID}, headers=auth_header(token)).json()[0]
     respuesta = client.post(
         f"/api/alertas/{alerta['id']}/acciones-correctivas",
-        json={"descripcion": "Se trasladaron los viales al refrigerador de respaldo."},
+        json={"decision": "Trasladar el lote", "justificacion": "Lectura fuera de rango", "descripcion": "Se trasladaron los viales al refrigerador de respaldo."},
         headers=auth_header(token),
     )
     assert respuesta.status_code == 201

@@ -54,7 +54,9 @@ def _accion_response(
         alert_id=accion.alert_id,
         usuario_id=accion.usuario_id,
         usuario_nombre=nombres.get(accion.usuario_id),
+        decision=accion.decision,
         descripcion=accion.descripcion,
+        justificacion=accion.justificacion,
         created_at=accion.created_at,
         corrige_accion_id=accion.corrige_accion_id,
         motivo_rectificacion=accion.motivo_rectificacion,
@@ -158,7 +160,9 @@ async def registrar_accion_correctiva(
     trazabilidad_repository = SQLAlchemyTrazabilidadRepository(session)
     use_case = RegistrarAccionCorrectivaUseCase(accion_repository, alerta_repository, trazabilidad_repository)
     try:
-        accion = await use_case.execute(alerta_id, usuario.id, body.descripcion)
+        accion = await use_case.execute(
+            alerta_id, usuario.id, body.descripcion, body.decision, body.justificacion
+        )
     except RecursoNoEncontradoError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except DomainError as exc:
@@ -180,7 +184,7 @@ async def registrar_accion_correctiva(
         # medía 102 y en PostgreSQL toda acción correctiva fallaba con 500
         # (SQLite, el de las pruebas, no valida longitudes).
         recurso=f"alertas/{alerta_id}/acciones/{accion.id}",
-        detalle={"descripcion": body.descripcion},
+        detalle={"decision": body.decision, "descripcion": body.descripcion, "justificacion": body.justificacion},
         ip_origen=request.client.host if request.client else None,
         device_id=alerta_para_auditoria.device_id if alerta_para_auditoria else None,
     )

@@ -71,7 +71,7 @@ def test_registrar_accion_correctiva_transiciona_a_atendida(client, token_tecnic
 
     respuesta = client.post(
         f"/api/alertas/{alerta_id}/acciones-correctivas",
-        json={"descripcion": "Se trasladaron los medicamentos a un refrigerador de respaldo."},
+        json={"decision": "Trasladar el lote", "justificacion": "Lectura fuera de rango", "descripcion": "Se trasladaron los medicamentos a un refrigerador de respaldo."},
         headers=auth_header(token_tecnico),
     )
     assert respuesta.status_code == 201
@@ -92,14 +92,14 @@ def test_accion_correctiva_concurrente_sobre_alerta_atendida_es_rechazada(
 
     primera = client.post(
         f"/api/alertas/{alerta_id}/acciones-correctivas",
-        json={"descripcion": "Primera acción: se documentó la excursión."},
+        json={"decision": "Trasladar el lote", "justificacion": "Lectura fuera de rango", "descripcion": "Primera acción: se documentó la excursión."},
         headers=auth_header(token_tecnico),
     )
     assert primera.status_code == 201
 
     segunda = client.post(
         f"/api/alertas/{alerta_id}/acciones-correctivas",
-        json={"descripcion": "Segunda acción, llegó tarde."},
+        json={"decision": "Trasladar el lote", "justificacion": "Lectura fuera de rango", "descripcion": "Segunda acción, llegó tarde."},
         headers=auth_header(token_farmaceutico),
     )
     assert segunda.status_code == 409
@@ -110,7 +110,7 @@ def test_accion_correctiva_sin_descripcion_se_rechaza(client, token_tecnico):
 
     respuesta = client.post(
         f"/api/alertas/{alerta_id}/acciones-correctivas",
-        json={"descripcion": ""},
+        json={"decision": "Trasladar el lote", "justificacion": "Lectura fuera de rango", "descripcion": ""},
         headers=auth_header(token_tecnico),
     )
     assert respuesta.status_code == 422
@@ -120,7 +120,7 @@ def test_rectificar_accion_correctiva_crea_evento_nuevo_sin_sobrescribir(client,
     alerta_id = _crear_alerta_critica(client, token_tecnico)
     original = client.post(
         f"/api/alertas/{alerta_id}/acciones-correctivas",
-        json={"descripcion": "Descripción con un error de tipeo."},
+        json={"decision": "Trasladar el lote", "justificacion": "Lectura fuera de rango", "descripcion": "Descripción con un error de tipeo."},
         headers=auth_header(token_tecnico),
     ).json()
 
