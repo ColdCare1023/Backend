@@ -268,6 +268,19 @@ def test_exportar_la_bitacora_en_csv_queda_auditado(client, token_admin, token_a
     assert exportacion["resultado"] == "exitoso"
 
 
+def test_el_frontend_de_otro_origen_puede_leer_el_nombre_del_csv(client, token_auditor):
+    """El CORSMiddleware reemplaza el Access-Control-Expose-Headers de la ruta:
+    sin declararlo en el middleware, el navegador oculta Content-Disposition."""
+    respuesta = client.get(
+        "/api/auditoria/exportar",
+        headers={**auth_header(token_auditor), "Origin": "http://localhost:5173"},
+    )
+
+    assert respuesta.status_code == 200
+    expuestas = {h.strip().lower() for h in respuesta.headers["access-control-expose-headers"].split(",")}
+    assert {"content-disposition", "retry-after", "x-total-count"} <= expuestas
+
+
 def test_solo_admin_y_auditor_exportan(client, token_tecnico, token_farmaceutico):
     assert client.get("/api/auditoria/exportar", headers=auth_header(token_tecnico)).status_code == 403
     assert client.get("/api/auditoria/exportar", headers=auth_header(token_farmaceutico)).status_code == 403

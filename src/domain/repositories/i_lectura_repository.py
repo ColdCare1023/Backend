@@ -33,8 +33,13 @@ class ILecturaRepository(ABC):
 
     @abstractmethod
     async def listar_recientes_por_device(
-        self, device_id: str, limite: int, solo_dispositivo: bool = True
-    ) -> list[LecturaTermica]: ...
+        self, device_id: str, limite: int, solo_dispositivo: bool = True, hasta: datetime | None = None
+    ) -> list[LecturaTermica]:
+        """Las `limite` lecturas más recientes por captura (orden descendente).
+        Con `hasta`, solo las capturadas ANTES de ese instante (timestamp <
+        hasta): HU-17, las features de la lectura t no pueden ver lecturas
+        posteriores, que sí existen cuando el nodo reenvía su buffer."""
+        ...
 
     @abstractmethod
     async def obtener_por_device_y_timestamp(

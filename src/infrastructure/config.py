@@ -246,6 +246,12 @@ class Settings(BaseSettings):
     # cerrado y reabierto dentro de esta ventana se trata como continuación
     # del mismo episodio en vez de crear uno nuevo (evita flapping).
     alerta_ventana_normalizacion_minutos: int = 15
+    # HU-20 esc. 3: minutos SEGUIDOS en Normal que necesita una alerta
+    # preventiva abierta para resolverse (una lectura preventiva reinicia la
+    # cuenta). 0 = se cierra con la primera lectura normal (comportamiento
+    # anterior). Con los modos de IA por defecto no se abren preventivas, así
+    # que este valor solo actúa con un modelo aprobado (o el legado «activo»).
+    alerta_preventiva_minutos_normales: int = Field(default=10, ge=0, le=240)
 
     # HU-07: antigüedad máxima de una lectura del nodo (reenvío del buffer
     # LittleFS tras un corte). Más vieja que esto va a cuarentena como

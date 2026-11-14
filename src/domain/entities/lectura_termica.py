@@ -41,6 +41,20 @@ ORIGEN_MANUAL = "manual"
 ANTIGUEDAD_MAXIMA_MANUAL = timedelta(hours=24)
 DERIVA_FUTURO_MAXIMA_MANUAL = timedelta(minutes=1)
 
+# HU-34 esc. 4: estados que el tablero debe distinguir de Normal, Riesgo
+# Preventivo y Excursión Crítica (ver LecturaTermica.estado_riesgo).
+ESTADO_RIESGO_FALLA_SENSOR = "falla_sensor"
+ESTADO_RIESGO_SIN_CLASIFICACION_IA = "sin_clasificacion_ia"
+ESTADOS_RIESGO = (
+    NivelRiesgo.NORMAL.value,
+    NivelRiesgo.RIESGO_PREVENTIVO.value,
+    NivelRiesgo.EXCURSION_CRITICA.value,
+    ESTADO_RIESGO_SIN_CLASIFICACION_IA,
+    ESTADO_RIESGO_FALLA_SENSOR,
+)
+_INFERENCIA_COMPLETADA = "completada"
+_ORIGEN_FALLO_SENSOR = "fallo_sensor"
+
 
 @dataclass(slots=True)
 class LecturaTermica:
@@ -128,6 +142,29 @@ class LecturaTermica:
         if self.es_excursion_confirmada():
             return NivelRiesgo.EXCURSION_CRITICA
         return self.nivel_riesgo
+
+    def estado_riesgo(self) -> str:
+        """HU-34 esc. 4: lo que el tablero debe mostrar como riesgo.
+
+        `riesgo_efectivo` sigue siendo «normal» para una lectura en rango sin
+        clasificación del modelo (la regla 2-8 °C no ve excursión), y así se
+        conserva por compatibilidad. Este estado no lo confunde: sin excursión
+        confirmada, si no hay temperatura interna válida es `falla_sensor`, y si
+        el modelo no llegó a clasificar (historial insuficiente, reloj sin
+        sincronizar, modelo no disponible o rechazado, inferencia fallida) es
+        `sin_clasificacion_ia`. Solo con una inferencia completada vale Normal
+        o Riesgo Preventivo."""
+        if self.excursion_confirmada or self.es_excursion_confirmada():
+            return NivelRiesgo.EXCURSION_CRITICA.value
+        if self.temperatura_interna is None or self.origen_clasificacion == _ORIGEN_FALLO_SENSOR:
+            return ESTADO_RIESGO_FALLA_SENSOR
+        if (
+            self.riesgo_efectivo is None
+            or self.nivel_riesgo is None
+            or self.estado_inferencia != _INFERENCIA_COMPLETADA
+        ):
+            return ESTADO_RIESGO_SIN_CLASIFICACION_IA
+        return self.riesgo_efectivo.value
 
     def diferencia_sensores(self) -> float:
         if self.temperatura_ambiental is None or self.temperatura_interna is None:

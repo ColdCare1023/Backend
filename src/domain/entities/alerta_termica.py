@@ -56,6 +56,11 @@ class AlertaTermica:
     iniciada_en: datetime | None = None
     temperatura_pico: float | None = None
     historica: bool = False
+    # HU-20 esc. 3 (migración 0039): hora de captura de la primera lectura
+    # normal tras la última preventiva. El episodio preventivo se resuelve
+    # cuando el riesgo lleva la ventana de normalización completa en Normal;
+    # cualquier lectura no normal la reinicia (None = no está normalizándose).
+    normalizacion_desde: datetime | None = None
 
     def marcar_revisada(self, usuario_id: UUID) -> None:
         self.revisada = True
@@ -89,6 +94,21 @@ class AlertaTermica:
         (que sigue apuntando a la lectura que originó la alerta)."""
         self.lectura_mas_reciente_id = reading_id
         self.ultima_actualizacion = timestamp
+        # El riesgo volvió a aparecer: la normalización empieza de cero.
+        self.normalizacion_desde = None
+
+    def iniciar_normalizacion(self, timestamp: datetime) -> bool:
+        """HU-20 esc. 3: primera lectura Normal del episodio preventivo.
+        Devuelve True si la normalización empezó con esta lectura."""
+        if self.normalizacion_desde is not None:
+            return False
+        self.normalizacion_desde = timestamp
+        return True
+
+    def minutos_en_normalizacion(self, timestamp: datetime) -> float:
+        if self.normalizacion_desde is None:
+            return 0.0
+        return max((_a_utc(timestamp) - _a_utc(self.normalizacion_desde)).total_seconds() / 60.0, 0.0)
 
     def actualizar_pico(self, temperatura: float | None) -> None:
         """Conserva la temperatura más alejada del rango 2-8 °C del episodio."""
@@ -121,3 +141,4 @@ class AlertaTermica:
         self.cerrada_en = None
         self.lectura_mas_reciente_id = reading_id
         self.ultima_actualizacion = timestamp
+        self.normalizacion_desde = None

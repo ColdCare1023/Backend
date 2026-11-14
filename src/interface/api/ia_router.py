@@ -101,6 +101,14 @@ async def obtener_metadata_modelo(
     recall, F1 por clase, matriz de confusión y validación cruzada)."""
     servicio = get_random_forest_service()
     metricas = servicio.metricas_entrenamiento()
+    # HU-16 esc. 2: un artefacto alterado o que no es el de la versión activa
+    # deja el modelo «no disponible» (503), nunca un 500.
+    if servicio.motivo_rechazo() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="El modelo Random Forest no está disponible: el artefacto no superó la verificación de "
+            "integridad o compatibilidad al cargarse.",
+        )
     if not servicio.modelo_disponible or metricas is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

@@ -70,6 +70,7 @@ async def ingestar_lectura(
         registro_dispositivos_estricto=settings.device_registry_estricto,
         audit_log_repository=SQLAlchemyAuditLogRepository(session),
         ventana_normalizacion_alerta_minutos=settings.alerta_ventana_normalizacion_minutos,
+        minutos_normales_preventiva=settings.alerta_preventiva_minutos_normales,
         antiguedad_maxima_horas=settings.lectura_antiguedad_max_horas,
         ia_legado_modo=settings.ia_legado_modo,
         ia_timeout_s=settings.ia_inferencia_timeout_s,
@@ -159,6 +160,10 @@ async def _emitir_eventos_sse(
                 "alerta_abierta": episodio_actual.episodio_abierto,
                 "lectura_inicial_id": str(episodio_actual.lectura_inicial_id),
                 "lectura_mas_reciente_id": str(episodio_actual.lectura_mas_reciente_id),
+                "normalizacion_desde": (
+                    episodio_actual.normalizacion_desde.isoformat()
+                    if episodio_actual.normalizacion_desde else None
+                ),
             },
             "alerta" if episodio_previo is None else "episodio_actualizado",
         )

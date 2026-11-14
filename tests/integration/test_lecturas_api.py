@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from tests.conftest import auth_header
 
@@ -18,15 +18,19 @@ def _payload(**overrides) -> dict:
 
 
 async def test_ingestar_lectura_estable_clasifica_normal(client, token_tecnico):
-    # HU-17: la IA necesita 2+ lecturas previas válidas para tendencia.
-    for _i in range(2):
+    # HU-17: la IA necesita 2+ puntos previos válidos (rejilla de 1 min,
+    # capturados ANTES de la lectura) para calcular la tendencia.
+    ahora = datetime.now(tz=timezone.utc)
+    for minutos in (2, 1):
         client.post(
             "/api/lecturas",
-            json=_payload(timestamp=datetime.now(tz=timezone.utc).isoformat()),
+            json=_payload(timestamp=(ahora - timedelta(minutes=minutos)).isoformat()),
             headers=auth_header(token_tecnico),
         )
 
-    response = client.post("/api/lecturas", json=_payload(), headers=auth_header(token_tecnico))
+    response = client.post(
+        "/api/lecturas", json=_payload(timestamp=ahora.isoformat()), headers=auth_header(token_tecnico)
+    )
 
     assert response.status_code == 201
     body = response.json()
