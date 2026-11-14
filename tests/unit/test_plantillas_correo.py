@@ -94,7 +94,8 @@ def test_el_pie_y_el_detalle_aparecen_solo_si_se_piden():
     sin = _correo()
     con = _correo(detalles=[("Dispositivo", "FARM-01")], nota="Verifica el equipo", pie="Pie propio")
     assert "FARM-01" not in sin and "FARM-01" in con and "Verifica el equipo" in con and "Pie propio" in con
-    assert "no respondas" in sin
+    assert "Responde a este correo o habla con el administrador de tu farmacia" in sin  # pie que invita a responder
+    assert "no respondas" not in sin.lower()
 
 
 def test_la_escala_termica_ubica_la_zona_segura_y_marca_la_lectura():
@@ -160,7 +161,7 @@ def test_correo_de_cuenta_creada_tiene_texto_y_html_sin_la_clave():
     from src.infrastructure.notifications.correos_cuenta import correo_cuenta_creada
 
     c = correo_cuenta_creada("Ana <b>", "ana@prueba.pe", "https://coldcare.example/")
-    assert c.asunto == "[ColdCare] Tu cuenta fue creada"
+    assert c.asunto == "Tu cuenta de ColdCare está lista"
     assert "ana@prueba.pe" in c.cuerpo and "https://coldcare.example" in c.cuerpo
     assert "Ana &lt;b&gt;" in c.html and "<b>" not in c.html  # nombre escapado
     assert 'href="https://coldcare.example"' in c.html  # sin barra final
@@ -176,7 +177,7 @@ def test_correo_de_recuperar_password_lleva_el_enlace_exacto_y_la_vigencia():
     c = correo_recuperar_password("Ana", enlace, 30)
     assert enlace in c.cuerpo and f'href="{enlace}"' in c.html
     assert "30 minutos" in c.cuerpo and "30 minutos" in c.html
-    assert c.asunto == "[ColdCare] Restablecer contraseña"
+    assert c.asunto == "Restablece tu contraseña de ColdCare"
 
 
 def _aviso(temperatura=11.4, diferida=False):
@@ -199,7 +200,7 @@ def test_el_correo_de_excursion_trae_escala_boton_y_datos():
     aviso = _aviso()
     m = componer_correo_excursion(aviso, "c@x.pe", "d@y.pe", "https://coldcare.example",
                                   {"nombre": "Refri <1>", "ubicacion": "Botica Central"})
-    assert m.asunto == "[ColdCare] EXCURSIÓN CRÍTICA — FARM-01" and "ALERTA CRÍTICA" in m.cuerpo  # texto intacto
+    assert m.asunto == "Excursión crítica en Refri <1>: 11.4 °C" and "ALERTA CRÍTICA" in m.cuerpo  # texto intacto
     assert "11.4 °C en Refri &lt;1&gt;" in m.html and "Botica Central" in m.html
     from src.infrastructure.notifications.plantillas_correo import TONOS
 
@@ -214,7 +215,7 @@ def test_el_correo_de_excursion_diferida_lo_dice_y_sin_enlace_no_hay_boton():
 
     m = componer_correo_excursion(_aviso(diferida=True), "c@x.pe", "d@y.pe", "", None)
     assert "diferida" in m.html.lower() and "Recibida por el sistema" in m.html
-    assert "<a href" not in m.html and m.asunto.endswith("— FARM-01") and "[DIFERIDA]" in m.asunto
+    assert "<a href" not in m.html and m.asunto == "Excursión crítica (lectura diferida) en FARM-01: 11.4 °C"
 
 
 def test_el_correo_de_excursion_sin_dato_de_sensor_no_dibuja_escala():
@@ -232,14 +233,14 @@ def test_el_correo_preventivo_avisa_con_margen_y_sin_exagerar():
 
     aviso = replace(_aviso(temperatura=7.6), nivel=NivelRiesgo.RIESGO_PREVENTIVO)
     m = componer_correo_preventivo(aviso, "c@x.pe", "d@y.pe", "https://coldcare.example", {"nombre": "Refri 1"})
-    assert m.asunto == "[ColdCare] RIESGO PREVENTIVO — FARM-01"
+    assert m.asunto == "Riesgo preventivo en Refri 1"
     assert "Margen hasta el límite: 0.4 °C" in m.cuerpo and "0.4 °C" in m.html
     assert "Todavía no es una excursión" in m.cuerpo and "Todavía no es una excursión" in m.html
     from src.infrastructure.notifications.plantillas_correo import TONOS
 
     assert TONOS["aviso"][0] in m.html  # acento ámbar, no el rojo de la excursión
     assert TONOS["critico"][0] not in m.html
-    assert "EXCURSIÓN CRÍTICA" not in m.asunto
+    assert "excursión" not in m.asunto.lower()
     assert "rango seguro" in m.html and "Refri 1 se acerca al límite" in m.html
     assert f"/alertas?id={aviso.alerta_id}" in m.html
 
@@ -369,3 +370,82 @@ def test_el_enlace_de_respaldo_es_un_enlace_neutro_y_legible_en_modo_oscuro():
     oscuro = html.split("prefers-color-scheme: dark")[1]
     assert not re.search(r"(^|[\s}])a\s*\{", oscuro)  # sin regla `a{}` que pise el texto blanco del botón
     assert _correo(boton=Boton("x", "javascript:alert(1)")).count("cc-enlace") == 1  # solo la regla CSS
+
+
+# ── Entregabilidad: que no parezcan spam ─────────────────────────────────
+
+
+def _todos_los_correos():
+    """(asunto, texto, html o None) de cada correo que sale del sistema, con un equipo sin nombre
+    (el asunto lleva el id del nodo) para revisar solo el texto propio del asunto."""
+    from dataclasses import replace
+    from uuid import uuid4
+
+    from src.application.use_cases.vigilar_sin_datos import AvisoSinDatos
+    from src.domain.value_objects.nivel_riesgo import NivelRiesgo
+    from src.infrastructure.notifications import correos_cuenta as c
+    from src.infrastructure.notifications import notificacion_service as n
+
+    pagina = "https://coldcare.example/recuperar-contrasena"
+    cuenta = [
+        c.correo_cuenta_creada("Ana", "a@x.pe", "https://coldcare.example"),
+        c.correo_recuperar_password("Ana", "https://coldcare.example/restablecer#token=t", 30),
+        *_correos_con_codigo().values(),
+    ]
+    correos = [(m.asunto, m.cuerpo, m.html) for m in cuenta]
+    excursion = _aviso()
+    alertas = [
+        n.componer_correo_excursion(excursion, "c@x.pe", "d@y.pe", "https://coldcare.example"),
+        n.componer_correo_excursion(_aviso(diferida=True), "c@x.pe", "d@y.pe"),
+        n.componer_correo_preventivo(
+            replace(_aviso(temperatura=7.6), nivel=NivelRiesgo.RIESGO_PREVENTIVO), "c@x.pe", "d@y.pe", pagina
+        ),
+    ]
+    for tipo in ("sin_datos", "monitoreo_suspendido", "excursion_no_verificada", "sensor_fault", "colision_clave"):
+        alertas.append(n.componer_correo_sin_datos(
+            AvisoSinDatos(incidente_id=uuid4(), device_id="FARM-01", abierto_en=excursion.captured_at,
+                          ultimo_reporte_en=excursion.captured_at, umbral_segundos=90, tipo=tipo,
+                          detalle={"temperatura_interna": 11.5}),
+            "c@x.pe", "d@y.pe",
+        ))
+    return correos + [(m.asunto, m.cuerpo, m.html) for m in alertas]
+
+
+def test_los_asuntos_son_frases_sin_corchetes_ni_mayusculas_sostenidas():
+    """Gmail mandó la activación a Spam «por parecerse a otros mensajes»: nada de «[ColdCare]» ni de
+    palabras en MAYÚSCULAS en el asunto, que es lo que se lee en la notificación del teléfono."""
+    asuntos = [asunto for asunto, _, _ in _todos_los_correos()]
+    assert len(asuntos) == 13
+    for asunto in asuntos:
+        propio = asunto.replace("FARM-01", "")
+        assert "[" not in propio and "]" not in propio, asunto
+        assert not re.search(r"\b[A-ZÁÉÍÓÚÑ]{3,}\b", propio), asunto
+        assert asunto[0].isupper() and len(asunto) <= 60, asunto
+
+
+def test_cada_correo_html_trae_texto_plano_y_un_pie_que_invita_a_responder():
+    for asunto, texto, html in _todos_los_correos():
+        assert len(texto) > 80, asunto  # versión de texto plano con contenido real
+        if html is not None:
+            assert "¿Dudas? Responde a este correo" in html and "no respondas" not in html.lower(), asunto
+            # Lo único oculto es el preheader estándar.
+            assert html.count("display:none") == 1, asunto
+
+
+@pytest.mark.parametrize("alta", ["cuenta_creada", "activacion"])
+def test_los_correos_de_alta_no_traen_filas_de_credenciales(alta):
+    """Nada de «Usuario: … / Contraseña: …» (texto ni tabla): el acceso se explica en una frase."""
+    from src.infrastructure.notifications import correos_cuenta as c
+
+    correo = (
+        c.correo_cuenta_creada("Ana", "a@x.pe", "https://coldcare.example")
+        if alta == "cuenta_creada"
+        else c.correo_activacion_cuenta("Ana", "a@x.pe", "123456", 48, "https://coldcare.example/r")
+    )
+    assert not re.search(r"(?mi)^\s*(usuario|contraseña|clave)\s*:", correo.cuerpo)
+    assert "Tu usuario es" not in correo.cuerpo
+    assert not re.search(r">\s*(Usuario|Contraseña|Clave)\s*</td>", correo.html)
+    assert "Entrarás con este mismo correo (a@x.pe)" in correo.cuerpo and "a@x.pe" in correo.html
+    if alta == "activacion":
+        assert "Tú eliges tu contraseña al activar la cuenta" in correo.cuerpo
+        assert "Tú eliges tu contraseña al activar la cuenta" in correo.html

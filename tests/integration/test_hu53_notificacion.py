@@ -256,7 +256,7 @@ async def test_lectura_diferida_se_marca_en_el_asunto(entorno):
     despachador = _despachador(entorno, transporte)
     await main._procesar_lectura_mqtt(_lectura(12.0, minutos_atras=20), _BroadcasterMudo(), None, despachador)
     await _procesar_cola(despachador)
-    assert "[DIFERIDA]" in transporte.enviados[0].asunto
+    assert "(lectura diferida)" in transporte.enviados[0].asunto
 
 
 @pytest.mark.asyncio

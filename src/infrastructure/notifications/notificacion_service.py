@@ -57,6 +57,18 @@ def _temperatura_html(temperatura: float | None) -> str:
     return formato_temperatura(temperatura) if temperatura is not None else "sin dato de sensor"
 
 
+def _equipo(device_id: str, dispositivo: dict) -> str:
+    """Para el asunto: el nombre que reconoce la farmacia («Refrigerador de vacunas») o, sin él, el id del nodo.
+
+    Los asuntos son frases cortas con mayúscula solo al inicio, sin etiquetas entre corchetes ni
+    palabras en MAYÚSCULAS (Gmail las asocia con spam). El asunto y el preheader son lo que se lee
+    en la notificación del teléfono; el id del nodo siempre va en el cuerpo.
+
+    El nombre lo escribe un usuario: se colapsan los espacios y saltos de línea, porque un salto en
+    el asunto hace que `EmailMessage` rechace la cabecera y la alerta crítica no saldría."""
+    return " ".join(str(dispositivo.get("nombre") or "").split()) or device_id
+
+
 def componer_correo_excursion(
     aviso: AvisoExcursion,
     remitente: str,
@@ -70,7 +82,6 @@ def componer_correo_excursion(
     —qué refrigerador, dónde, a cuánto y cuándo— y llevar a la alerta."""
     dispositivo = dispositivo or {}
     temperatura = f"{aviso.temperatura:.1f} °C" if aviso.temperatura is not None else "sin dato de sensor"
-    etiqueta = " [DIFERIDA]" if aviso.diferida else ""
     lineas = [
         "ALERTA CRÍTICA — Cadena de frío",
         "",
@@ -99,7 +110,8 @@ def componer_correo_excursion(
     ]
     if frontend_url:
         lineas += ["", f"Ver la alerta: {frontend_url.rstrip('/')}/alertas?id={aviso.alerta_id}"]
-    asunto = f"[ColdCare] EXCURSIÓN CRÍTICA{etiqueta} — {aviso.device_id}"
+    diferida = " (lectura diferida)" if aviso.diferida else ""
+    asunto = f"Excursión crítica{diferida} en {_equipo(aviso.device_id, dispositivo)}: {temperatura}"
     return MensajeCorreo(
         remitente=remitente,
         destinatario=destinatario,
@@ -162,8 +174,8 @@ def componer_correo_preventivo(
         if aviso.temperatura is not None and RANGO_TERMICO_BPA.contiene(aviso.temperatura)
         else None
     )
-    equipo = dispositivo.get("nombre") or aviso.device_id
-    asunto = f"[ColdCare] RIESGO PREVENTIVO — {aviso.device_id}"
+    equipo = _equipo(aviso.device_id, dispositivo)
+    asunto = f"Riesgo preventivo en {equipo}"
     lineas = [
         "RIESGO PREVENTIVO — Cadena de frío",
         "",
@@ -220,8 +232,10 @@ def _correo_retencion(
     telemetría se retiene) o una lectura retenida salió de rango y su origen no
     se puede comprobar."""
     detalle = aviso.detalle or {}
+    equipo = _equipo(aviso.device_id, dispositivo)
     if aviso.tipo == "excursion_no_verificada":
         titulo = "EXCURSIÓN CRÍTICA (origen no verificado)"
+        asunto = f"Excursión crítica de origen no verificado en {equipo}"
         temperatura = detalle.get("temperatura_interna")
         lineas = [f"{titulo} — Cadena de frío", "", f"Dispositivo: {aviso.device_id}"]
         if dispositivo.get("nombre"):
@@ -238,6 +252,7 @@ def _correo_retencion(
         ]
     elif aviso.tipo == "sensor_fault":
         titulo = "FALLA DEL SENSOR DE TEMPERATURA"
+        asunto = f"Falla del sensor de temperatura en {equipo}"
         lineas = [f"{titulo} — Cadena de frío", "", f"Dispositivo: {aviso.device_id}"]
         if dispositivo.get("nombre"):
             lineas.append(f"Equipo: {dispositivo['nombre']}")
@@ -250,6 +265,7 @@ def _correo_retencion(
         ]
     elif aviso.tipo == "colision_clave":
         titulo = "COLISIÓN DE IDENTIDAD DE LECTURAS"
+        asunto = f"Colisión de identidad de lecturas en {equipo}"
         lineas = [
             f"{titulo} — Cadena de frío", "", f"Dispositivo: {aviso.device_id}",
             f"Arranque (boot_id): {detalle.get('boot_id')}  Secuencia (seq_no): {detalle.get('seq_no')}",
@@ -260,6 +276,7 @@ def _correo_retencion(
         ]
     else:
         titulo = "MONITOREO SUSPENDIDO POR ROTACIÓN"
+        asunto = f"Monitoreo suspendido por rotación en {equipo}"
         lineas = [
             f"{titulo} — Cadena de frío", "", f"Dispositivo: {aviso.device_id}", "",
             "Se rotó la credencial del nodo por sospecha de compromiso. Hasta que el nodo demuestre que tiene "
@@ -273,7 +290,7 @@ def _correo_retencion(
     return MensajeCorreo(
         remitente=remitente,
         destinatario=destinatario,
-        asunto=f"[ColdCare] {titulo} — {aviso.device_id}",
+        asunto=asunto,
         cuerpo="\n".join(lineas),
     )
 
@@ -309,7 +326,7 @@ def componer_correo_sin_datos(
     return MensajeCorreo(
         remitente=remitente,
         destinatario=destinatario,
-        asunto=f"[ColdCare] SIN DATOS — {aviso.device_id}",
+        asunto=f"Sin datos de {_equipo(aviso.device_id, dispositivo)}",
         cuerpo="\n".join(lineas),
     )
 

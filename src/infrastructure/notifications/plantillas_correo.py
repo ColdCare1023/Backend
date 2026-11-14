@@ -419,7 +419,11 @@ def renderizar(
         if nota
         else ""
     )
-    texto_pie = pie or "Recibes este mensaje porque eres parte del equipo de ColdCare. Es un aviso automático: no respondas a este correo."
+    # Pie que invita a responder: un «no respondas» (no-reply) resta confianza ante los filtros de spam.
+    texto_pie = pie or (
+        "Recibes este mensaje porque eres parte del equipo de ColdCare. "
+        "¿Dudas? Responde a este correo o habla con el administrador de tu farmacia."
+    )
     relleno = "&#847;&zwnj;&nbsp;" * 40  # evita que Gmail rellene la vista previa con el cuerpo
     return f"""<!DOCTYPE html>
 {_ATRIBUCION}

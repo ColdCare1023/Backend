@@ -18,14 +18,17 @@ class CorreoComposto:
 def correo_cuenta_creada(
     nombre: str, email: str, frontend_url: str = "", *, logo_url: str | None = None
 ) -> CorreoComposto:
-    """Se envía al crear la cuenta. Nunca lleva la contraseña: la entrega el administrador."""
+    """Se envía al crear la cuenta. Nunca lleva la contraseña: la entrega el administrador.
+
+    Sin filas tipo «Usuario: … / Contraseña: …» (parecen credenciales y Gmail las trata como spam):
+    el correo de acceso va dentro de una frase."""
     enlace = frontend_url.rstrip("/") if frontend_url else ""
-    asunto = "[ColdCare] Tu cuenta fue creada"
+    asunto = "Tu cuenta de ColdCare está lista"
     lineas = [
         f"Hola {nombre},",
         "",
         "Se creó tu cuenta en ColdCare, el sistema de monitoreo de la cadena de frío.",
-        f"Tu usuario es este correo: {email}.",
+        f"Entrarás con este mismo correo ({email}).",
         "La contraseña temporal te la entrega el administrador; el sistema te pedirá cambiarla en tu primer acceso.",
     ]
     if enlace:
@@ -41,10 +44,9 @@ def correo_cuenta_creada(
         parrafos=[
             "Se creó tu cuenta en ColdCare, el sistema que vigila la temperatura de tus refrigeradores "
             "y te avisa antes de que un lote se pierda.",
-            "Tu contraseña es temporal, te la entrega el administrador. En tu primer acceso el sistema "
-            "te pedirá elegir una propia.",
+            f"Entrarás con este mismo correo ({email}). Tu contraseña es temporal, te la entrega el "
+            "administrador. En tu primer acceso el sistema te pedirá elegir una propia.",
         ],
-        detalles=[("Usuario", email)],
         boton=Boton("Ingresar a ColdCare", enlace) if enlace else None,
         nota="¿No esperabas este mensaje? Avisa al administrador: alguien pudo escribir tu correo por error.",
     )
@@ -53,7 +55,7 @@ def correo_cuenta_creada(
 
 def correo_recuperar_password(nombre: str, enlace: str, minutos: int, *, logo_url: str | None = None) -> CorreoComposto:
     """«Olvidé mi contraseña»: enlace de un solo uso con vida corta."""
-    asunto = "[ColdCare] Restablecer contraseña"
+    asunto = "Restablece tu contraseña de ColdCare"
     cuerpo = (
         f"Hola {nombre}:\n\n"
         "Recibimos una solicitud para restablecer la contraseña de tu cuenta.\n"
@@ -103,7 +105,7 @@ def enlace_codigo(url_codigo: str, email: str, modo: str) -> str:
 
 def correo_codigo_login(nombre: str, codigo: str, minutos: int, *, logo_url: str | None = None) -> CorreoComposto:
     """Segundo factor del inicio de sesión con contraseña. `logo_url`: ver `plantillas_correo.url_logo`."""
-    asunto = "[ColdCare] Tu código para iniciar sesión"
+    asunto = "Tu código de acceso a ColdCare"
     vigencia = _vigencia(minutos)
     cuerpo = (
         f"Hola {nombre}:\n\n"
@@ -148,7 +150,7 @@ def correo_codigo_recuperacion(
     (como en la activación). Si se pasa `enlace_legado`, el enlace de un solo uso
     de la versión anterior (sigue funcionando) va solo en el texto plano: en el
     HTML el código es la única vigencia que se lee primero."""
-    asunto = "[ColdCare] Restablecer contraseña"
+    asunto = "Restablece tu contraseña de ColdCare"
     vigencia = _vigencia(minutos)
     lineas = [
         f"Hola {nombre}:",
@@ -199,17 +201,17 @@ def correo_activacion_cuenta(
     logo_url: str | None = None,
 ) -> CorreoComposto:
     """Bienvenida de una cuenta creada por un administrador: explica cómo
-    elegir la contraseña con el código de activación. Nunca lleva una contraseña."""
-    asunto = "[ColdCare] Tu cuenta fue creada"
+    elegir la contraseña con el código de activación. Nunca lleva una contraseña ni filas
+    tipo «Usuario: …»: el correo de acceso va dentro de una frase."""
+    asunto = "Activa tu cuenta de ColdCare"
     vigencia = _vigencia(horas * 60)
     inicio = frontend_url.rstrip("/") if frontend_url else ""
     lineas = [
         f"Hola {nombre},",
         "",
         "Un administrador creó tu cuenta en ColdCare, el sistema de monitoreo de la cadena de frío.",
-        f"Tu usuario es este correo: {email}.",
+        f"Entrarás con este mismo correo ({email}). Tú eliges tu contraseña al activar la cuenta:",
         "",
-        "Para activarla, elige tu propia contraseña:",
         f"  1. Abre {enlace_activacion}",
         "  2. Escribe este código de activación:",
         "",
@@ -226,19 +228,19 @@ def correo_activacion_cuenta(
     html = renderizar(
         asunto=asunto,
         logo_url=logo_url or url_logo(inicio or enlace_activacion),
-        preheader="Activa tu cuenta de ColdCare eligiendo tu contraseña.",
+        preheader=f"Un administrador te dio acceso a ColdCare. Tú eliges tu contraseña; el código vence en {vigencia}.",
         tono="marca",
         etiqueta="Activa tu cuenta",
         titulo=f"Bienvenido/a, {nombre}",
         parrafos=[
             "Un administrador creó tu cuenta en ColdCare, el sistema que vigila la temperatura de tus "
             "refrigeradores y te avisa antes de que un lote se pierda.",
-            "Para activarla, abre la pantalla de activación, escribe este código y elige tu contraseña: "
-            "al menos 10 caracteres, con letras y números.",
+            f"Entrarás con este mismo correo ({email}). Tú eliges tu contraseña al activar la cuenta: "
+            "abre la pantalla de activación, escribe este código y elige una de al menos 10 caracteres, "
+            "con letras y números.",
         ],
         codigo=codigo,
         codigo_vigencia=f"Vence en {vigencia} · funciona una sola vez",
-        detalles=[("Usuario", email)],
         boton=Boton("Activar mi cuenta", enlace_activacion),
         nota="¿No esperabas este mensaje? Avisa al administrador: alguien pudo escribir tu correo por error. "
         "No compartas este código: ColdCare nunca te lo pedirá.",

@@ -141,7 +141,7 @@ async def test_el_aviso_sin_datos_se_envia_una_sola_vez(db_session_factory, nodo
     segundo = await despachador.procesar(aviso)
 
     assert (primero.estado, segundo.estado) == ("enviado", "ya_notificado")
-    assert transporte.enviados[0].asunto == f"[ColdCare] SIN DATOS — {DEVICE_ID}"
+    assert transporte.enviados[0].asunto == f"Sin datos de {DEVICE_ID}"
     assert (await _incidentes(db_session_factory))[0].notificado_en is not None
 
 

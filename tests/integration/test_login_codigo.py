@@ -119,7 +119,7 @@ async def test_login_con_codigo_camino_feliz(client, tecnico, otp, db_session_fa
 
     (destino, asunto, texto, html) = otp.enviados[0]
     codigo = otp.ultimo_codigo()
-    assert destino == EMAIL and asunto == "[ColdCare] Tu código para iniciar sesión"
+    assert destino == EMAIL and asunto == "Tu código de acceso a ColdCare"
     assert codigo not in asunto and codigo in html and "no fuiste t" in texto.lower()
     # La base no guarda ni el código ni el desafío.
     (fila,) = await _codigos(db_session_factory)
