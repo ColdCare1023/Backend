@@ -55,6 +55,7 @@ from src.interface.api.schemas import (
     SSETicketResponse,
     TokenResponse,
 )
+from src.interface.limitador_auditoria import LIMITE_AUDITORIA
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -84,17 +85,24 @@ async def login(
         # HU-50 criterio 2: un evento administrativo DISTINTO de cada intento
         # fallido individual, visible en el panel de seguridad, sin afirmar
         # que se trata de un ataque confirmado — solo que se superó el umbral.
-        await auditoria.execute(
-            usuario_id=None,
-            accion="UMBRAL_INTENTOS_FALLIDOS_EXCEDIDO",
-            recurso="auth/login",
-            detalle={
-                "email": enmascarar_email(form_data.username),
-                "alcance": "cuenta" if bloqueo_cuenta else "ip",
-            },
-            ip_origen=ip,
-        )
-        await session.commit()
+        # Esta rama no exige autenticación y la bitácora no admite borrado:
+        # se audita una fila por ventana y clave bloqueada, con el número de
+        # intentos que solo se contaron desde la anterior.
+        alcance = "cuenta" if bloqueo_cuenta else "ip"
+        sin_auditar = LIMITE_AUDITORIA.permitir(f"login_bloqueado:{alcance}:{cuenta if bloqueo_cuenta else ip}")
+        if sin_auditar is not None:
+            await auditoria.execute(
+                usuario_id=None,
+                accion="UMBRAL_INTENTOS_FALLIDOS_EXCEDIDO",
+                recurso="auth/login",
+                detalle={
+                    "email": enmascarar_email(form_data.username),
+                    "alcance": alcance,
+                    "intentos_sin_auditar": sin_auditar,
+                },
+                ip_origen=ip,
+            )
+            await session.commit()
         espera = max(limiter.segundos_para_reintentar(ip), limiter_cuenta.segundos_para_reintentar(cuenta))
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,

@@ -77,3 +77,19 @@ def test_rechaza_artefacto_con_checksum_externo_alterado(tmp_path):
     servicio = RandomForestRiesgoService(model_path=ruta, metadata_path=metadata)
     with pytest.raises(RuntimeError, match="Checksum SHA-256 inválido"):
         _ = servicio.modelo_disponible
+
+
+def test_modelo_version_es_none_si_el_artefacto_fue_rechazado(tmp_path):
+    """Un artefacto con checksum alterado no puede tumbar la ingesta: la
+    versión del modelo queda en None y la lectura se registra igual (HU-16)."""
+    from src.application.use_cases.clasificar_riesgo_termico import ClasificarRiesgoTermicoUseCase
+
+    ruta = tmp_path / "modelo.pkl"
+    metadata = tmp_path / "model_metadata.json"
+    joblib.dump(_ModeloFeaturesIncorrectas(), ruta)
+    metadata.write_text('{"model_hash": "checksum-falso"}')
+    servicio = RandomForestRiesgoService(model_path=ruta, metadata_path=metadata)
+
+    clasificar = ClasificarRiesgoTermicoUseCase(servicio, modo_legado="experimental")
+
+    assert clasificar.modelo_version is None
