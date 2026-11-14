@@ -26,6 +26,8 @@ UMBRAL_DESVIACION_C = 0.5
 # de rango 2-8 °C (HU-21), que no depende de este historial.
 MINIMO_HISTORIAL_PARA_TENDENCIA = 2
 
+TIME_QUALITY_SIN_SINCRONIZAR = "unsynced"
+
 
 def _a_utc(valor: datetime) -> datetime:
     """SQLite devuelve datetimes naive aunque la columna sea timezone=True;
@@ -222,4 +224,10 @@ class ClasificarRiesgoTermicoUseCase:
             )
         if self._modo_legado == "desactivado":
             return self._ai_service.inferir_solo_regla(features)
+        # HU-18 esc. 3: sin hora sincronizada la ventana temporal no es fiable.
+        if lectura.time_quality == TIME_QUALITY_SIN_SINCRONIZAR:
+            return ResultadoInferencia(
+                nivel=None, confianza=None, origen=ORIGEN_DATO_INSUFICIENTE,
+                estado_inferencia=ESTADO_OMITIDA, motivo_no_inferencia="time_quality_insuficiente",
+            )
         return self._ai_service.inferir(features)

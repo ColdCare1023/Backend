@@ -30,7 +30,7 @@ from src.infrastructure.database.repositories.prediccion_preventiva_repository i
 from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
-from src.interface.api.deps import DbSessionDep, SettingsDep, require_roles
+from src.interface.api.deps import CurrentUserDep, DbSessionDep, SettingsDep, require_roles
 from src.interface.api.schemas import (
     InferenciaLecturaResponse,
     RegistrarVersionModeloRequest,
@@ -252,6 +252,7 @@ async def activar_version_modelo(
     use_case = ActivarVersionModeloUseCase(
         repositorio, RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session)),
         settings.ia_criterio_principal,
+        get_random_forest_service().hash_artefacto,
     )
     try:
         activada = await use_case.execute(version, admin.id)
@@ -290,6 +291,8 @@ async def activar_version_modelo(
         ip_origen=request.client.host if request.client else None,
     )
     await session.commit()
+    # HU-46 esc. 3: desde aquí solo se carga el artefacto de la versión activa.
+    get_random_forest_service().fijar_hash_aprobado(activada.model_hash)
     return _version_a_response(activada)
 
 
@@ -309,4 +312,34 @@ async def consultar_inferencia_lectura(
         resultado = await use_case.execute(lectura_id)
     except RecursoNoEncontradoError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    if resultado["feature_schema_version"] is None and resultado["modelo_version"] is not None:
+        metadata = get_random_forest_service().metadata or {}
+        resultado["feature_schema_version"] = metadata.get("feature_schema_version")
     return InferenciaLecturaResponse(**resultado)
+
+
+@router.api_route(
+    "/inferencia/{lectura_id}", methods=["PUT", "PATCH", "DELETE"], include_in_schema=False
+)
+async def rechazar_modificacion_inferencia(
+    lectura_id: UUID,
+    session: DbSessionDep,
+    request: Request,
+    usuario: CurrentUserDep,
+) -> None:
+    """HU-47 esc. 3: la evidencia es de solo lectura y el intento queda auditado."""
+    await AuditarAccionCriticaUseCase(
+        SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+    ).execute(
+        usuario_id=usuario.id,
+        accion="INTENTO_MODIFICAR_INFERENCIA",
+        recurso=f"ia/inferencia/{lectura_id}",
+        detalle={"metodo": request.method},
+        ip_origen=request.client.host if request.client else None,
+    )
+    await session.commit()
+    raise HTTPException(
+        status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+        detail="La evidencia de inferencia es de solo lectura.",
+        headers={"Allow": "GET"},
+    )

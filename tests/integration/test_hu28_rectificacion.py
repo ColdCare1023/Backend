@@ -34,7 +34,7 @@ def _crear_alerta(client, token) -> str:
 
 def _accion(client, token, alerta_id, texto="Se trasladó el lote al refrigerador de respaldo.") -> dict:
     respuesta = client.post(
-        f"/api/alertas/{alerta_id}/acciones-correctivas", json={"descripcion": texto}, headers=auth_header(token)
+        f"/api/alertas/{alerta_id}/acciones-correctivas", json={"decision": "Trasladar el lote", "justificacion": "Lectura fuera de rango", "descripcion": texto}, headers=auth_header(token)
     )
     assert respuesta.status_code == 201
     return respuesta.json()

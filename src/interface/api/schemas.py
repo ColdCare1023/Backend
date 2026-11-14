@@ -10,6 +10,7 @@ from pydantic import (
     Field,
     StringConstraints,
     field_validator,
+    model_validator,
 )
 
 from src.domain.entities.checklist_bpa import DIAS_RETROACTIVOS_MAXIMOS
@@ -272,7 +273,11 @@ class AlertaResponse(BaseModel):
 
 
 class AccionCorrectivaCreateRequest(_PeticionEstricta):
+    """HU-27: decisión adoptada, acción ejecutada (`descripcion`) y justificación."""
+
+    decision: str = Field(min_length=1, max_length=2000)
     descripcion: str = Field(min_length=1, max_length=2000)
+    justificacion: str = Field(min_length=1, max_length=2000)
 
 
 class AccionCorrectivaRectificarRequest(_PeticionEstricta):
@@ -288,7 +293,9 @@ class AccionCorrectivaResponse(BaseModel):
     usuario_id: UUID
     # D7: nombre ya resuelto ("Usuario desactivado" si fue anonimizado, HU-45).
     usuario_nombre: str | None = None
+    decision: str | None = None
     descripcion: str
+    justificacion: str | None = None
     created_at: datetime | None = None
     corrige_accion_id: UUID | None = None
     # HU-28: motivo de la rectificación, qué acción la rectificó a ella y si es
@@ -404,6 +411,7 @@ class DispositivoResponse(BaseModel):
     fecha_ultima_calibracion: date | None = None
     numero_certificado_calibracion: str | None = None
     fecha_proxima_calibracion: date | None = None
+    margen_aviso_calibracion_dias: int = 30
     observaciones_calibracion: str | None = None
     # HU-44/HU-10: estado de la credencial MQTT (nunca el token en sí).
     mqtt_token_activo: bool = False
@@ -455,6 +463,7 @@ class DispositivoResumenResponse(BaseModel):
     fecha_ultima_calibracion: date | None = None
     numero_certificado_calibracion: str | None = None
     fecha_proxima_calibracion: date | None = None
+    margen_aviso_calibracion_dias: int = 30
     sensores_habilitados: list[str] = Field(default_factory=list)
 
 
@@ -654,6 +663,10 @@ class InferenciaLecturaResponse(BaseModel):
     estado_inferencia: str | None = None
     excursion_confirmada: bool = False
     riesgo_efectivo: NivelRiesgo | None = None
+    # HU-18 esc. 4: contexto de la inferencia.
+    horizonte_min: int | None = None
+    feature_schema_version: str | None = None
+    politica_operativa: str | None = None
     # HU-20: la clase la produjo el modelo legado (datos sintéticos).
     ia_experimental: bool = False
 
@@ -764,9 +777,19 @@ class CalibracionRequest(_PeticionEstricta):
     fecha_calibracion: date
     numero_certificado: str = Field(min_length=1, max_length=100)
     observaciones: str | None = Field(default=None, max_length=2000)
-    # Periodicidad legal habitual del certificado; configurable por si el
-    # laboratorio emite uno con vigencia distinta.
-    meses_vigencia: int = Field(default=12, ge=1, le=60)
+    # HU-30: la vigencia sale del certificado. `meses_vigencia` queda para
+    # clientes anteriores; sin ninguno de los dos no se impone un periodo.
+    fecha_vencimiento: date | None = None
+    meses_vigencia: int | None = Field(default=None, ge=1, le=60)
+    margen_aviso_dias: int = Field(default=30, ge=1, le=365)
+
+    @model_validator(mode="after")
+    def _vigencia_indicada(self) -> "CalibracionRequest":
+        if self.fecha_vencimiento is None and self.meses_vigencia is None:
+            raise ValueError("Indique la fecha de vencimiento del certificado")
+        if self.fecha_vencimiento is not None and self.fecha_vencimiento <= self.fecha_calibracion:
+            raise ValueError("El vencimiento debe ser posterior a la fecha de calibración")
+        return self
 
     @field_validator("fecha_calibracion")
     @classmethod

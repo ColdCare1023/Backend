@@ -3,10 +3,12 @@ trazabilidad de la inferencia) del backlog de 51 HU finales."""
 
 from datetime import datetime, timedelta, timezone
 
+from src.infrastructure.ai.random_forest_service import RandomForestRiesgoService
 from tests.conftest import auth_header
 
 DEVICE_ID = "FARM-HU46-01"
-HASH_VALIDO = "a" * 64
+# HU-16 esc. 4: solo se activa la versión cuyo hash es el del artefacto desplegado.
+HASH_VALIDO = RandomForestRiesgoService().hash_artefacto()
 
 
 def _version_payload(**overrides) -> dict:
