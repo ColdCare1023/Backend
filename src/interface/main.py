@@ -34,6 +34,10 @@ from src.application.use_cases.prueba_posesion import (
     preparar_desafio,
     verificar_posesion,
 )
+from src.application.use_cases.registrar_estado_nodo import (
+    RegistrarEpisodioBufferUseCase,
+    RegistrarEstadoNodoUseCase,
+)
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.application.use_cases.registrar_lectura_termica import (
     RegistrarLecturaTermicaUseCase,
@@ -60,6 +64,7 @@ from src.infrastructure.database.repositories.audit_log_repository import (
     SQLAlchemyAuditLogRepository,
 )
 from src.infrastructure.database.repositories.device_repository import SQLAlchemyDeviceRepository
+from src.infrastructure.database.repositories.estado_nodo_repository import SQLAlchemyEstadoNodoRepository
 from src.infrastructure.database.repositories.firmware_repository import SQLAlchemyFirmwareRepository
 from src.infrastructure.database.repositories.incidente_repository import SQLAlchemyIncidenteRepository
 from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
@@ -543,6 +548,12 @@ async def _procesar_evento_v1(
             )
             if evento.event_type == "arranque":
                 await _registrar_version_arranque(device_repository, evento)
+            elif evento.event_type == "buffer_saturado":
+                # HU-48 esc. 2: además de auditarse, el episodio (desde, hasta,
+                # causa, pérdidas) queda consultable para el tablero.
+                await RegistrarEpisodioBufferUseCase(SQLAlchemyEstadoNodoRepository(session)).execute(
+                    evento.device_id, evento.detail, recibido_en=datetime.now(timezone.utc)
+                )
         # IOT-004: el resultado de un despliegue OTA lo informa el propio nodo.
         await RegistrarResultadoOtaUseCase(
             device_repository,
@@ -583,7 +594,18 @@ async def _registrar_estado_nodo(evento: contrato_v1.EventoV1) -> bool:
             return False
         if await credencial_en_cuarentena(dispositivos, evento.device_id):
             return True
-        await dispositivos.registrar_latido(evento.device_id, datetime.now(timezone.utc))
+        recibido_en = datetime.now(timezone.utc)
+        await dispositivos.registrar_latido(evento.device_id, recibido_en)
+        # HU-48: último estado del buffer LittleFS (pendientes, capacidad,
+        # pérdidas), consultable en /api/dispositivos/estado-operativo.
+        await RegistrarEstadoNodoUseCase(SQLAlchemyEstadoNodoRepository(session)).execute(
+            evento.device_id,
+            evento.detail,
+            recibido_en=recibido_en,
+            # Sin reloj sincronizado, la hora del nodo no sirve para ubicar los pendientes.
+            ocurrido_en=evento.occurred_at if evento.time_quality != "unsynced" else None,
+            boot_id=evento.boot_id,
+        )
         if isinstance(intervalo, int) and not isinstance(intervalo, bool):
             try:
                 await ActualizarIntervaloReporteUseCase(dispositivos).execute(
@@ -1429,8 +1451,9 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
-        # El frontend necesita leer cuándo reintentar tras un 429/503.
-        expose_headers=["Retry-After"],
+        # El frontend necesita leer cuándo reintentar tras un 429/503 y el
+        # total sin paginar de GET /api/lecturas (HU-31/HU-36).
+        expose_headers=["Retry-After", "X-Total-Count"],
     )
     instalar_security_headers(app, hsts=es_produccion)
 

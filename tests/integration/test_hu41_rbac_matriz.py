@@ -84,6 +84,8 @@ MATRIZ_ESPERADA: dict[tuple[str, str], frozenset[str] | str] = {
     ("POST", "/api/lecturas"): frozenset({F, T}),
     ("GET", "/api/lecturas"): frozenset({AU, F, T}),
     ("GET", "/api/lecturas/{lectura_id}"): frozenset({AU, F, T}),
+    # HU-31/HU-36: serie agregada, mismos roles que el historial.
+    ("GET", "/api/lecturas/serie"): frozenset({AU, F, T}),
     ("GET", "/api/reportes/bpa"): frozenset({AU, F}),
     ("GET", "/api/reportes/bpa/pdf"): frozenset({A, AU, F}),
     # Autenticado por ticket SSE de un solo uso (EventSource no envía headers).

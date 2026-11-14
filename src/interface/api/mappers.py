@@ -1,14 +1,33 @@
 import math
+from datetime import datetime, timezone
 from numbers import Real
 
 from src.application.use_cases.clasificar_riesgo_termico import MOTIVO_REGLA_DIRECTA
+from src.application.use_cases.registrar_estado_nodo import (
+    CAUSA_BUFFER_AGOTADO,
+    DESCRIPCION_BUFFER_AGOTADO,
+    VistaBufferLittleFS,
+)
 from src.domain.entities.alerta_termica import AlertaTermica
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.entities.registro_trazabilidad import RegistroTrazabilidad
+from src.domain.entities.serie_termica import EstadisticaMagnitud, SerieTermica
 from src.domain.entities.usuario import Usuario
+from src.domain.repositories.i_estado_nodo_repository import EpisodioBufferSaturado
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.config import get_settings
-from src.interface.api.schemas import AlertaResponse, LecturaResponse, TrazabilidadResponse
+from src.interface.api.schemas import (
+    AlertaResponse,
+    BrechaBufferResponse,
+    BrechaSerieResponse,
+    BucketSerieResponse,
+    BufferLittleFSResponse,
+    EstadisticaMagnitudResponse,
+    LecturaResponse,
+    ResumenSerieResponse,
+    SerieTermicaResponse,
+    TrazabilidadResponse,
+)
 
 
 def _estado_sensor(valor: object | None, minimo: float, maximo: float) -> str:
@@ -50,6 +69,20 @@ def _apertura_continua(payload: dict | None) -> int | None:
     return valor if isinstance(valor, int) and not isinstance(valor, bool) and valor > 0 else None
 
 
+def lectura_sin_hora(lectura: LecturaTermica) -> bool:
+    """HU-07 (H2): arranque sin hora sincronizada todavía sin reanclar. El
+    `timestamp` de la lectura es entonces la hora de llegada al backend."""
+    return not lectura.es_manual and lectura.time_quality == "unsynced" and lectura.timestamp_estimado is None
+
+
+def origen_hora(lectura: LecturaTermica) -> str:
+    if lectura.es_manual:
+        return "manual"
+    if lectura.time_quality == "unsynced":
+        return "recepcion" if lectura.timestamp_estimado is None else "reconstruida"
+    return "nodo"
+
+
 def lectura_to_response(lectura: LecturaTermica) -> LecturaResponse:
     return LecturaResponse(
         id=lectura.id,
@@ -81,6 +114,9 @@ def lectura_to_response(lectura: LecturaTermica) -> LecturaResponse:
         timestamp_estimado=lectura.timestamp_estimado,
         origen=lectura.origen,
         registrado_por=lectura.registrado_por,
+        sin_hora=lectura_sin_hora(lectura),
+        origen_hora=origen_hora(lectura),
+        recibida_en=lectura.received_at,
         estado_sensores={
             "temperatura_interna": _estado_sensor(lectura.temperatura_interna, -55.0, 125.0),
             "temperatura_ambiental": _estado_sensor(lectura.temperatura_ambiental, -40.0, 125.0),
@@ -177,4 +213,110 @@ def trazabilidad_to_response(registro: RegistroTrazabilidad, rol: Rol | None = N
         hash_actual=registro.hash_actual,
         chain_id=registro.chain_id,
         chain_seq=registro.chain_seq,
+    )
+
+
+# ── HU-31 / HU-36: serie agregada ──────────────────────────────────────────
+
+
+def _utc(instante: datetime | None) -> datetime | None:
+    if instante is None:
+        return None
+    return instante if instante.tzinfo else instante.replace(tzinfo=timezone.utc)
+
+
+def _estadistica(e: EstadisticaMagnitud) -> EstadisticaMagnitudResponse:
+    return EstadisticaMagnitudResponse(min=e.minimo, max=e.maximo, promedio=e.promedio, n=e.n)
+
+
+def serie_to_response(serie: SerieTermica) -> SerieTermicaResponse:
+    r = serie.resumen
+    return SerieTermicaResponse(
+        device_id=serie.device_id,
+        desde=serie.desde,
+        hasta=serie.hasta,
+        bucket_segundos=serie.bucket_segundos,
+        bucket_automatico=serie.bucket_automatico,
+        intervalo_reporte_segundos=serie.intervalo_reporte_segundos,
+        umbral_brecha_segundos=serie.umbral_brecha_segundos,
+        total_lecturas=r.lecturas,
+        lecturas_sin_hora=r.lecturas_sin_hora,
+        lecturas_manuales=r.lecturas_manuales,
+        buckets=[
+            BucketSerieResponse(
+                inicio=b.inicio,
+                fin=b.fin,
+                lecturas=b.lecturas,
+                temperatura_interna=_estadistica(b.temperatura_interna),
+                temperatura_ambiental=_estadistica(b.temperatura_ambiental),
+                humedad_ambiental=_estadistica(b.humedad_ambiental),
+                fuera_de_rango=b.fuera_de_rango,
+                excursiones=b.excursiones,
+            )
+            for b in serie.buckets
+        ],
+        brechas=[
+            BrechaSerieResponse(
+                desde=_utc(b.desde),
+                hasta=_utc(b.hasta),
+                duracion_segundos=b.duracion_segundos,
+                causa=b.causa,
+                perdidas=b.perdidas,
+                abierta=b.abierta,
+            )
+            for b in serie.brechas
+        ],
+        brechas_truncadas=serie.brechas_truncadas,
+        resumen=ResumenSerieResponse(
+            lecturas=r.lecturas,
+            temperatura_interna=_estadistica(r.temperatura_interna),
+            temperatura_ambiental=_estadistica(r.temperatura_ambiental),
+            humedad_ambiental=_estadistica(r.humedad_ambiental),
+            fuera_de_rango=r.fuera_de_rango,
+            excursiones=r.excursiones,
+            por_riesgo_efectivo=r.por_riesgo_efectivo,
+            primera_lectura_en=r.primera_lectura_en,
+            ultima_lectura_en=r.ultima_lectura_en,
+        ),
+    )
+
+
+# ── HU-48: buffer LittleFS del nodo ────────────────────────────────────────
+
+
+def brecha_buffer_to_response(episodio: EpisodioBufferSaturado) -> BrechaBufferResponse:
+    return BrechaBufferResponse(
+        desde=_utc(episodio.desde),
+        hasta=_utc(episodio.hasta),
+        muestras_perdidas=episodio.perdidas,
+        perdidas=episodio.perdidas,
+        causa=CAUSA_BUFFER_AGOTADO,
+        causa_nodo=episodio.causa,
+        descripcion=DESCRIPCION_BUFFER_AGOTADO,
+        abierta=episodio.abierto,
+        registrada_en=_utc(episodio.registrado_en),
+        actualizada_en=_utc(episodio.actualizado_en),
+        cerrada_en=_utc(episodio.cerrado_en),
+        desde_boot_id=episodio.desde_boot_id,
+        desde_seq_no=episodio.desde_seq_no,
+        hasta_boot_id=episodio.hasta_boot_id,
+        hasta_seq_no=episodio.hasta_seq_no,
+    )
+
+
+def buffer_to_response(vista: VistaBufferLittleFS | None) -> BufferLittleFSResponse | None:
+    if vista is None:
+        return None
+    return BufferLittleFSResponse(
+        pendientes=vista.pendientes,
+        limite=vista.limite,
+        ocupacion_pct=vista.ocupacion_pct,
+        desde=_utc(vista.desde),
+        hasta=_utc(vista.hasta),
+        rango_estimado=vista.rango_estimado,
+        perdidas=vista.perdidas,
+        cuarentena=vista.cuarentena,
+        reportado_en=vista.reportado_en,
+        ultima_sincronizacion_en=vista.ultima_sincronizacion_en,
+        brechas=[brecha_buffer_to_response(e) for e in vista.brechas],
     )

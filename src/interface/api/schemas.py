@@ -280,6 +280,17 @@ class LecturaResponse(BaseModel):
     # `registrado_por`). Un reporte o una pantalla no deben mezclarlas.
     origen: str = "dispositivo"
     registrado_por: UUID | None = None
+    # HU-07 (H2): lectura de un arranque sin hora sincronizada que aún no se
+    # pudo reanclar. Su `timestamp` es la hora de LLEGADA al backend, no la de
+    # captura: la interfaz debe rotularla «sin hora» y no ubicarla en la curva.
+    sin_hora: bool = False
+    # De dónde sale la hora que se muestra: "nodo" (reloj sincronizado o
+    # fechada por el nodo), "reconstruida" (`timestamp_estimado`),
+    # "recepcion" (sin hora: llegada al backend) o "manual" (la declaró quien
+    # registró la lectura).
+    origen_hora: Literal["nodo", "reconstruida", "recepcion", "manual"] = "nodo"
+    # HU-05: instante en que el backend recibió la lectura (None en filas antiguas).
+    recibida_en: datetime | None = None
 
 
 class AlertaResponse(BaseModel):
@@ -578,6 +589,55 @@ class IncidenteOperativoResponse(BaseModel):
     detalle: dict | None = None
 
 
+class BrechaBufferResponse(BaseModel):
+    """HU-48 esc. 2: tramo en que LittleFS estuvo lleno y el nodo no pudo
+    almacenar muestras nuevas. `desde`/`hasta` son None si el nodo no tenía
+    hora al perderlas (se identifican por `*_boot_id`/`*_seq_no`)."""
+
+    desde: datetime | None
+    hasta: datetime | None
+    # Mismo valor en los dos nombres: `muestras_perdidas` es el que ya lee el
+    # tablero; `perdidas`, el del evento del nodo.
+    muestras_perdidas: int
+    perdidas: int
+    causa: Literal["buffer_agotado"] = "buffer_agotado"
+    # Causa tal como la reporta el firmware (p. ej. "buffer_lleno").
+    causa_nodo: str
+    descripcion: str
+    abierta: bool
+    registrada_en: datetime
+    actualizada_en: datetime
+    cerrada_en: datetime | None = None
+    desde_boot_id: int | None = None
+    desde_seq_no: int | None = None
+    hasta_boot_id: int | None = None
+    hasta_seq_no: int | None = None
+
+
+class BufferLittleFSResponse(BaseModel):
+    """HU-48: datos pendientes de sincronizar en el buffer LittleFS del nodo
+    (último `estado_nodo`) y brechas por capacidad agotada.
+
+    `desde`/`hasta`: rango temporal de los pendientes (None si no hay). Si el
+    firmware no lo informa se estima (`rango_estimado = true`): desde la
+    última lectura persistida del nodo hasta su último latido."""
+
+    pendientes: int
+    limite: int
+    ocupacion_pct: int | None = None
+    desde: datetime | None = None
+    hasta: datetime | None = None
+    rango_estimado: bool = False
+    # Muestras no almacenadas desde la instalación (contador persistente del nodo).
+    perdidas: int
+    cuarentena: int | None = None
+    # Cuándo llegó el último `estado_nodo` (None si solo hay brechas).
+    reportado_en: datetime | None = None
+    # Último latido con 0 pendientes (HU-48 esc. 3).
+    ultima_sincronizacion_en: datetime | None = None
+    brechas: list[BrechaBufferResponse] = Field(default_factory=list)
+
+
 class EstadoOperativoResponse(DispositivoResumenResponse):
     """HU-33: estado operativo del nodo a partir de su última lectura recibida.
 
@@ -592,6 +652,12 @@ class EstadoOperativoResponse(DispositivoResumenResponse):
     estado_operativo: Literal["OPERATIVO", "SIN_DATOS", "FALLA_SENSOR", "MONITOREO_SUSPENDIDO"]
     sensores: list[SensorIoTResponse] = Field(default_factory=list)
     incidencias_operativas: list[IncidenteOperativoResponse] = Field(default_factory=list)
+    # HU-35: umbral configurado (PUERTA_UMBRAL_PROLONGADA_SEGUNDOS) a partir del
+    # cual una apertura en curso se destaca como prolongada. Se informa aunque
+    # aún no haya lecturas, para que el tablero no use un valor propio.
+    umbral_puerta_abierta_segundos: int | None = None
+    # HU-48: None si el nodo nunca informó su buffer (firmware sin `estado_nodo`).
+    buffer_littlefs: BufferLittleFSResponse | None = None
 
 
 class DispositivoBajaRequest(_PeticionEstricta):
@@ -905,3 +971,76 @@ class AuditLogResponse(BaseModel):
     # HU-42 esc. 1 / HU-50: resultado de la operación. En filas anteriores a la
     # migración 0039 se deriva de la acción (la bitácora no se reescribe).
     resultado: Literal["exitoso", "fallido", "denegado", "bloqueado"] = "exitoso"
+
+
+class EstadisticaMagnitudResponse(BaseModel):
+    """Mínimo, máximo y promedio de una magnitud; `n` cuenta solo lecturas con valor."""
+
+    min: float | None = None
+    max: float | None = None
+    promedio: float | None = None
+    n: int = 0
+
+
+class BucketSerieResponse(BaseModel):
+    inicio: datetime
+    fin: datetime
+    lecturas: int
+    temperatura_interna: EstadisticaMagnitudResponse
+    temperatura_ambiental: EstadisticaMagnitudResponse
+    humedad_ambiental: EstadisticaMagnitudResponse
+    # Lecturas con temperatura interna fuera de 2-8 °C y con excursión confirmada.
+    fuera_de_rango: int = 0
+    excursiones: int = 0
+
+
+class BrechaSerieResponse(BaseModel):
+    """Tramo sin telemetría mayor que el umbral de silencio del nodo."""
+
+    desde: datetime
+    hasta: datetime
+    duracion_segundos: int
+    # "buffer_agotado" si coincide con un episodio de buffer saturado (HU-48).
+    causa: Literal["sin_datos", "buffer_agotado"]
+    perdidas: int | None = None
+    # La brecha llega hasta ahora: el nodo sigue sin reportar.
+    abierta: bool = False
+
+
+class ResumenSerieResponse(BaseModel):
+    lecturas: int
+    temperatura_interna: EstadisticaMagnitudResponse
+    temperatura_ambiental: EstadisticaMagnitudResponse
+    humedad_ambiental: EstadisticaMagnitudResponse
+    fuera_de_rango: int = 0
+    excursiones: int = 0
+    por_riesgo_efectivo: dict[str, int] = Field(default_factory=dict)
+    primera_lectura_en: datetime | None = None
+    ultima_lectura_en: datetime | None = None
+
+
+class SerieTermicaResponse(BaseModel):
+    """HU-31 / HU-36: serie agregada del periodo completo, sin tope de filas.
+
+    Cada intervalo (`bucket_segundos`, alineado a la época UNIX) trae mínimo,
+    máximo, promedio y conteo; los intervalos sin lecturas no se incluyen y
+    los tramos sin datos se listan en `brechas`. `total_lecturas` es el número
+    de lecturas del nodo con hora en el periodo (la suma de `lecturas` de los
+    intervalos): la interfaz lo compara con lo que trajo `/api/lecturas` para
+    avisar de un recorte. Las lecturas sin hora (HU-07) y las manuales no
+    entran en la curva y se cuentan aparte."""
+
+    device_id: str
+    desde: datetime
+    hasta: datetime
+    bucket_segundos: int
+    bucket_automatico: bool
+    intervalo_reporte_segundos: int
+    umbral_brecha_segundos: int
+    total_lecturas: int
+    lecturas_sin_hora: int
+    lecturas_manuales: int
+    buckets: list[BucketSerieResponse]
+    brechas: list[BrechaSerieResponse]
+    brechas_truncadas: bool = False
+    resumen: ResumenSerieResponse
