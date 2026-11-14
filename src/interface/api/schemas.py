@@ -324,10 +324,20 @@ class AccionCorrectivaCreateRequest(_PeticionEstricta):
 
 
 class AccionCorrectivaRectificarRequest(_PeticionEstricta):
-    """HU-28: nueva justificación que corrige la anterior, con su motivo (P6)."""
+    """HU-28 esc. 2: corrige la decisión, la acción ejecutada (`descripcion`)
+    y/o la justificación de la acción vigente, con su motivo (P6). Lo que no se
+    envía se hereda de la versión corregida; al menos un campo debe venir."""
 
-    descripcion: str = Field(min_length=1, max_length=2000)
+    descripcion: str | None = Field(default=None, min_length=1, max_length=2000)
+    decision: str | None = Field(default=None, min_length=1, max_length=2000)
+    justificacion: str | None = Field(default=None, min_length=1, max_length=2000)
     motivo_rectificacion: str = Field(min_length=10, max_length=500)
+
+    @model_validator(mode="after")
+    def _algo_que_corregir(self) -> "AccionCorrectivaRectificarRequest":
+        if self.descripcion is None and self.decision is None and self.justificacion is None:
+            raise ValueError("Indique la decisión, la acción o la justificación que se corrige")
+        return self
 
 
 class AccionCorrectivaResponse(BaseModel):
@@ -384,13 +394,34 @@ class VerificacionIntegridadResponse(BaseModel):
     detalle_inconsistencia: DetalleInconsistenciaResponse | None = None
     registros_posteriores_afectados: int = 0
     # HU-26: la verificación no se detiene en la primera ruptura.
-    estado: Literal["integra", "ruptura_aislada", "ruptura_detectada"] = "integra"
+    # `no_concluida` (HU-26 esc. 1): hay eslabones v3 que no se pudieron
+    # verificar sin la clave HMAC y ninguna ruptura demostrada; no es íntegra.
+    estado: Literal["integra", "ruptura_aislada", "ruptura_detectada", "no_concluida"] = "integra"
     total_rupturas: int = 0
     rupturas: list[DetalleInconsistenciaResponse] = Field(default_factory=list)
     registros_posteriores_consistentes: int = 0
     integra_desde: datetime | None = None
-    # HU-26 escenario 4: alcance explícito del resultado (no es certificación DIGEMID).
+    # HU-26 escenario 4: alcance explícito del resultado (no es certificación
+    # DIGEMID), redactado según las versiones de hash verificadas.
     alcance: str
+    # Cadena verificada (None = todas) y versiones de hash encontradas en ella.
+    chain_id: str | None = None
+    versiones_hash: list[int] = Field(default_factory=list)
+    # Eslabones que no se pudieron verificar (sin clave HMAC); no son rupturas.
+    total_no_verificables: int = 0
+    no_verificables: list[DetalleInconsistenciaResponse] = Field(default_factory=list)
+    # HU-38: hash_actual completo (64 hex) del último eslabón examinado.
+    hash_final: str | None = None
+
+
+class CadenaTrazabilidadResponse(BaseModel):
+    """HU-26: cadenas existentes (una por dispositivo y SISTEMA) para elegir
+    cuál verificar."""
+
+    chain_id: str
+    es_sistema: bool
+    total_registros: int
+    ultimo_registro_en: datetime | None = None
 
 
 class EstadoCadenaResponse(BaseModel):
@@ -402,6 +433,11 @@ class EstadoRegistroSegmentoResponse(BaseModel):
     tipo_evento: str
     timestamp: datetime
     integro: bool
+    # HU-37 esc. 2: el registro alterado se rotula "corrupto" con su ID y
+    # timestamp; sin clave HMAC, "no_verificable" (no se da por íntegro).
+    estado: Literal["integro", "corrupto", "no_verificable"] = "integro"
+    tipo_discrepancia: Literal["payload_alterado", "enlace_roto", "no_verificable"] | None = None
+    chain_seq: int | None = None
 
 
 class VerificacionSegmentoResponse(BaseModel):
@@ -415,6 +451,13 @@ class VerificacionSegmentoResponse(BaseModel):
     registros_del_dispositivo: list[EstadoRegistroSegmentoResponse]
     primer_registro_inconsistente: UUID | None = None
     alcance: str
+    # Resultado global: `integra` sigue siendo el booleano de siempre.
+    estado: Literal["integra", "corrupta", "no_concluida"] = "integra"
+    total_corruptos: int = 0
+    total_no_verificables: int = 0
+    versiones_hash: list[int] = Field(default_factory=list)
+    # Hash del eslabón inmediatamente anterior al periodo (o génesis): el ancla.
+    hash_ancla: str | None = None
 
 
 class ReporteBPAResponse(BaseModel):
@@ -593,6 +636,15 @@ class HistorialConfiguracionResponse(BaseModel):
     valor_nuevo: str | None
     actor_id: UUID | None
     created_at: datetime
+    # HU-49 esc. 2: campo sin el origen ("intervalo_reporte_segundos"), quién
+    # lo originó ("administrador"/"nodo") si consta, grupo para filtrar y
+    # desde/hasta cuándo estuvo vigente (None = sigue vigente).
+    campo_base: str | None = None
+    origen: str | None = None
+    categoria: str | None = None
+    vigente_desde: datetime | None = None
+    vigente_hasta: datetime | None = None
+    actor_nombre: str | None = None
 
 
 class RotarCredencialRequest(_PeticionEstricta):
@@ -850,3 +902,6 @@ class AuditLogResponse(BaseModel):
     detalle: dict | None
     ip_origen: str | None
     created_at: datetime
+    # HU-42 esc. 1 / HU-50: resultado de la operación. En filas anteriores a la
+    # migración 0039 se deriva de la acción (la bitácora no se reescribe).
+    resultado: Literal["exitoso", "fallido", "denegado", "bloqueado"] = "exitoso"

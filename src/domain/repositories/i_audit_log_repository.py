@@ -12,7 +12,10 @@ class IAuditLogRepository(ABC):
         recurso: str,
         detalle: dict,
         ip_origen: str | None = None,
-    ) -> None: ...
+        resultado: str | None = None,
+    ) -> None:
+        """HU-42 esc. 1: `resultado` (exitoso, fallido, denegado, bloqueado);
+        si se omite, se deriva de la acción (`resultado_de_accion`)."""
 
     @abstractmethod
     async def listar(
@@ -23,7 +26,8 @@ class IAuditLogRepository(ABC):
         hasta: datetime | None = None,
         usuario_id: UUID | None = None,
         accion: str | None = None,
+        resultado: str | None = None,
     ) -> list[dict]:
-        """HU-42/HU-50: el auditor filtra la bitácora por periodo, actor o
-        tipo de acción y obtiene una vista de solo lectura."""
+        """HU-42/HU-50: el auditor filtra la bitácora por periodo, actor, tipo
+        de acción o resultado y obtiene una vista de solo lectura."""
         ...

@@ -53,3 +53,24 @@ class IAlertaRepository(ABC):
         tipo de riesgo, para decidir si reabrirlo dentro de la ventana de
         cooldown en vez de crear una alerta nueva."""
         ...
+
+    async def contar_por_nivel(
+        self, device_id: str | None, desde: datetime | None, hasta: datetime | None
+    ) -> dict[str, int] | None:
+        """HU-38 esc. 3: episodios de alerta por nivel en TODO el periodo (por
+        `created_at`, como `listar`). None si el repositorio no lo soporta."""
+        return None
+
+    async def listar_por_nivel(
+        self,
+        nivel_riesgo: str,
+        device_id: str | None,
+        desde: datetime | None,
+        hasta: datetime | None,
+        limite: int = 10_000,
+    ) -> list[AlertaTermica]:
+        """HU-38 esc. 3: alertas de un nivel (p. ej. todas las excursiones
+        críticas) aunque el listado general del periodo se haya recortado."""
+        alertas = await self.listar(device_id=device_id, desde=desde, hasta=hasta, limite=limite)
+        return [a for a in alertas if a.nivel_riesgo is not None and a.nivel_riesgo.value == nivel_riesgo]
+

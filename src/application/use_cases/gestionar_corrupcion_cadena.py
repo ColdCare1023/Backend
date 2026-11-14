@@ -2,7 +2,10 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
-from src.application.use_cases.verificar_integridad_registro import VerificarIntegridadRegistroUseCase
+from src.application.use_cases.verificar_integridad_registro import (
+    EstadoCadena,
+    VerificarIntegridadRegistroUseCase,
+)
 from src.domain.exceptions import DomainError, RecursoNoEncontradoError
 from src.domain.repositories.i_corrupcion_repository import ICorrupcionRepository
 from src.domain.repositories.i_trazabilidad_repository import ITrazabilidadRepository
@@ -53,6 +56,13 @@ class AislarCorrupcionUseCase:
         )
         if resultado.integra or resultado.detalle_inconsistencia is None:
             raise DomainError("La cadena del registro es íntegra: no hay corrupción que aislar.")
+        # HU-26: un eslabón que no se pudo verificar (sin clave HMAC) no está
+        # demostrado como corrupto; aislarlo daría por rota evidencia sana.
+        if resultado.estado == EstadoCadena.NO_CONCLUIDA:
+            raise DomainError(
+                "La verificación de la cadena no concluyó (eslabones sin clave HMAC): "
+                "no hay una ruptura demostrada que aislar."
+            )
         if resultado.detalle_inconsistencia.id != registro_corrupto_id:
             raise DomainError(
                 "Solo se puede aislar el primer registro inconsistente verificado de la cadena "

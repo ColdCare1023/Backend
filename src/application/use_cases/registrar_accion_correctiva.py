@@ -3,7 +3,12 @@ from uuid import UUID
 
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.domain.entities.accion_correctiva import AccionCorrectiva
-from src.domain.exceptions import DomainError, PermisoDenegadoError, RecursoNoEncontradoError
+from src.domain.exceptions import (
+    DomainError,
+    PermisoDenegadoError,
+    RectificacionSinCambiosError,
+    RecursoNoEncontradoError,
+)
 from src.domain.repositories.i_accion_correctiva_repository import IAccionCorrectivaRepository
 from src.domain.repositories.i_alerta_repository import IAlertaRepository
 from src.domain.repositories.i_trazabilidad_repository import ITrazabilidadRepository
@@ -71,20 +76,22 @@ class RegistrarAccionCorrectivaUseCase:
 
 
 class CorregirAccionCorrectivaUseCase:
-    """HU-28: corregir una justificación previamente registrada crea un
-    NUEVO evento que referencia a la acción anterior, en vez de sobrescribir
+    """HU-28: corregir una decisión o justificación previamente registrada crea
+    un NUEVO evento que referencia a la acción anterior, en vez de sobrescribir
     su contenido — la original permanece intacta y auditable (en PostgreSQL lo
     garantiza además el trigger append-only de corrective_actions).
 
     Reglas:
-    - BE-020: la rectificación sustituye a la justificación vigente en la
-      cronología de la alerta, así que solo puede hacerla su autor o el
-      farmacéutico (responsable técnico de la cadena de frío) → 403.
+    - BE-020: la rectificación sustituye a la versión vigente en la cronología
+      de la alerta, así que solo puede hacerla su autor o el farmacéutico
+      (responsable técnico de la cadena de frío) → 403.
     - Solo se rectifica la acción VIGENTE (la última de su línea): rectificar
       una que ya tiene rectificación bifurcaría la historia → DomainError (409).
+    - Lo que no se corrige (decisión, acción o justificación) se hereda de la
+      versión corregida; si nada cambia → RectificacionSinCambiosError (422).
     - El eslabón ACCION_CORRECTIVA_RECTIFICADA cita el `hash_actual` del
-      eslabón de la acción corregida: el vínculo queda probado
-      criptográficamente, no solo por un id en una tabla.
+      eslabón de la acción corregida y lleva la versión completa resultante y
+      los campos corregidos: el vínculo y el contenido quedan bajo el hash.
     """
 
     def __init__(
@@ -102,9 +109,11 @@ class CorregirAccionCorrectivaUseCase:
         self,
         accion_anterior_id: UUID,
         usuario_id: UUID,
-        nueva_descripcion: str,
+        nueva_descripcion: str | None,
         motivo_rectificacion: str,
         rol_actor: Rol,
+        nueva_decision: str | None = None,
+        nueva_justificacion: str | None = None,
     ) -> AccionCorrectiva:
         anterior = await self._accion_repository.obtener_por_id(accion_anterior_id)
         if anterior is None:
@@ -120,10 +129,23 @@ class CorregirAccionCorrectivaUseCase:
                 "La acción ya fue rectificada: solo se puede rectificar la versión vigente."
             )
 
+        resultante = {
+            "decision": nueva_decision if nueva_decision is not None else anterior.decision,
+            "descripcion": nueva_descripcion if nueva_descripcion is not None else anterior.descripcion,
+            "justificacion": nueva_justificacion if nueva_justificacion is not None else anterior.justificacion,
+        }
+        corregidos = [campo for campo, valor in resultante.items() if valor != getattr(anterior, campo)]
+        if not corregidos:
+            raise RectificacionSinCambiosError(
+                "La rectificación no modifica la decisión, la acción ni la justificación vigentes."
+            )
+
         rectificacion = AccionCorrectiva(
             alert_id=anterior.alert_id,
             usuario_id=usuario_id,
-            descripcion=nueva_descripcion,
+            descripcion=resultante["descripcion"],
+            decision=resultante["decision"],
+            justificacion=resultante["justificacion"],
             corrige_accion_id=accion_anterior_id,
             motivo_rectificacion=motivo_rectificacion,
         )
@@ -150,7 +172,8 @@ class CorregirAccionCorrectivaUseCase:
                 "accion_id": str(creada.id),
                 "alert_id": str(anterior.alert_id),
                 "usuario_id": str(usuario_id),
-                "descripcion": nueva_descripcion,
+                **resultante,
+                "campos_corregidos": corregidos,
                 "corrige_accion_id": str(accion_anterior_id),
                 "motivo_rectificacion": motivo_rectificacion,
                 "hash_registro_corregido": eslabon.hash_actual if eslabon else None,

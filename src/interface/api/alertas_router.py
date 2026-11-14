@@ -13,7 +13,12 @@ from src.application.use_cases.registrar_accion_correctiva import (
     RegistrarAccionCorrectivaUseCase,
 )
 from src.domain.entities.accion_correctiva import AccionCorrectiva
-from src.domain.exceptions import DomainError, PermisoDenegadoError, RecursoNoEncontradoError
+from src.domain.exceptions import (
+    DomainError,
+    PermisoDenegadoError,
+    RectificacionSinCambiosError,
+    RecursoNoEncontradoError,
+)
 from src.domain.value_objects.device_id import PATRON_DEVICE_ID
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.database.repositories.accion_correctiva_repository import (
@@ -204,22 +209,31 @@ async def rectificar_accion_correctiva(
     request: Request,
     usuario=Depends(require_roles(Rol.TECNICO, Rol.FARMACEUTICO)),
 ) -> AccionCorrectivaResponse:
-    """HU-28: corrige una justificación previamente registrada creando un
-    nuevo evento que referencia a la anterior, sin sobrescribirla. Solo la
-    versión vigente (409 si ya fue rectificada), por su autor o un
-    farmacéutico (403 en otro caso), y con motivo obligatorio (422)."""
+    """HU-28: corrige la decisión, la acción y/o la justificación de la
+    versión vigente creando un nuevo evento que referencia a la anterior, sin
+    sobrescribirla (lo no enviado se hereda). Solo la versión vigente (409 si
+    ya fue rectificada), por su autor o un farmacéutico (403 en otro caso),
+    con motivo obligatorio y al menos un cambio real (422)."""
     accion_repository = SQLAlchemyAccionCorrectivaRepository(session)
     alerta_repository = SQLAlchemyAlertaRepository(session)
     trazabilidad_repository = SQLAlchemyTrazabilidadRepository(session)
     use_case = CorregirAccionCorrectivaUseCase(accion_repository, alerta_repository, trazabilidad_repository)
     try:
         accion = await use_case.execute(
-            accion_id, usuario.id, body.descripcion, body.motivo_rectificacion, usuario.rol
+            accion_id,
+            usuario.id,
+            body.descripcion,
+            body.motivo_rectificacion,
+            usuario.rol,
+            nueva_decision=body.decision,
+            nueva_justificacion=body.justificacion,
         )
     except RecursoNoEncontradoError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except PermisoDenegadoError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except RectificacionSinCambiosError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     except DomainError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
@@ -230,7 +244,12 @@ async def rectificar_accion_correctiva(
         accion="RECTIFICAR_ACCION_CORRECTIVA",
         recurso=f"alertas/acciones-correctivas/{accion_id}/rectificar",
         detalle={
-            "descripcion": body.descripcion,
+            "decision": accion.decision,
+            "descripcion": accion.descripcion,
+            "justificacion": accion.justificacion,
+            "campos_enviados": [
+                campo for campo in ("decision", "descripcion", "justificacion") if getattr(body, campo) is not None
+            ],
             "corrige_accion_id": str(accion_id),
             "motivo_rectificacion": body.motivo_rectificacion,
         },

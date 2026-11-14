@@ -183,3 +183,92 @@ async def test_usuario_desactivado_aparece_anonimizado(client, token_tecnico, to
 
     ciclo = client.get(f"/api/alertas/{alerta_id}/acciones-correctivas", headers=auth_header(token_admin)).json()
     assert ciclo[0]["usuario_nombre"] == "Usuario desactivado"
+
+
+# ── HU-28 esc. 2: la rectificación corrige decisión y justificación ───────
+
+
+def _rectificar_campos(client, token, accion_id, motivo=MOTIVO, **campos):
+    return client.post(
+        f"/api/alertas/acciones-correctivas/{accion_id}/rectificar",
+        json={"motivo_rectificacion": motivo, **campos},
+        headers=auth_header(token),
+    )
+
+
+@pytest.mark.asyncio
+async def test_corregir_solo_la_justificacion_hereda_lo_demas_y_conserva_la_original(
+    client, token_tecnico, db_session_factory
+):
+    alerta_id = _crear_alerta(client, token_tecnico)
+    original = _accion(client, token_tecnico, alerta_id)
+
+    respuesta = _rectificar_campos(
+        client, token_tecnico, original["id"], justificacion="La lectura superó 8 °C durante 12 min."
+    )
+
+    assert respuesta.status_code == 201, respuesta.text
+    rectificacion = respuesta.json()
+    assert rectificacion["justificacion"] == "La lectura superó 8 °C durante 12 min."
+    assert rectificacion["decision"] == original["decision"]
+    assert rectificacion["descripcion"] == original["descripcion"]
+    async with db_session_factory() as session:
+        fila = await session.get(CorrectiveActionModel, UUID(original["id"]))
+    assert fila.justificacion == "Lectura fuera de rango"  # la original no se sobrescribe
+
+    [eslabon] = _cadena(client, token_tecnico)["ACCION_CORRECTIVA_RECTIFICADA"]
+    payload = eslabon["payload"]
+    assert payload["campos_corregidos"] == ["justificacion"]
+    assert payload["justificacion"] == "La lectura superó 8 °C durante 12 min."
+    assert payload["decision"] == original["decision"]
+    assert payload["descripcion"] == original["descripcion"]
+
+
+def test_corregir_la_decision_queda_en_la_cronologia(client, token_tecnico):
+    alerta_id = _crear_alerta(client, token_tecnico)
+    original = _accion(client, token_tecnico, alerta_id)
+
+    rectificacion = _rectificar_campos(
+        client, token_tecnico, original["id"], decision="Poner el lote en cuarentena"
+    ).json()
+
+    ciclo = client.get(f"/api/alertas/{alerta_id}/acciones-correctivas", headers=auth_header(token_tecnico)).json()
+    por_id = {a["id"]: a for a in ciclo}
+    assert por_id[original["id"]]["decision"] == "Trasladar el lote"
+    assert por_id[original["id"]]["vigente"] is False
+    assert por_id[rectificacion["id"]]["decision"] == "Poner el lote en cuarentena"
+    assert por_id[rectificacion["id"]]["justificacion"] == original["justificacion"]
+    assert por_id[rectificacion["id"]]["vigente"] is True
+
+
+def test_una_rectificacion_sin_cambios_se_rechaza(client, token_tecnico):
+    alerta_id = _crear_alerta(client, token_tecnico)
+    original = _accion(client, token_tecnico, alerta_id)
+
+    assert _rectificar_campos(client, token_tecnico, original["id"]).status_code == 422
+    igual = _rectificar_campos(client, token_tecnico, original["id"], justificacion=original["justificacion"])
+    assert igual.status_code == 422
+    assert _cadena(client, token_tecnico).get("ACCION_CORRECTIVA_RECTIFICADA") is None
+
+
+def test_el_ciclo_se_reconstruye_en_orden_por_chain_id(client, token_tecnico, token_auditor):
+    """Esc. 3: el auditor ordena acción y rectificaciones por chain_seq y
+    comprueba su integridad verificando una sola cadena."""
+    alerta_id = _crear_alerta(client, token_tecnico)
+    original = _accion(client, token_tecnico, alerta_id)
+    primera = _rectificar_campos(client, token_tecnico, original["id"], decision="Cuarentena").json()
+    segunda = _rectificar_campos(client, token_tecnico, primera["id"], justificacion="Corregida dos veces").json()
+
+    registros = client.get(
+        "/api/trazabilidad", params={"chain_id": DEVICE_ID, "limite": 500}, headers=auth_header(token_auditor)
+    ).json()
+    acciones = sorted(
+        (r for r in registros if r["tipo_evento"].startswith("ACCION_CORRECTIVA")), key=lambda r: r["chain_seq"]
+    )
+    assert [r["payload"]["accion_id"] for r in acciones] == [original["id"], primera["id"], segunda["id"]]
+    assert acciones[2]["payload"]["hash_registro_corregido"] == acciones[1]["hash_actual"]
+    assert acciones[2]["payload"]["decision"] == "Cuarentena"  # heredada de la primera rectificación
+    verificacion = client.get(
+        "/api/trazabilidad/verificar", params={"chain_id": DEVICE_ID}, headers=auth_header(token_auditor)
+    ).json()
+    assert verificacion["estado"] == "integra"

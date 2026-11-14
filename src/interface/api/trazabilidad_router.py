@@ -5,9 +5,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.gestionar_corrupcion_cadena import AislarCorrupcionUseCase
-from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
+from src.application.use_cases.registrar_hash_encadenado import (
+    CHAIN_ID_SISTEMA,
+    RegistrarHashEncadenadoUseCase,
+)
 from src.application.use_cases.verificar_integridad_registro import (
-    ALCANCE_VERIFICACION,
     DetalleInconsistencia,
     VerificarIntegridadPorDispositivoYPeriodoUseCase,
     VerificarIntegridadRegistroUseCase,
@@ -26,6 +28,7 @@ from src.interface.api.api_protection import limitar_concurrencia, limitar_por_u
 from src.interface.api.deps import DbSessionDep, require_roles
 from src.interface.api.mappers import trazabilidad_to_response
 from src.interface.api.schemas import (
+    CadenaTrazabilidadResponse,
     DetalleInconsistenciaResponse,
     EstadoCadenaResponse,
     EstadoRegistroSegmentoResponse,
@@ -35,6 +38,9 @@ from src.interface.api.schemas import (
 )
 
 router = APIRouter(prefix="/api/trazabilidad", tags=["trazabilidad"])
+
+# HU-26: una cadena es un device_id o "SISTEMA" (mismo alfabeto, hasta 80).
+PATRON_CHAIN_ID = r"^[A-Za-z0-9_-]{1,80}$"
 
 
 @router.get("", response_model=list[TrazabilidadResponse])
@@ -68,13 +74,15 @@ async def listar_trazabilidad(
 async def verificar_integridad(
     session: DbSessionDep,
     _usuario=Depends(require_roles(Rol.TECNICO, Rol.FARMACEUTICO, Rol.AUDITOR)),
-    chain_id: str | None = None,
+    chain_id: str | None = Query(default=None, pattern=PATRON_CHAIN_ID),
 ) -> VerificacionIntegridadResponse:
     """HU-26 + HU-47 Escenarios 1-2: sin chain_id, verifica todas las cadenas
     a la vez (vista de administrador); con chain_id, verifica solo la cadena
     de esa unidad monitoreada (o "SISTEMA"), tal como exige el criterio de
-    aceptación. Si detecta corrupción, además notifica (flag global, snapshot
-    forense, evento de emergencia encadenado en la misma cadena afectada)."""
+    aceptación (404 si esa cadena no tiene registros: no hay nada que dar por
+    íntegro). Si detecta corrupción, además notifica (flag global, snapshot
+    forense, evento de emergencia encadenado en la misma cadena afectada); un
+    resultado `no_concluida` (eslabones v3 sin clave) no notifica nada."""
     repositorio = SQLAlchemyTrazabilidadRepository(session)
     use_case = VerificarIntegridadRegistroUseCase(
         repositorio,
@@ -82,6 +90,11 @@ async def verificar_integridad(
         RegistrarHashEncadenadoUseCase(repositorio),
     )
     resultado = await use_case.execute(chain_id)
+    if chain_id is not None and resultado.total_registros == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"La cadena {chain_id} no tiene registros de trazabilidad",
+        )
     await session.commit()
     detalle = resultado.detalle_inconsistencia
     return VerificacionIntegridadResponse(
@@ -96,7 +109,26 @@ async def verificar_integridad(
         registros_posteriores_consistentes=resultado.registros_posteriores_consistentes,
         integra_desde=resultado.integra_desde,
         alcance=resultado.alcance,
+        chain_id=resultado.chain_id,
+        versiones_hash=list(resultado.versiones_hash),
+        total_no_verificables=resultado.total_no_verificables,
+        no_verificables=[_detalle_response(r) for r in resultado.no_verificables],
+        hash_final=resultado.hash_final,
     )
+
+
+@router.get("/cadenas", response_model=list[CadenaTrazabilidadResponse])
+async def listar_cadenas(
+    session: DbSessionDep,
+    _usuario=Depends(require_roles(Rol.TECNICO, Rol.FARMACEUTICO, Rol.AUDITOR)),
+) -> list[CadenaTrazabilidadResponse]:
+    """HU-26: cadenas existentes (una por dispositivo y la de SISTEMA) con su
+    número de eslabones, para elegir el `chain_id` de /verificar."""
+    cadenas = await SQLAlchemyTrazabilidadRepository(session).listar_cadenas()
+    return [
+        CadenaTrazabilidadResponse(**c, es_sistema=c["chain_id"] == CHAIN_ID_SISTEMA)
+        for c in cadenas
+    ]
 
 
 def _detalle_response(d: DetalleInconsistencia) -> DetalleInconsistenciaResponse:
@@ -135,7 +167,9 @@ async def verificar_integridad_por_dispositivo(
     resultado = await use_case.execute(device_id, desde, hasta)
 
     # HU-37 criterio 3: constancia verificable de la revisión, append-only,
-    # encadenada — no solo el resultado devuelto al usuario que la pidió.
+    # encadenada — no solo el resultado devuelto al usuario que la pidió. El
+    # usuario solicitante y el resultado global van DENTRO del payload, es
+    # decir, bajo el hash: la columna usuario_id sola no queda protegida.
     await RegistrarHashEncadenadoUseCase(repositorio).execute(
         tipo_evento="VERIFICACION_INTEGRIDAD",
         payload={
@@ -143,7 +177,15 @@ async def verificar_integridad_por_dispositivo(
             "desde": desde.isoformat(),
             "hasta": hasta.isoformat(),
             "integra": resultado.integra,
+            "resultado": resultado.estado.value,
             "total_bloques_verificados": resultado.total_bloques_verificados,
+            "registros_corruptos": resultado.total_corruptos,
+            "registros_no_verificables": resultado.total_no_verificables,
+            "primer_registro_inconsistente": (
+                str(resultado.primer_registro_inconsistente) if resultado.primer_registro_inconsistente else None
+            ),
+            "hash_ancla": resultado.hash_ancla,
+            "usuario_id": str(usuario.id),
         },
         device_id=device_id,
         usuario_id=usuario.id,
@@ -158,12 +200,23 @@ async def verificar_integridad_por_dispositivo(
         total_bloques_verificados=resultado.total_bloques_verificados,
         registros_del_dispositivo=[
             EstadoRegistroSegmentoResponse(
-                id=r.id, tipo_evento=r.tipo_evento, timestamp=r.timestamp, integro=r.integro
+                id=r.id,
+                tipo_evento=r.tipo_evento,
+                timestamp=r.timestamp,
+                integro=r.integro,
+                estado=r.estado.value,
+                tipo_discrepancia=r.tipo_discrepancia.value if r.tipo_discrepancia else None,
+                chain_seq=r.chain_seq,
             )
             for r in resultado.registros_del_dispositivo
         ],
         primer_registro_inconsistente=resultado.primer_registro_inconsistente,
-        alcance=ALCANCE_VERIFICACION,
+        alcance=resultado.alcance,
+        estado=resultado.estado.value,
+        total_corruptos=resultado.total_corruptos,
+        total_no_verificables=resultado.total_no_verificables,
+        versiones_hash=list(resultado.versiones_hash),
+        hash_ancla=resultado.hash_ancla,
     )
 
 
