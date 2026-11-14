@@ -223,8 +223,10 @@ async def test_recuperacion_completa_por_correo(client, token_tecnico, correo, d
     assert correo.enviados[0][0] == TECNICO
     token = _token_del_correo(correo)
     assert "http://localhost:5173/restablecer-password#token=" in correo.enviados[0][2]
-    # La versión HTML lleva el mismo enlace de un solo uso y el diseño de ColdCare.
-    assert 'href="http://localhost:5173/restablecer-password#token=' in correo.html[0]
+    # La versión HTML lleva a la pantalla donde se escribe el código; el enlace
+    # de un solo uso (legado) va solo en el texto plano.
+    assert 'href="http://localhost:5173/recuperar-contrasena?' in correo.html[0]
+    assert "#token=" not in correo.html[0]
     assert "[ColdCare] Restablecer contraseña" == correo.enviados[0][1]
 
     assert _restablecer(client, token).status_code == 204

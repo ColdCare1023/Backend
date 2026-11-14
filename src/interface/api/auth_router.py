@@ -50,6 +50,7 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
 from src.infrastructure.database.repositories.usuario_repository import SQLAlchemyUsuarioRepository
+from src.infrastructure.notifications.plantillas_correo import url_logo
 from src.infrastructure.security.google_verifier_provider import obtener_verificador_google
 from src.infrastructure.security.privacidad import enmascarar_email
 from src.interface.api.api_protection import limitar_por_ip
@@ -223,7 +224,9 @@ async def login(
         # una contraseña correcta todavía no es un inicio de sesión.
         _limitar_emision_codigo_login(request, cuenta)
         try:
-            desafio = await IniciarLoginConCodigoUseCase(servicio_codigos(session, settings)).execute(usuario, ip)
+            desafio = await IniciarLoginConCodigoUseCase(
+                servicio_codigos(session, settings), url_logo(settings.base_frontend)
+            ).execute(usuario, ip)
         except CodigosBloqueadosError as exc:
             raise _429_codigos_bloqueados(exc) from exc
         await auditoria.execute(
@@ -346,7 +349,9 @@ async def reenviar_codigo_login(
     intentos fallidos ya acumulados."""
     if not enviador.configurado:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=_CORREO_NO_DISPONIBLE)
-    use_case = ReenviarCodigoLoginUseCase(servicio_codigos(session, settings), SQLAlchemyUsuarioRepository(session))
+    use_case = ReenviarCodigoLoginUseCase(
+        servicio_codigos(session, settings), SQLAlchemyUsuarioRepository(session), url_logo(settings.base_frontend)
+    )
     try:
         registro, usuario = await use_case.localizar(body.desafio)
     except CodigoVerificacionInvalidoError as exc:

@@ -18,6 +18,9 @@ def _correo(**extra):
 def test_el_documento_es_completo_y_no_carga_nada_externo():
     html = _correo(boton=Boton("Abrir", "https://coldcare.example/alertas"))
     assert html.startswith("<!DOCTYPE html>") and "</html>" in html
+    assert 'lang="es"' in html and 'role="presentation"' in html
+    assert "Barebone" in html and "MIT" in html and "Plus Five Five" in html  # atribución de la plantilla base
+    assert len(html.encode()) < 60_000  # Gmail recorta los correos de más de ~102 KB
     assert "prefers-color-scheme: dark" in html and 'name="viewport"' in html
     assert not re.search(r"<img|<link|@import|url\(", html)  # sin imágenes ni recursos remotos
     assert 'href="https://coldcare.example/alertas"' in html and "Abrir" in html
@@ -36,11 +39,55 @@ def test_un_enlace_que_no_es_http_nunca_llega_al_href(url):
     assert 'href="#"' in html and url not in html
 
 
-@pytest.mark.parametrize("tono", ["critico", "aviso", "ok", "info"])
-def test_cada_tono_pinta_su_acento(tono):
+@pytest.mark.parametrize("tono", ["critico", "aviso"])
+def test_las_alertas_pintan_su_estado_en_una_pildora(tono):
     from src.infrastructure.notifications.plantillas_correo import TONOS
 
-    assert TONOS[tono][0] in _correo(tono=tono)
+    html = _correo(tono=tono, etiqueta="Excursión <crítica>")
+    assert TONOS[tono][0] in html and TONOS[tono][1] in html
+    assert "Excursión &lt;crítica&gt;" in html  # el estado va escrito, no solo en color
+
+
+@pytest.mark.parametrize("tono", ["ok", "info", "marca"])
+def test_los_correos_que_no_son_alerta_no_usan_color_de_estado(tono):
+    from src.infrastructure.notifications.plantillas_correo import TONOS
+
+    html = _correo(tono=tono, etiqueta="Cuenta creada")
+    assert "Cuenta creada" in html
+    assert TONOS["critico"][0] not in html and TONOS["aviso"][0] not in html
+
+
+def test_un_tono_desconocido_falla():
+    with pytest.raises(KeyError):
+        _correo(tono="rosado")
+
+
+def test_el_logo_es_imagen_https_con_alt_o_marca_sin_imagen():
+    from src.infrastructure.notifications.plantillas_correo import url_logo
+
+    assert url_logo("https://coldcare.vercel.app/") == "https://coldcare.vercel.app/email/coldcare-icon-96.png"
+    # Settings.base_frontend quita la barra final: FRONTEND_URL de producción tal cual.
+    assert url_logo("https://coldcare.vercel.app") == "https://coldcare.vercel.app/email/coldcare-icon-96.png"
+    assert url_logo("https://coldcare.vercel.app/recuperar-contrasena?email=a") == (
+        "https://coldcare.vercel.app/email/coldcare-icon-96.png"
+    )
+    assert url_logo("http://localhost:5173") is None and url_logo("") is None and url_logo(None) is None
+    con = _correo(logo_url="https://coldcare.vercel.app/email/coldcare-icon-96.png")
+    assert '<img src="https://coldcare.vercel.app/email/coldcare-icon-96.png"' in con and 'alt="ColdCare"' in con
+    sin = _correo()
+    assert "<img" not in sin and "ColdCare" in sin  # marca dibujada con celdas
+    for malo in ("javascript:alert(1)", "data:image/png;base64,AAAA", "//evil.example/x.png", "http://x.pe/a.png"):
+        assert "<img" not in _correo(logo_url=malo) and malo not in _correo(logo_url=malo)
+    assert '<img src="../assets/coldcare-icon-96.png"' in _correo(logo_url="../assets/coldcare-icon-96.png")
+
+
+def test_los_detalles_se_apilan_etiqueta_y_valor_sin_media_queries():
+    """Sin `<style>` (Gmail con cuentas que no son de Google) la lista no puede quedar en dos
+    columnas estrechas: cada etiqueta va en su fila y el valor debajo, siempre a la izquierda."""
+    html = _correo(detalles=[("Dispositivo", "FARM-01"), ("Ubicación", "Botica <Central>")])
+    assert "Botica &lt;Central&gt;" in html and "border-bottom:1px solid" in html
+    assert "cc-det" not in html and 'width="38%"' not in html and 'text-align:right;">FARM-01' not in html
+    assert re.search(r'<td class="cc-fg3" style="[^"]*">Dispositivo</td></tr><tr><td class="cc-fg cc-linea" style="[^"]*text-align:left[^"]*">FARM-01</td>', html)
 
 
 def test_el_pie_y_el_detalle_aparecen_solo_si_se_piden():
@@ -51,20 +98,62 @@ def test_el_pie_y_el_detalle_aparecen_solo_si_se_piden():
 
 
 def test_la_escala_termica_ubica_la_zona_segura_y_marca_la_lectura():
+    from src.infrastructure.notifications.plantillas_correo import TONOS
+
     en_rango = escala_termica(5.0)
-    assert "#12b76a" in en_rango and "rango seguro" in en_rango and "2 °C" in en_rango and "8 °C" in en_rango
-    assert "#0e9f6e" in en_rango  # marcador verde dentro de 2-8
+    assert "#12B76A" in en_rango and "rango seguro" in en_rango and "2 °C" in en_rango and "8 °C" in en_rango
+    assert TONOS["ok"][0] in en_rango and "Dentro de rango" in en_rango  # marcador verde dentro de 2-8
     fuera = escala_termica(11.4)
-    assert "#e5382b" in fuera  # marcador rojo fuera de rango
+    assert TONOS["critico"][0] in fuera and "Fuera de rango" in fuera  # marcador rojo fuera de rango
+    cerca = escala_termica(7.6)
+    assert TONOS["aviso"][0] in cerca and "Cerca del límite" in cerca  # a menos de 1 °C del límite
 
 
-@pytest.mark.parametrize("temperatura", [-30.0, 0.0, 2.0, 8.0, 14.0, 60.0])
+@pytest.mark.parametrize("temperatura", [-127.0, -30.0, -12.0, 0.0, 2.0, 8.0, 14.0, 25.0, 60.0, 85.0])
 def test_las_proporciones_de_la_escala_suman_100(temperatura):
     html = escala_termica(temperatura)
     anchos = [int(m) for m in re.findall(r'<td width="(\d+)%" style="padding:0;font-size:0', html)]
     assert len(anchos) == 3 and sum(anchos) == 100 and all(a >= 0 for a in anchos)
     marcador = int(re.search(r'width:(\d+)%;">&nbsp;</td>\s*<td align="center"', html).group(1))
     assert 0 <= marcador <= 97  # el marcador no se sale de la barra
+
+
+@pytest.mark.parametrize("temperatura", [-127.0, -12.0, 1.2, 5.0, 11.4, 25.0, 85.0])
+def test_la_zona_segura_no_se_deforma_con_lecturas_extremas(temperatura):
+    """Eje fijo: la zona verde mide lo mismo con -127 °C (sensor desconectado) que con 5 °C, y las
+    etiquetas van en su propia tabla de anchos fijos y sin saltos de línea."""
+    html = escala_termica(temperatura)
+    anchos = [int(m) for m in re.findall(r'<td width="(\d+)%" style="padding:0;font-size:0', html)]
+    assert anchos == [33, 34, 33]
+    assert html.count("table-layout:fixed") == 3
+    assert "rango seguro</td>" not in html and "rango seguro 2 a 8 °C" in html  # sin etiqueta bajo el verde
+    assert html.count("white-space:nowrap") >= 3
+
+
+def test_las_temperaturas_negativas_usan_el_signo_menos():
+    from src.infrastructure.notifications.plantillas_correo import formato_temperatura
+
+    assert "\u2212127.0" in escala_termica(-127.0) and "-127" not in escala_termica(-127.0)
+    assert formato_temperatura(-0.04) == "0.0 °C" and formato_temperatura(-3.5) == "\u22123.5 °C"
+
+
+def test_outlook_recibe_una_tabla_fantasma_de_600_y_la_cabecera_en_una_celda():
+    html = _correo()
+    assert '<!--[if mso]><table role="presentation" width="600"' in html and "<![endif]-->" in html
+    assert '<td class="cc-cabecera"' in html and "<div class=\"cc-cabecera\"" not in html
+
+
+def test_el_boton_resiste_la_inversion_de_gmail():
+    html = _correo(boton=Boton("Ver la alerta", "https://coldcare.example/alertas"))
+    assert '<span class="gmail-screen"><span class="gmail-diff">Ver la alerta</span></span>' in html
+    assert "u + .body .gmail-screen" in html and 'class="cc-fondo body"' in html
+
+
+def test_un_valor_largo_de_detalle_va_debajo_de_su_etiqueta_y_a_la_izquierda():
+    largo = "Una frase larga que no cabe a la derecha de la etiqueta"
+    html = _correo(detalles=[("Dispositivo", "FARM-01"), ("Nota", largo)])
+    fila = re.search(r'<td class="cc-fg cc-linea" style="([^"]*)">' + largo, html)
+    assert fila and "text-align:left" in fila.group(1)
 
 
 def test_correo_de_cuenta_creada_tiene_texto_y_html_sin_la_clave():
@@ -112,8 +201,11 @@ def test_el_correo_de_excursion_trae_escala_boton_y_datos():
                                   {"nombre": "Refri <1>", "ubicacion": "Botica Central"})
     assert m.asunto == "[ColdCare] EXCURSIÓN CRÍTICA — FARM-01" and "ALERTA CRÍTICA" in m.cuerpo  # texto intacto
     assert "11.4 °C en Refri &lt;1&gt;" in m.html and "Botica Central" in m.html
-    assert "rango seguro" in m.html and "#e5382b" in m.html
+    from src.infrastructure.notifications.plantillas_correo import TONOS
+
+    assert "rango seguro" in m.html and TONOS["critico"][0] in m.html
     assert f'href="https://coldcare.example/alertas?id={aviso.alerta_id}"' in m.html
+    assert '<img src="https://coldcare.example/email/coldcare-icon-96.png"' in m.html  # icono servido por el frontend
     assert "diferida" not in m.html.lower()
 
 
@@ -143,7 +235,10 @@ def test_el_correo_preventivo_avisa_con_margen_y_sin_exagerar():
     assert m.asunto == "[ColdCare] RIESGO PREVENTIVO — FARM-01"
     assert "Margen hasta el límite: 0.4 °C" in m.cuerpo and "0.4 °C" in m.html
     assert "Todavía no es una excursión" in m.cuerpo and "Todavía no es una excursión" in m.html
-    assert "#e07b00" in m.html  # acento ámbar, no el rojo de la excursión
+    from src.infrastructure.notifications.plantillas_correo import TONOS
+
+    assert TONOS["aviso"][0] in m.html  # acento ámbar, no el rojo de la excursión
+    assert TONOS["critico"][0] not in m.html
     assert "EXCURSIÓN CRÍTICA" not in m.asunto
     assert "rango seguro" in m.html and "Refri 1 se acerca al límite" in m.html
     assert f"/alertas?id={aviso.alerta_id}" in m.html
@@ -209,7 +304,7 @@ def test_el_bloque_del_codigo_es_grande_monoespaciado_y_de_marca():
     from src.infrastructure.notifications.plantillas_correo import AZUL_MARCA, AZUL_MARINO
 
     html = _correo(tono="marca", codigo="048213", codigo_vigencia="Vence en 10 minutos")
-    assert "048213" in html and "monospace" in html and "font-size:38px" in html
+    assert "048213" in html and "monospace" in html and "font-size:34px" in html
     assert AZUL_MARCA in html and AZUL_MARINO in html
     assert 'aria-label="0 4 8 2 1 3"' in html and "Vence en 10 minutos" in html
     assert not re.search(r"<img|<link|@import|url\(", html)
@@ -239,8 +334,38 @@ def test_los_correos_con_codigo_lo_muestran_sin_ponerlo_en_asunto_ni_preheader(t
     assert re.search(r"no (fuiste|lo solicitaste|esperabas)", correo.cuerpo + correo.html, re.IGNORECASE)
 
 
+def test_la_recuperacion_lleva_a_escribir_el_codigo_y_el_enlace_heredado_queda_en_el_texto():
+    from src.infrastructure.notifications.correos_cuenta import correo_codigo_recuperacion
+
+    pagina = "https://coldcare.example/recuperar-contrasena?email=a%40x.pe"
+    legado = "https://coldcare.example/restablecer-password#token=abc"
+    c = correo_codigo_recuperacion("Ana", "123456", 10, pagina, enlace_legado=legado, minutos_enlace=30)
+    assert f'href="{pagina}"' in c.html and "Escribir el código" in c.html
+    assert legado not in c.html and "#token=" not in c.html and "Pantalla de recuperación" not in c.html
+    assert legado in c.cuerpo and "30 minutos" in c.cuerpo
+
+
+def test_las_alertas_muestran_la_hora_de_peru_corta_y_el_texto_conserva_utc():
+    from src.infrastructure.notifications.notificacion_service import componer_correo_excursion
+
+    m = componer_correo_excursion(_aviso(diferida=True), "c@x.pe", "d@y.pe", "", None)
+    assert "03/11/2026, 10:00 (hora de Perú)" in m.html and "UTC" not in m.html
+    assert "03/11/2026 10:00:00 (hora de Perú)" in m.cuerpo and "2026-11-03 15:00:00 UTC" in m.cuerpo
+
+
 def test_vigencias_en_minutos_y_horas():
     from src.infrastructure.notifications.correos_cuenta import correo_activacion_cuenta, correo_codigo_login
 
     assert "10 minutos" in correo_codigo_login("Ana", "123456", 10).cuerpo
     assert "48 horas" in correo_activacion_cuenta("Ana", "a@x.pe", "123456", 48, "https://x.pe/r").cuerpo
+
+
+def test_el_enlace_de_respaldo_es_un_enlace_neutro_y_legible_en_modo_oscuro():
+    html = _correo(boton=Boton("Ver la alerta", "https://coldcare.example/alertas?x=1&y=2"))
+    assert '<a href="https://coldcare.example/alertas?x=1&amp;y=2" target="_blank" class="cc-enlace"' in html
+    assert ".cc-enlace { color:#C7C9CE !important; }" in html
+    # Enlaces que detectan Apple Mail y Gmail (fechas, correos): heredan el color del texto.
+    assert "a[x-apple-data-detectors]" in html and "u + .body a, #MessageViewBody a" in html
+    oscuro = html.split("prefers-color-scheme: dark")[1]
+    assert not re.search(r"(^|[\s}])a\s*\{", oscuro)  # sin regla `a{}` que pise el texto blanco del botón
+    assert _correo(boton=Boton("x", "javascript:alert(1)")).count("cc-enlace") == 1  # solo la regla CSS

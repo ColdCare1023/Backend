@@ -33,32 +33,37 @@ from src.infrastructure.notifications.notificacion_service import (
     componer_correo_excursion,
     componer_correo_preventivo,
 )
+from src.infrastructure.notifications.plantillas_correo import url_logo
 from src.infrastructure.notifications.transporte_email import MensajeCorreo, construir_transporte
 
 DISPOSITIVO = {"nombre": "Refrigerador de vacunas", "ubicacion": "Botica Central · Almacén"}
 
 
-def ejemplos(frontend_url: str, remitente: str, destinatario: str) -> dict[str, MensajeCorreo]:
-    """Un MensajeCorreo por tipo de aviso, con datos de ejemplo (no tocan la base de datos)."""
+def ejemplos(
+    frontend_url: str, remitente: str, destinatario: str, logo_url: str | None = None
+) -> dict[str, MensajeCorreo]:
+    """Un MensajeCorreo por tipo de aviso, con datos de ejemplo (no tocan la base de datos).
+    `logo_url` reemplaza el icono derivado del frontend (p. ej. una ruta relativa para verlo en local)."""
+    logo = {"logo_url": logo_url} if logo_url else {}
     ahora = datetime.now(timezone.utc).replace(microsecond=0)
     base = AvisoExcursion(
         alerta_id=uuid4(), device_id="ESP32_FARMACIA_01", temperatura=11.4, captured_at=ahora,
         received_at=ahora, time_quality="synced",
     )
-    cuenta = correo_cuenta_creada("Brenda Gamio", destinatario, frontend_url)
+    cuenta = correo_cuenta_creada("Brenda Gamio", destinatario, frontend_url, **logo)
     clave = correo_recuperar_password(
-        "Brenda Gamio", f"{frontend_url or 'https://coldcare.example'}/restablecer-password#token=EJEMPLO", 30
+        "Brenda Gamio", f"{frontend_url or 'https://coldcare.example'}/restablecer-password#token=EJEMPLO", 30, **logo
     )
     base_frontend = (frontend_url or "https://coldcare.example").rstrip("/")
     pagina_codigo = f"{base_frontend}/recuperar-contrasena"
     # Códigos de ejemplo fijos: la vista previa no emite códigos reales.
-    login = correo_codigo_login("Brenda Gamio", "482915", 10)
+    login = correo_codigo_login("Brenda Gamio", "482915", 10, logo_url=logo_url or url_logo(base_frontend))
     recuperacion = correo_codigo_recuperacion(
         "Brenda Gamio", "730264", 10, enlace_codigo(pagina_codigo, destinatario, "recuperar"),
-        enlace_legado=f"{base_frontend}/restablecer-password#token=EJEMPLO", minutos_enlace=30,
+        enlace_legado=f"{base_frontend}/restablecer-password#token=EJEMPLO", minutos_enlace=30, **logo,
     )
     activacion = correo_activacion_cuenta(
-        "Brenda Gamio", destinatario, "159307", 48, enlace_codigo(pagina_codigo, destinatario, "activar"), base_frontend,
+        "Brenda Gamio", destinatario, "159307", 48, enlace_codigo(pagina_codigo, destinatario, "activar"), base_frontend, **logo,
     )
 
     def _m(asunto: str, cuerpo: str, html: str) -> MensajeCorreo:
@@ -69,12 +74,12 @@ def ejemplos(frontend_url: str, remitente: str, destinatario: str) -> dict[str, 
         "02_recuperar_password": _m(clave.asunto, clave.cuerpo, clave.html),
         "03_riesgo_preventivo": componer_correo_preventivo(
             replace(base, temperatura=7.6, nivel=NivelRiesgo.RIESGO_PREVENTIVO),
-            remitente, destinatario, frontend_url, DISPOSITIVO,
+            remitente, destinatario, frontend_url, DISPOSITIVO, **logo,
         ),
-        "04_excursion_critica": componer_correo_excursion(base, remitente, destinatario, frontend_url, DISPOSITIVO),
+        "04_excursion_critica": componer_correo_excursion(base, remitente, destinatario, frontend_url, DISPOSITIVO, **logo),
         "05_excursion_diferida": componer_correo_excursion(
             replace(base, temperatura=1.2, captured_at=ahora - timedelta(hours=3)),
-            remitente, destinatario, frontend_url, DISPOSITIVO,
+            remitente, destinatario, frontend_url, DISPOSITIVO, **logo,
         ),
         "06_codigo_login": _m(login.asunto, login.cuerpo, login.html),
         "07_codigo_recuperacion": _m(recuperacion.asunto, recuperacion.cuerpo, recuperacion.html),
@@ -102,10 +107,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--salida", default="vista_previa_correos")
     parser.add_argument("--enviar", help="Correos separados por coma: los envía de verdad")
+    parser.add_argument("--logo", help="URL o ruta relativa del icono (por defecto: ../assets/coldcare-icon-96.png si existe)")
     args = parser.parse_args(argv)
     ajustes = get_settings()
     destinatario = args.enviar or "destino@ejemplo.com"
-    mensajes = ejemplos(ajustes.frontend_url or "https://coldcare.example", ajustes.correo_remitente or "coldcare@ejemplo.com", destinatario)
+    logo = args.logo
+    if logo is None and not args.enviar:
+        # Vista previa local: el icono del frontend no existe en coldcare.example; se usa la copia vecina.
+        vecino = Path(args.salida).resolve().parent / "assets" / "coldcare-icon-96.png"
+        logo = "../assets/coldcare-icon-96.png" if vecino.exists() else None
+    mensajes = ejemplos(
+        ajustes.frontend_url or "https://coldcare.example", ajustes.correo_remitente or "coldcare@ejemplo.com",
+        destinatario, logo,
+    )
     if args.enviar:
         return asyncio.run(enviar(mensajes))
     carpeta = Path(args.salida)

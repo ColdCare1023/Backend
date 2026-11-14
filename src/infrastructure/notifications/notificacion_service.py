@@ -25,7 +25,13 @@ from src.application.use_cases.generar_alerta import AvisoExcursion
 from src.application.use_cases.vigilar_sin_datos import AvisoSinDatos
 from src.domain.value_objects.rango_termico import RANGO_TERMICO_BPA
 from src.infrastructure.config import Settings
-from src.infrastructure.notifications.plantillas_correo import Boton, escala_termica, renderizar
+from src.infrastructure.notifications.plantillas_correo import (
+    Boton,
+    escala_termica,
+    formato_temperatura,
+    renderizar,
+    url_logo,
+)
 from src.infrastructure.notifications.transporte_email import MensajeCorreo
 
 logger = logging.getLogger("infrastructure.notificaciones")
@@ -41,12 +47,24 @@ def _formatear(instante: datetime) -> str:
     return f"{local:%d/%m/%Y %H:%M:%S} (hora de Perú) — {utc.astimezone(timezone.utc):%Y-%m-%d %H:%M:%S} UTC"
 
 
+def _formatear_corto(instante: datetime) -> str:
+    """Para el HTML: «14/11/2026, 11:30 (hora de Perú)». La hora UTC con segundos queda en el texto plano."""
+    utc = instante if instante.tzinfo is not None else instante.replace(tzinfo=timezone.utc)
+    return f"{utc.astimezone(HORA_PERU):%d/%m/%Y, %H:%M} (hora de Perú)"
+
+
+def _temperatura_html(temperatura: float | None) -> str:
+    return formato_temperatura(temperatura) if temperatura is not None else "sin dato de sensor"
+
+
 def componer_correo_excursion(
     aviso: AvisoExcursion,
     remitente: str,
     destinatario: str,
     frontend_url: str = "",
     dispositivo: dict | None = None,
+    *,
+    logo_url: str | None = None,
 ) -> MensajeCorreo:
     """HU-53 criterio 6: el correo debe permitir actuar sin abrir el sistema
     —qué refrigerador, dónde, a cuánto y cuándo— y llevar a la alerta."""
@@ -87,31 +105,34 @@ def componer_correo_excursion(
         destinatario=destinatario,
         asunto=asunto,
         cuerpo="\n".join(lineas),
-        html=_html_excursion(aviso, asunto, temperatura, frontend_url, dispositivo),
+        html=_html_excursion(
+            aviso, asunto, _temperatura_html(aviso.temperatura), frontend_url, dispositivo, logo_url or url_logo(frontend_url)
+        ),
     )
 
 
 def _html_excursion(
-    aviso: AvisoExcursion, asunto: str, temperatura: str, frontend_url: str, dispositivo: dict
+    aviso: AvisoExcursion, asunto: str, temperatura: str, frontend_url: str, dispositivo: dict, logo_url: str | None = None
 ) -> str:
     detalles = [("Dispositivo", aviso.device_id)]
     if dispositivo.get("nombre"):
         detalles.append(("Equipo", dispositivo["nombre"]))
     if dispositivo.get("ubicacion"):
         detalles.append(("Ubicación", dispositivo["ubicacion"]))
-    detalles += [("Temperatura registrada", temperatura), ("Momento de la lectura", _formatear(aviso.captured_at))]
+    detalles += [("Temperatura registrada", temperatura), ("Momento de la lectura", _formatear_corto(aviso.captured_at))]
     parrafos = [
         "La temperatura salió del rango de 2 a 8 °C exigido para medicamentos termolábiles. "
         "Verifica el refrigerador de inmediato y registra la acción correctiva en el sistema."
     ]
     if aviso.diferida:
-        detalles.append(("Recibida por el sistema", _formatear(aviso.received_at) if aviso.received_at else "—"))
+        detalles.append(("Recibida por el sistema", _formatear_corto(aviso.received_at) if aviso.received_at else "—"))
         parrafos.append(
             "Esta lectura llegó diferida: el nodo estuvo sin conexión y la envió desde su memoria, "
             "así que la excursión pudo haber ocurrido antes de este aviso."
         )
     return renderizar(
         asunto=asunto,
+        logo_url=logo_url,
         preheader=f"{aviso.device_id}: {temperatura}, fuera del rango 2-8 °C. Verifica el refrigerador.",
         tono="critico",
         etiqueta="Excursión crítica · diferida" if aviso.diferida else "Excursión crítica",
@@ -130,6 +151,8 @@ def componer_correo_preventivo(
     destinatario: str,
     frontend_url: str = "",
     dispositivo: dict | None = None,
+    *,
+    logo_url: str | None = None,
 ) -> MensajeCorreo:
     """Aviso anticipado: la temperatura se acerca al límite del rango 2-8 °C, pero todavía no lo cruza."""
     dispositivo = dispositivo or {}
@@ -166,13 +189,15 @@ def componer_correo_preventivo(
         detalles.append(("Equipo", dispositivo["nombre"]))
     if dispositivo.get("ubicacion"):
         detalles.append(("Ubicación", dispositivo["ubicacion"]))
-    detalles.append(("Temperatura registrada", temperatura))
+    temperatura_html = _temperatura_html(aviso.temperatura)
+    detalles.append(("Temperatura registrada", temperatura_html))
     if margen is not None:
         detalles.append(("Margen hasta el límite", f"{margen:.1f} °C"))
-    detalles.append(("Momento de la lectura", _formatear(aviso.captured_at)))
+    detalles.append(("Momento de la lectura", _formatear_corto(aviso.captured_at)))
     html = renderizar(
         asunto=asunto,
-        preheader=f"{equipo}: {temperatura}, cerca del límite del rango 2-8 °C. Revisa el refrigerador antes de que se pase.",
+        logo_url=logo_url or url_logo(frontend_url),
+        preheader=f"{equipo}: {temperatura_html}, cerca del límite del rango 2-8 °C. Revisa el refrigerador antes de que se pase.",
         tono="aviso",
         etiqueta="Riesgo preventivo",
         titulo=f"{equipo} se acerca al límite",
