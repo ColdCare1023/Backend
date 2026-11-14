@@ -6,7 +6,7 @@
 fastapi>=0.115.6
 # Starlette, python-multipart y h11 llegan como transitivas; se fijan cotas
 # propias porque son las que parsean la entrada HTTP.
-starlette>=1.3.1
+starlette>=1.10.0
 uvicorn[standard]>=0.32.0
 h11>=0.16.0
 pydantic>=2.9.0
