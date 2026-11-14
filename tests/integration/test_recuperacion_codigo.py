@@ -86,7 +86,7 @@ async def test_recuperacion_por_codigo_completa(client, token_tecnico, correo, d
     assert respuesta.status_code == 202
     (destino, asunto, texto, html) = correo.enviados[0]
     codigo = correo.ultimo_codigo()
-    assert destino == TECNICO and asunto == "[ColdCare] Restablecer contraseña"
+    assert destino == TECNICO and asunto == "Restablece tu contraseña de ColdCare"
     assert codigo not in asunto and codigo in html
     assert "http://localhost:5173/recuperar-contrasena?email=tecnico%40farmacia.example.org&modo=recuperar" in texto
     assert "#token=" in texto  # el enlace heredado sigue llegando
@@ -232,7 +232,7 @@ async def test_alta_por_admin_envia_codigo_de_activacion_y_permite_elegir_passwo
     assert alta.status_code == 201 and alta.json()["debe_cambiar_password"] is True
 
     (correo,) = transporte.enviados
-    assert correo.asunto == "[ColdCare] Tu cuenta fue creada"
+    assert correo.asunto == "Activa tu cuenta de ColdCare"
     assert temporal not in correo.cuerpo and temporal not in correo.html  # nunca una contraseña
     assert "https://coldcare.example/recuperar-contrasena?email=ana%40prueba.pe&modo=activar" in correo.cuerpo
     assert "48 horas" in correo.cuerpo

@@ -63,7 +63,8 @@ def test_el_correo_permite_actuar_sin_abrir_el_sistema():
         frontend_url="https://coldcare.vercel.app/",
         dispositivo={"nombre": "Refrigerador vacunas", "ubicacion": "Almacén 1"},
     )
-    assert correo.asunto == "[ColdCare] EXCURSIÓN CRÍTICA — ESP32-01"
+    assert correo.asunto == "Excursión crítica en Refrigerador vacunas: 14.2 °C"
+    assert "Dispositivo: ESP32-01" in correo.cuerpo  # el id del nodo queda en el cuerpo
     assert "14.2 °C" in correo.cuerpo
     assert "Refrigerador vacunas" in correo.cuerpo
     assert "Almacén 1" in correo.cuerpo
@@ -76,8 +77,21 @@ def test_el_correo_permite_actuar_sin_abrir_el_sistema():
 def test_lectura_diferida_se_marca_en_asunto_y_cuerpo():
     aviso = _aviso(time_quality="unsynced")
     correo = componer_correo_excursion(aviso, "de@x.pe", "para@x.pe")
-    assert "[DIFERIDA]" in correo.asunto
+    assert correo.asunto == "Excursión crítica (lectura diferida) en ESP32-01: 14.2 °C"
     assert "DIFERIDA" in correo.cuerpo
+
+
+@pytest.mark.parametrize("nombre", ["Refri\nvacunas", "  Refri \r\n vacunas  "])
+def test_un_nombre_de_equipo_con_saltos_de_linea_no_rompe_el_asunto(nombre):
+    """El nombre del equipo va en el asunto: un salto de línea haría que `EmailMessage`
+    rechace la cabecera y la alerta crítica no saldría."""
+    from email.message import EmailMessage
+
+    correo = componer_correo_excursion(_aviso(), "de@x.pe", "para@x.pe", dispositivo={"nombre": nombre})
+    assert correo.asunto == "Excursión crítica en Refri vacunas: 14.2 °C"
+    EmailMessage()["Subject"] = correo.asunto  # no lanza ValueError
+    blanco = componer_correo_excursion(_aviso(), "de@x.pe", "para@x.pe", dispositivo={"nombre": " \n "})
+    assert blanco.asunto == "Excursión crítica en ESP32-01: 14.2 °C"
 
 
 def test_temperatura_nula_se_describe_sin_romper():
@@ -191,7 +205,8 @@ def test_el_correo_sin_datos_dice_desde_cuando_calla_el_nodo():
     correo = componer_correo_sin_datos(
         aviso, "de@x.pe", "para@x.pe", "https://coldcare.example.org", {"nombre": "Refrigerador 1"}
     )
-    assert correo.asunto == "[ColdCare] SIN DATOS — ESP32-01"
+    assert correo.asunto == "Sin datos de Refrigerador 1"
+    assert "Dispositivo: ESP32-01" in correo.cuerpo
     assert "25/07/2026 10:00:00 (hora de Perú)" in correo.cuerpo
     assert "Refrigerador 1" in correo.cuerpo
     assert "/dispositivos?id=ESP32-01" in correo.cuerpo
@@ -207,7 +222,7 @@ def test_los_correos_de_la_retencion_por_compromiso_dicen_que_hacer():
                       umbral_segundos=0, tipo="monitoreo_suspendido"),
         "de@x.pe", "para@x.pe",
     )
-    assert suspendido.asunto == "[ColdCare] MONITOREO SUSPENDIDO POR ROTACIÓN — ESP32-01"
+    assert suspendido.asunto == "Monitoreo suspendido por rotación en ESP32-01"
     assert "termómetro de respaldo" in suspendido.cuerpo
 
     excursion = componer_correo_sin_datos(
@@ -216,7 +231,7 @@ def test_los_correos_de_la_retencion_por_compromiso_dicen_que_hacer():
                       detalle={"temperatura_interna": 11.5, "captured_at": CAPTURA.isoformat()}),
         "de@x.pe", "para@x.pe",
     )
-    assert excursion.asunto == "[ColdCare] EXCURSIÓN CRÍTICA (origen no verificado) — ESP32-01"
+    assert excursion.asunto == "Excursión crítica de origen no verificado en ESP32-01"
     assert "11.50 °C" in excursion.cuerpo
 
 

@@ -61,7 +61,7 @@ async def test_crear_la_cuenta_envia_correo_y_sms_y_lo_audita(client, app, token
     assert _alta(client, token_admin).status_code == 201
 
     (correo,) = transporte.enviados
-    assert correo.destinatario == "ana@prueba.pe" and correo.asunto == "[ColdCare] Tu cuenta fue creada"
+    assert correo.destinatario == "ana@prueba.pe" and correo.asunto == "Activa tu cuenta de ColdCare"
     assert "Clave-Segura" not in correo.cuerpo  # nunca la contraseña
     assert "https://coldcare.example" in correo.cuerpo
     assert sms[0][0] == "+51999888777" and "Clave-Segura" not in sms[0][1]
