@@ -57,7 +57,9 @@ def ejemplos(
     base_frontend = (frontend_url or "https://coldcare.example").rstrip("/")
     pagina_codigo = f"{base_frontend}/recuperar-contrasena"
     # Códigos de ejemplo fijos: la vista previa no emite códigos reales.
-    login = correo_codigo_login("Brenda Gamio", "482915", 10, logo_url=logo_url or url_logo(base_frontend))
+    login = correo_codigo_login(
+        "Brenda Gamio", "482915", 10, logo_url=logo_url or url_logo(base_frontend), base_frontend=base_frontend
+    )
     recuperacion = correo_codigo_recuperacion(
         "Brenda Gamio", "730264", 10, enlace_codigo(pagina_codigo, destinatario, "recuperar"),
         enlace_legado=f"{base_frontend}/restablecer-password#token=EJEMPLO", minutos_enlace=30, **logo,

@@ -19,7 +19,7 @@ def test_el_documento_es_completo_y_no_carga_nada_externo():
     html = _correo(boton=Boton("Abrir", "https://coldcare.example/alertas"))
     assert html.startswith("<!DOCTYPE html>") and "</html>" in html
     assert 'lang="es"' in html and 'role="presentation"' in html
-    assert "Barebone" in html and "MIT" in html and "Plus Five Five" in html  # atribución de la plantilla base
+    assert "React Email" in html and "MIT" in html and "Plus Five Five" in html  # atribución de la estructura base
     assert len(html.encode()) < 60_000  # Gmail recorta los correos de más de ~102 KB
     assert "prefers-color-scheme: dark" in html and 'name="viewport"' in html
     assert not re.search(r"<img|<link|@import|url\(", html)  # sin imágenes ni recursos remotos
@@ -73,7 +73,9 @@ def test_el_logo_es_imagen_https_con_alt_o_marca_sin_imagen():
     )
     assert url_logo("http://localhost:5173") is None and url_logo("") is None and url_logo(None) is None
     con = _correo(logo_url="https://coldcare.vercel.app/email/coldcare-icon-96.png")
-    assert '<img src="https://coldcare.vercel.app/email/coldcare-icon-96.png"' in con and 'alt="ColdCare"' in con
+    assert '<img src="https://coldcare.vercel.app/email/coldcare-icon-96.png"' in con
+    # Icono decorativo: el nombre va en texto al lado, así se lee también con imágenes bloqueadas.
+    assert 'alt=""' in con and ">ColdCare</td>" in con
     sin = _correo()
     assert "<img" not in sin and "ColdCare" in sin  # marca dibujada con celdas
     for malo in ("javascript:alert(1)", "data:image/png;base64,AAAA", "//evil.example/x.png", "http://x.pe/a.png"):
@@ -102,7 +104,7 @@ def test_la_escala_termica_ubica_la_zona_segura_y_marca_la_lectura():
     from src.infrastructure.notifications.plantillas_correo import TONOS
 
     en_rango = escala_termica(5.0)
-    assert "#12B76A" in en_rango and "rango seguro" in en_rango and "2 °C" in en_rango and "8 °C" in en_rango
+    assert "#14B8A6" in en_rango and "rango seguro" in en_rango and "2 °C" in en_rango and "8 °C" in en_rango
     assert TONOS["ok"][0] in en_rango and "Dentro de rango" in en_rango  # marcador verde dentro de 2-8
     fuera = escala_termica(11.4)
     assert TONOS["critico"][0] in fuera and "Fuera de rango" in fuera  # marcador rojo fuera de rango
@@ -113,10 +115,10 @@ def test_la_escala_termica_ubica_la_zona_segura_y_marca_la_lectura():
 @pytest.mark.parametrize("temperatura", [-127.0, -30.0, -12.0, 0.0, 2.0, 8.0, 14.0, 25.0, 60.0, 85.0])
 def test_las_proporciones_de_la_escala_suman_100(temperatura):
     html = escala_termica(temperatura)
-    anchos = [int(m) for m in re.findall(r'<td width="(\d+)%" style="padding:0;font-size:0', html)]
+    anchos = [int(m) for m in re.findall(r'<td width="(\d+)%" style="padding:0;font-size:0;line-height:0;height:6px', html)]
     assert len(anchos) == 3 and sum(anchos) == 100 and all(a >= 0 for a in anchos)
-    marcador = int(re.search(r'width:(\d+)%;">&nbsp;</td>\s*<td align="center"', html).group(1))
-    assert 0 <= marcador <= 97  # el marcador no se sale de la barra
+    marcador = int(re.search(r'width:(\d+)%;">&nbsp;</td>\s*<td align="center" width="8%"', html).group(1))
+    assert 0 <= marcador <= 92  # el marcador no se sale de la barra
 
 
 @pytest.mark.parametrize("temperatura", [-127.0, -12.0, 1.2, 5.0, 11.4, 25.0, 85.0])
@@ -124,11 +126,28 @@ def test_la_zona_segura_no_se_deforma_con_lecturas_extremas(temperatura):
     """Eje fijo: la zona verde mide lo mismo con -127 °C (sensor desconectado) que con 5 °C, y las
     etiquetas van en su propia tabla de anchos fijos y sin saltos de línea."""
     html = escala_termica(temperatura)
-    anchos = [int(m) for m in re.findall(r'<td width="(\d+)%" style="padding:0;font-size:0', html)]
+    anchos = [int(m) for m in re.findall(r'<td width="(\d+)%" style="padding:0;font-size:0;line-height:0;height:6px', html)]
     assert anchos == [33, 34, 33]
     assert html.count("table-layout:fixed") == 3
-    assert "rango seguro</td>" not in html and "rango seguro 2 a 8 °C" in html  # sin etiqueta bajo el verde
+    assert "rango seguro</td>" not in html and "rango seguro 2 a 8 °C" in html
     assert html.count("white-space:nowrap") >= 3
+
+
+@pytest.mark.parametrize("temperatura", [0.4, 1.2, 9.5, 11.4])
+def test_las_etiquetas_del_rango_van_dentro_del_tramo_seguro(temperatura):
+    """«2 °C» y «8 °C» van dentro de la celda del tramo seguro, pegadas a sus bordes por dentro: una
+    excursión de 1.2 °C o 9.5 °C deja el marcador sobre el riel gris, no encima de la etiqueta."""
+    html = escala_termica(temperatura)
+    zona = re.search(r'<td width="34%" class="cc-rango"[^>]*>(.*?)</table></td>', html, re.S)
+    assert zona, "las dos etiquetas van en la celda del tramo seguro"
+    assert re.search(r'text-align:left;">2 °C</td>', zona.group(1)) and "padding-left:4px" in zona.group(1)
+    assert re.search(r'text-align:right;">8 °C</td>', zona.group(1)) and "padding-right:4px" in zona.group(1)
+    assert zona.group(1).count("font-size:11px") == 2  # caben en el tramo de 64 px (320 px sin `<style>`)
+    fila = html.split('class="cc-rango"')[0].rsplit("<tr>", 1)[1]
+    assert "°C" not in fila  # nada de texto en el tramo fuera de rango
+    marcador = re.search(r'<td align="center" width="8%"[^>]*>&#9660;</td>', html).group(0)
+    assert "font-size:14px" in marcador and "line-height:14px" in marcador
+    assert "#3F3F46" in html and "#2C2C31" not in html  # riel visible sobre el bloque
 
 
 def test_las_temperaturas_negativas_usan_el_signo_menos():
@@ -301,15 +320,65 @@ async def test_el_aviso_sale_a_varios_destinatarios_y_la_auditoria_los_enmascara
 # ── Códigos de verificación ───────────────────────────────────────────────
 
 
-def test_el_bloque_del_codigo_es_grande_monoespaciado_y_de_marca():
-    from src.infrastructure.notifications.plantillas_correo import AZUL_MARCA, AZUL_MARINO
-
+def test_el_bloque_del_codigo_es_grande_tabular_y_seleccionable_de_un_toque():
     html = _correo(tono="marca", codigo="048213", codigo_vigencia="Vence en 10 minutos")
-    assert "048213" in html and "monospace" in html and "font-size:34px" in html
-    assert AZUL_MARCA in html and AZUL_MARINO in html
+    codigo = re.search(r'<p class="cc-codigo"[^>]*>048213</p>', html)
+    assert codigo, "el código va como texto plano en un solo nodo"
+    estilo = codigo.group(0)
+    assert "tabular-nums" in estilo and "font-size:38px" in estilo and "white-space:nowrap" in estilo
+    assert "-webkit-user-select:all" in estilo and "user-select:all" in estilo  # se selecciona entero con un toque
     assert 'aria-label="0 4 8 2 1 3"' in html and "Vence en 10 minutos" in html
     assert not re.search(r"<img|<link|@import|url\(", html)
     assert "048213" not in _correo(tono="marca")
+    assert "Copiar código" not in html and "copiar-codigo" not in html  # sin URL no hay botón
+
+
+def test_el_boton_copiar_codigo_lleva_el_codigo_en_el_fragmento():
+    from src.infrastructure.notifications.plantillas_correo import AZUL_MARCA
+
+    url = "https://coldcare.example/copiar-codigo#048213"
+    html = _correo(tono="marca", codigo="048213", codigo_copiar_url=url)
+    boton = re.search(r'<a href="([^"]*)"[^>]*aria-label="Copiar el código 0 4 8 2 1 3"[^>]*>(.*?)</a>', html)
+    assert boton and boton.group(1) == url
+    assert '<span class="gmail-screen"><span class="gmail-diff">Copiar código</span></span>' in boton.group(2)
+    assert f'bgcolor="{AZUL_MARCA}"' in html  # fondo sólido en la celda (Outlook)
+    assert html.count("copiar-codigo#") == 1
+    # Sin código no se dibuja el botón aunque llegue la URL; una URL que no es http nunca llega al href.
+    assert "copiar-codigo" not in _correo(codigo_copiar_url=url)
+    malo = _correo(tono="marca", codigo="048213", codigo_copiar_url="javascript:alert(1)")
+    assert "javascript:" not in malo and "Copiar código" not in malo
+
+
+def test_url_copiar_codigo_usa_el_origen_del_frontend_y_el_fragmento():
+    from src.infrastructure.notifications.plantillas_correo import url_copiar_codigo
+
+    assert url_copiar_codigo("https://coldcare.vercel.app", "123456") == "https://coldcare.vercel.app/copiar-codigo#123456"
+    assert url_copiar_codigo("https://coldcare.vercel.app/", "123456") == "https://coldcare.vercel.app/copiar-codigo#123456"
+    assert url_copiar_codigo("https://coldcare.vercel.app/recuperar-contrasena?email=a%40x.pe&modo=activar", "007123") == (
+        "https://coldcare.vercel.app/copiar-codigo#007123"
+    )
+    assert url_copiar_codigo("https://u:p@coldcare.vercel.app", "123456") == "https://coldcare.vercel.app/copiar-codigo#123456"
+    # http solo en desarrollo local.
+    assert url_copiar_codigo("http://localhost:5173", "123456") == "http://localhost:5173/copiar-codigo#123456"
+    assert url_copiar_codigo("http://127.0.0.1:8000/x", "123456") == "http://127.0.0.1:8000/copiar-codigo#123456"
+    assert url_copiar_codigo("http://[::1]:5173", "123456") == "http://[::1]:5173/copiar-codigo#123456"
+    for malo in ("", None, "javascript:alert(1)", "//evil.example", "ftp://x.pe", "coldcare.vercel.app",
+                 "http://coldcare.vercel.app", "http://localhost.evil.example", "http://[::1"):
+        assert url_copiar_codigo(malo, "123456") is None, malo
+    # Solo 4 a 12 letras o cifras ASCII.
+    for malo in ("", None, "123", "1234567890123", "a b&c", "12-456", "١٢٣٤٥٦", "123456\n"):
+        assert url_copiar_codigo("https://x.pe", malo) is None, malo
+    assert url_copiar_codigo("https://x.pe", "AB12cd") == "https://x.pe/copiar-codigo#AB12cd"
+
+
+def test_con_codigo_en_fragmento_solo_agrega_un_codigo_valido_a_un_enlace_http():
+    from src.infrastructure.notifications.plantillas_correo import con_codigo_en_fragmento
+
+    pagina = "https://coldcare.example/recuperar-contrasena?email=a%40x.pe&modo=activar"
+    assert con_codigo_en_fragmento(pagina, "123456") == pagina + "#codigo=123456"
+    assert con_codigo_en_fragmento(pagina + "#x", "123456") == pagina + "#x"  # ya trae fragmento
+    assert con_codigo_en_fragmento(pagina, "12 34") == pagina
+    assert con_codigo_en_fragmento("javascript:alert(1)", "123456") == "javascript:alert(1)"
 
 
 def _correos_con_codigo():
@@ -361,10 +430,116 @@ def test_vigencias_en_minutos_y_horas():
     assert "48 horas" in correo_activacion_cuenta("Ana", "a@x.pe", "123456", 48, "https://x.pe/r").cuerpo
 
 
+def _correos_con_codigo_y_frontend():
+    from src.infrastructure.notifications import correos_cuenta as c
+
+    base = "https://coldcare.example"
+    pagina = f"{base}/recuperar-contrasena"
+    return {
+        "login": c.correo_codigo_login("Ana", "123456", 10, base_frontend=base),
+        "recuperacion": c.correo_codigo_recuperacion("Ana", "123456", 10, f"{pagina}?email=a%40x.pe&modo=recuperar"),
+        "activacion": c.correo_activacion_cuenta(
+            "Ana", "a@x.pe", "123456", 48, f"{pagina}?email=a%40x.pe&modo=activar", f"{base}/"
+        ),
+    }
+
+
+@pytest.mark.parametrize("tipo", ["login", "recuperacion", "activacion"])
+def test_los_correos_con_codigo_traen_el_boton_copiar_codigo(tipo):
+    correo = _correos_con_codigo_y_frontend()[tipo]
+    assert 'href="https://coldcare.example/copiar-codigo#123456"' in correo.html
+    assert correo.html.count("Copiar código") == 1 and "user-select:all" in correo.html
+    assert "123456" not in correo.asunto
+    preheader = re.search(r'<span style="display:none[^>]*>([^<]*)</span>', correo.html).group(1)
+    assert "123456" not in preheader
+    assert "copiar-codigo" not in correo.cuerpo  # el texto plano ya trae el código a la vista
+    assert correo.html.count("display:none") == 1  # sin texto oculto extra
+    if tipo != "login":
+        # El botón de la página pasa a secundario: la acción principal es el código.
+        assert re.search(r'class="cc-boton2"', correo.html)
+
+
+def test_el_boton_copiar_codigo_es_la_accion_principal_con_area_tactil_de_44_px():
+    """Píldora azul sólida (la mezcla de Gmail incluida) de 12 + 20 + 12 px de alto, y el botón de la
+    pantalla, con borde y secundario. El rótulo del código cabe en una línea a 320 px sin `<style>`."""
+    for tipo, correo in _correos_con_codigo_y_frontend().items():
+        boton = re.search(r'<a href="[^"]*copiar-codigo#123456"[^>]*>', correo.html).group(0)
+        assert "padding:12px 24px" in boton and "line-height:20px" in boton, tipo
+        assert "mso-padding-alt:12px 24px" in correo.html, tipo
+        rotulo = re.search(r'<p class="cc-fg3 cc-rotulo" style="([^"]*)">([^<]*)</p>', correo.html)
+        assert "letter-spacing:.6px" in rotulo.group(1), tipo
+        assert rotulo.group(2) == ("Tu código de activación" if tipo == "activacion" else "Tu código de verificación")
+    assert ".cc-rotulo { letter-spacing:1.2px !important; }" in correo.html  # más aire en escritorio
+
+
+@pytest.mark.parametrize("tipo", ["recuperacion", "activacion"])
+def test_el_boton_de_la_pantalla_rellena_el_codigo_y_la_direccion_en_texto_va_sin_el(tipo):
+    """«Escribir el código» / «Activar mi cuenta» llevan `#codigo=…` (fragmento: no llega al servidor)
+    para que la pantalla lo rellene; la dirección de respaldo y el texto plano van sin el fragmento."""
+    correo = _correos_con_codigo_y_frontend()[tipo]
+    pagina = re.search(r'href="(https://coldcare\.example/recuperar-contrasena\?[^"#]*)#codigo=123456"', correo.html)
+    assert pagina, "el botón de la pantalla lleva el código en el fragmento"
+    secundario = re.search(r'<td [^>]*class="cc-boton2"[^>]*><a href="([^"]*)"', correo.html)
+    assert secundario.group(1).endswith("#codigo=123456")
+    respaldo = re.search(r'<a href="([^"]*)" target="_blank" class="cc-enlace"[^>]*>([^<]*)</a>', correo.html)
+    assert respaldo.group(1) == respaldo.group(2) == pagina.group(1)  # texto y href coinciden, sin el código
+    assert "#codigo=" not in correo.cuerpo and correo.html.count("#codigo=") == 1
+    assert "123456" not in correo.asunto
+
+
+def test_la_firma_de_la_tarjeta_es_un_filo_de_2_px_que_nace_y_muere_en_transparente():
+    """Sin degradado el filo desaparece (fondo grafito, no azul) y al invertirlo no deja extremos oscuros;
+    los tres resplandores (cian, azul y rosa) también terminan en transparente sobre el grafito."""
+    from src.infrastructure.notifications.plantillas_correo import AZUL_MARCA
+
+    html = _correo(tono="marca")
+    filo = re.search(r'<td height="2" bgcolor="([^"]+)"[^>]*style="([^"]*)"', html)
+    assert filo and filo.group(1) == "#141416"
+    assert "height:2px" in filo.group(2) and "background-color:#141416" in filo.group(2)
+    assert "linear-gradient(90deg,rgba(34,211,238,0),#22D3EE 20%,#0B5CFF 50%,#F472B6 80%,rgba(244,114,182,0))" in filo.group(2)
+    assert f'bgcolor="{AZUL_MARCA}" style="height' not in html
+    panel = re.search(r'<td class="cc-panel cc-tarjeta" bgcolor="#141416" style="([^"]*)"', html).group(1)
+    for brillo in ("rgba(11,92,255,.18)", "rgba(34,211,238,.08) 0,rgba(34,211,238,0)", "rgba(244,114,182,.08) 0,rgba(244,114,182,0)"):
+        assert brillo in panel, brillo
+    assert "at 15% 0" in panel and "at 85% 0" in panel and "background-color:#141416" in panel
+
+
+def test_los_correos_sin_codigo_no_traen_el_boton_copiar():
+    for _, _, html in _todos_los_correos():
+        if html and "cc-codigo" not in html:
+            assert "copiar-codigo" not in html and "Copiar código" not in html
+
+
+def test_el_login_sin_frontend_no_dibuja_el_boton_y_con_frontend_trae_el_icono():
+    from src.infrastructure.notifications.correos_cuenta import correo_codigo_login
+
+    assert "copiar-codigo" not in correo_codigo_login("Ana", "123456", 10).html
+    con = correo_codigo_login("Ana", "123456", 10, base_frontend="https://coldcare.example")
+    assert '<img src="https://coldcare.example/email/coldcare-icon-96.png"' in con.html
+
+
+def test_el_caso_de_uso_de_login_pasa_el_frontend_al_correo():
+    from datetime import timedelta
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from src.application.use_cases.codigos_verificacion import CodigoEmitido
+    from src.application.use_cases.login_con_codigo import _desafio
+
+    usuario = SimpleNamespace(id=uuid4(), nombre="Ana", email="ana@x.pe")
+    emitido = CodigoEmitido(codigo="654321", registro=None, desafio="d", vigencia=timedelta(minutes=10))
+    servicio = SimpleNamespace(politica=SimpleNamespace(reenvio=timedelta(seconds=60)))
+    desafio = _desafio(usuario, "d", emitido, servicio, None, "https://coldcare.example")
+    assert 'href="https://coldcare.example/copiar-codigo#654321"' in desafio.html
+    assert "654321" not in desafio.asunto
+    sin = _desafio(usuario, "d", emitido, servicio)
+    assert "copiar-codigo" not in sin.html and "654321" in sin.html
+
+
 def test_el_enlace_de_respaldo_es_un_enlace_neutro_y_legible_en_modo_oscuro():
     html = _correo(boton=Boton("Ver la alerta", "https://coldcare.example/alertas?x=1&y=2"))
     assert '<a href="https://coldcare.example/alertas?x=1&amp;y=2" target="_blank" class="cc-enlace"' in html
-    assert ".cc-enlace { color:#C7C9CE !important; }" in html
+    assert ".cc-enlace { color:#A3A3A9 !important; }" in html
     # Enlaces que detectan Apple Mail y Gmail (fechas, correos): heredan el color del texto.
     assert "a[x-apple-data-detectors]" in html and "u + .body a, #MessageViewBody a" in html
     oscuro = html.split("prefers-color-scheme: dark")[1]

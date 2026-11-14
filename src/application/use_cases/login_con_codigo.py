@@ -59,8 +59,11 @@ def _desafio(
     emitido: CodigoEmitido,
     servicio: ServicioCodigosVerificacion,
     logo_url: str | None = None,
+    base_frontend: str | None = None,
 ) -> DesafioLogin:
-    correo = correo_codigo_login(usuario.nombre, emitido.codigo, emitido.vigencia_minutos, logo_url=logo_url)
+    correo = correo_codigo_login(
+        usuario.nombre, emitido.codigo, emitido.vigencia_minutos, logo_url=logo_url, base_frontend=base_frontend
+    )
     return DesafioLogin(
         usuario_id=usuario.id,
         desafio=desafio,
@@ -77,14 +80,18 @@ def _desafio(
 class IniciarLoginConCodigoUseCase:
     """Credenciales ya verificadas: crea el login pendiente y su código."""
 
-    def __init__(self, codigos: ServicioCodigosVerificacion, logo_url: str | None = None) -> None:
+    def __init__(
+        self, codigos: ServicioCodigosVerificacion, logo_url: str | None = None, base_frontend: str | None = None
+    ) -> None:
         self._codigos = codigos
         self._logo_url = logo_url
+        # Origen del frontend para el botón «Copiar código» del correo.
+        self._base_frontend = base_frontend
 
     async def execute(self, usuario: Usuario, ip: str | None = None) -> DesafioLogin:
         emitido = await self._codigos.emitir(usuario.id, PropositoCodigo.LOGIN, ip=ip, con_desafio=True)
         assert emitido.desafio is not None
-        return _desafio(usuario, emitido.desafio, emitido, self._codigos, self._logo_url)
+        return _desafio(usuario, emitido.desafio, emitido, self._codigos, self._logo_url, self._base_frontend)
 
 
 async def _usuario_del_desafio(
@@ -102,11 +109,16 @@ class ReenviarCodigoLoginUseCase:
     reenviar no regala intentos."""
 
     def __init__(
-        self, codigos: ServicioCodigosVerificacion, usuarios: IUsuarioRepository, logo_url: str | None = None
+        self,
+        codigos: ServicioCodigosVerificacion,
+        usuarios: IUsuarioRepository,
+        logo_url: str | None = None,
+        base_frontend: str | None = None,
     ) -> None:
         self._codigos = codigos
         self._usuarios = usuarios
         self._logo_url = logo_url
+        self._base_frontend = base_frontend
 
     async def localizar(self, desafio: str) -> tuple[CodigoVerificacion, Usuario]:
         registro, usuario = await _usuario_del_desafio(self._codigos, self._usuarios, desafio)
@@ -128,7 +140,7 @@ class ReenviarCodigoLoginUseCase:
         """Lanza ReenvioPrematuroError durante la espera y CodigosBloqueadosError
         si la cuenta superó el tope de fallos."""
         emitido = await self._codigos.reenviar(registro)
-        return _desafio(usuario, desafio, emitido, self._codigos, self._logo_url)
+        return _desafio(usuario, desafio, emitido, self._codigos, self._logo_url, self._base_frontend)
 
 
 @dataclass(frozen=True, slots=True)
