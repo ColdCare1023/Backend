@@ -311,3 +311,41 @@ async def test_firmware_update_con_version_arbitraria_se_descarta(sesion_con_dev
     mensaje = _MensajeFalso(f"farmacias/{DEVICE_ID}/eventos", _evento("firmware_update", firmware_version="99999-hack"))
     await _procesar_mensaje_mqtt(mensaje, _BroadcasterEspia())
     assert (await _estado_device(sesion_con_device))["firmware_version"] == antes
+
+
+def _arranque_v1(**detalle) -> str:
+    import json
+
+    return json.dumps({
+        "schema_version": "1.0",
+        "device_id": DEVICE_ID,
+        "boot_id": 7,
+        "event_type": "arranque",
+        "occurred_at": datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "time_quality": "sntp_synced",
+        "uptime_s": 1,
+        "detail": {"reset_reason": "POWERON", **detalle},
+    })
+
+
+@pytest.mark.asyncio
+async def test_arranque_v1_actualiza_la_version_de_firmware_del_dispositivo(sesion_con_device):
+    """Un nodo flasheado por USB no emite ningún evento de OTA: la versión que
+    corre solo llega en su `arranque`. Sin esto la ficha se queda en el valor
+    por defecto y el control anti-downgrade compara contra un dato falso."""
+    mensaje = _MensajeFalso(f"farmacias/{DEVICE_ID}/eventos", _arranque_v1(firmware_version="v1.2.0"))
+
+    await _procesar_mensaje_mqtt(mensaje, _BroadcasterEspia())
+
+    assert (await _estado_device(sesion_con_device))["firmware_version"] == "1.2.0"
+
+
+@pytest.mark.asyncio
+async def test_arranque_v1_con_version_ilegible_no_cambia_la_ficha_y_se_audita_igual(sesion_con_device):
+    antes = (await _estado_device(sesion_con_device))["firmware_version"]
+    mensaje = _MensajeFalso(f"farmacias/{DEVICE_ID}/eventos", _arranque_v1(firmware_version="desconocida"))
+
+    await _procesar_mensaje_mqtt(mensaje, _BroadcasterEspia())
+
+    assert (await _estado_device(sesion_con_device))["firmware_version"] == antes
+    assert "ARRANQUE" in [e["accion"] for e in await _auditoria(sesion_con_device)]
