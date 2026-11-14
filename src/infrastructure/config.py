@@ -21,6 +21,9 @@ def _secreto_publicado(valor: str) -> bool:
     return hashlib.sha256(valor.encode()).hexdigest() in _HASHES_SECRETOS_PUBLICADOS
 
 
+_URL_API_RESEND = "https://api.resend.com/emails"
+_URL_RESTABLECER_POR_DEFECTO = "http://localhost:5173/restablecer-password"
+
 _PREFIJOS_POSTGRES_SIN_DRIVER = ("postgres://", "postgresql://")
 
 
@@ -149,6 +152,29 @@ class Settings(BaseSettings):
 
     password_min_length: int = 10
 
+    # Códigos de verificación de un solo uso (6 dígitos) enviados por correo:
+    # segundo factor del login, recuperación de contraseña y activación de
+    # cuentas creadas por un administrador. Se guardan como HMAC-SHA256 con
+    # CODIGOS_HMAC_KEY (secreto aparte del JWT y de la trazabilidad).
+    #
+    # OTP_LOGIN_ENABLED: interruptor del segundo factor del login con
+    # contraseña. Apagado, POST /api/auth/login se comporta exactamente como
+    # antes (interruptor de emergencia si el correo deja de salir).
+    otp_login_enabled: bool = False
+    codigo_ttl_minutos: int = Field(default=10, ge=1, le=60)
+    codigo_activacion_ttl_horas: int = Field(default=48, ge=1, le=24 * 14)
+    # Intentos fallidos admitidos por código; al agotarlos el código se quema.
+    codigo_max_intentos: int = Field(default=5, ge=1, le=20)
+    # Espera mínima entre dos envíos del código de un mismo inicio de sesión.
+    codigo_reenvio_segundos: int = Field(default=60, ge=0, le=3600)
+    # Tope de intentos fallidos por cuenta sumando todos los códigos (login, o
+    # recuperación+activación) emitidos en la ventana. Superado, no se emiten
+    # ni se aceptan códigos de ese tipo hasta que la ventana pase o un
+    # administrador restablezca la contraseña. Vive en la base, no en memoria.
+    codigo_max_fallos_cuenta: int = Field(default=20, ge=5, le=200)
+    codigo_ventana_fallos_horas: int = Field(default=24, ge=1, le=24 * 7)
+    codigos_hmac_key: str = ""
+
     # HU-23: aviso fuera de la aplicación ante excursión crítica. Ambos canales
     # llegan deshabilitados: sin credenciales configuradas el sistema funciona
     # igual, solo sin notificar. Las credenciales viven en el entorno (RNF-05),
@@ -156,19 +182,26 @@ class Settings(BaseSettings):
     # BE-025: página del frontend que recibe el enlace de recuperación de
     # contraseña (el token viaja en el fragmento `#token=`). Se envía por el
     # mismo SMTP de las alertas.
-    password_reset_url: str = "http://localhost:5173/restablecer-password"
+    password_reset_url: str = _URL_RESTABLECER_POR_DEFECTO
     #
     # HU-53: el correo tiene dos transportes. `smtp` (SSL en 465 o STARTTLS en
     # 587) y `http_api` (proveedor transaccional por HTTPS, compatible con la
     # API de Resend), para plataformas que restringen el SMTP saliente.
     # `SMTP_ENABLED` se conserva como sinónimo de `EMAIL_ENABLED` para no romper
     # despliegues que ya lo usaban.
+    #
+    # `apps_script`: relé HTTPS propio desplegado como aplicación web de Google
+    # Apps Script (envía con la cuenta de Gmail/Workspace que lo publica). Recibe
+    # POST JSON en EMAIL_API_URL con el secreto compartido EMAIL_API_KEY en el
+    # cuerpo y responde {"ok": true}. Ver docs/operacion/CODIGOS_VERIFICACION.md.
     email_enabled: bool = False
-    email_transporte: Literal["smtp", "http_api"] = "smtp"
+    email_transporte: Literal["smtp", "http_api", "apps_script"] = "smtp"
     email_from: str = ""
+    # Nombre visible del remitente (lo usa el relé de Apps Script).
+    email_from_nombre: str = "ColdCare"
     # Destinatario cuando el dispositivo no tiene `responsable_email` propio.
     email_destino_respaldo: str = ""
-    email_api_url: str = "https://api.resend.com/emails"
+    email_api_url: str = _URL_API_RESEND
     email_api_key: str = ""
 
     smtp_enabled: bool = False
@@ -293,6 +326,40 @@ class Settings(BaseSettings):
     @property
     def correo_remitente(self) -> str:
         return self.email_from or self.smtp_from
+
+    @property
+    def base_frontend(self) -> str:
+        """Origen del frontend: FRONTEND_URL, o el de PASSWORD_RESET_URL si no se declaró."""
+        if self.frontend_url:
+            return self.frontend_url.rstrip("/")
+        esquema, _, resto = self.password_reset_url.partition("://")
+        return f"{esquema}://{resto.split('/', 1)[0]}" if resto else ""
+
+    @property
+    def url_restablecer(self) -> str:
+        """Página del enlace de recuperación (legado). Si PASSWORD_RESET_URL quedó en su
+        valor de desarrollo pero hay FRONTEND_URL, el enlace apunta a ese frontend."""
+        if self.password_reset_url == _URL_RESTABLECER_POR_DEFECTO and self.frontend_url:
+            return f"{self.frontend_url.rstrip('/')}/restablecer-password"
+        return self.password_reset_url
+
+    @property
+    def url_codigo_cuenta(self) -> str:
+        """Página del frontend donde se ingresa un código de recuperación o activación."""
+        return f"{self.base_frontend}/recuperar-contrasena"
+
+    @property
+    def clave_codigos(self) -> bytes:
+        """Clave HMAC de los códigos de verificación.
+
+        Fuera de producción, si CODIGOS_HMAC_KEY está vacía, se deriva de forma
+        determinista de JWT_SECRET_KEY (desarrollo y pruebas arrancan sin
+        configurar nada). En producción la clave propia es obligatoria."""
+        if self.codigos_hmac_key:
+            return self.codigos_hmac_key.encode()
+        if self.environment == "production":
+            raise RuntimeError("CODIGOS_HMAC_KEY no está configurada.")
+        return hashlib.sha256(b"coldcare-codigos-verificacion:" + self.jwt_secret_key.encode()).digest()
 
     @property
     def correo_destino_respaldo(self) -> str:
@@ -428,6 +495,15 @@ class Settings(BaseSettings):
                     raise ValueError(
                         "EMAIL_TRANSPORTE=http_api requiere EMAIL_API_URL (https) y EMAIL_API_KEY."
                     )
+                if self.email_transporte == "apps_script" and not (
+                    self.email_api_url.startswith("https://")
+                    and self.email_api_url != _URL_API_RESEND
+                    and self.email_api_key
+                ):
+                    raise ValueError(
+                        "EMAIL_TRANSPORTE=apps_script requiere EMAIL_API_URL (https, la URL /exec "
+                        "del despliegue de Apps Script) y EMAIL_API_KEY (secreto compartido)."
+                    )
                 if not self.frontend_url.startswith("https://"):
                     raise ValueError(
                         "FRONTEND_URL (https) es obligatoria con el correo habilitado: "
@@ -442,9 +518,11 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "SMTP_ENABLED requiere SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM y SMTP_TO."
                 )
-            # BE-025: con SMTP habilitado se envían enlaces de recuperación; el
-            # token no puede viajar a una página sin TLS.
-            if self.smtp_enabled and not self.password_reset_url.startswith("https://"):
+            # BE-025: con cualquier transporte de correo (SMTP, http_api o
+            # apps_script) se envían enlaces de recuperación; el token no puede
+            # viajar a una página sin TLS. Se valida la URL efectiva (incluido
+            # el respaldo en FRONTEND_URL).
+            if self.correo_habilitado and not self.url_restablecer.startswith("https://"):
                 raise ValueError("PASSWORD_RESET_URL debe ser una URL HTTPS en producción.")
             if self.telegram_enabled and not all(
                 (self.telegram_bot_token, self.telegram_chat_id)
@@ -458,7 +536,34 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "SMS_ENABLED requiere SMS_ACCOUNT_SID, SMS_AUTH_TOKEN y SMS_FROM."
                 )
+            self._validar_codigos_en_produccion()
         return self
+
+    def _validar_codigos_en_produccion(self) -> None:
+        """Segundo factor y códigos de un solo uso. Fallar cerrado: con el
+        login por código activo y sin correo nadie podría entrar, y con una
+        clave HMAC débil o compartida los códigos guardados serían atacables
+        por fuerza bruta fuera de línea (solo hay 10^6 valores posibles)."""
+        if self.otp_login_enabled and not self.correo_habilitado:
+            raise ValueError(
+                "OTP_LOGIN_ENABLED=true requiere el correo habilitado (EMAIL_ENABLED y su transporte): "
+                "sin él nadie podría recibir el código de acceso."
+            )
+        if not (self.otp_login_enabled or self.correo_habilitado or self.codigos_hmac_key):
+            return
+        clave = self.codigos_hmac_key
+        if len(clave.encode()) < 32:
+            raise ValueError(
+                "CODIGOS_HMAC_KEY debe ser un secreto aleatorio de al menos 32 bytes en producción."
+            )
+        if clave in (self.jwt_secret_key, self.trazabilidad_hmac_key):
+            raise ValueError(
+                "CODIGOS_HMAC_KEY no puede reutilizar JWT_SECRET_KEY ni TRAZABILIDAD_HMAC_KEY."
+            )
+        if _secreto_publicado(clave):
+            raise ValueError(
+                "CODIGOS_HMAC_KEY usa un valor publicado en el historial del repositorio; genere uno nuevo."
+            )
 
 
 @lru_cache

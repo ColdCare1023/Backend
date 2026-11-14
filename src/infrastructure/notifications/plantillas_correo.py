@@ -24,8 +24,15 @@ TONOS: dict[str, tuple[str, str]] = {
     "aviso": ("#e07b00", "#fff3df"),
     "ok": ("#0e9f6e", "#e3f7ee"),
     "info": ("#2563eb", "#e8f0fe"),
+    # Correos de cuenta con código (login, recuperación, activación): azul de marca.
+    "marca": ("#0B5CFF", "#E8EFFF"),
 }
-_SIMBOLO = {"critico": "!", "aviso": "!", "ok": "&#10003;", "info": "i"}
+_SIMBOLO = {"critico": "!", "aviso": "!", "ok": "&#10003;", "info": "i", "marca": "i"}
+
+# Paleta ColdCare para el bloque del código: azul primario y azul marino del texto.
+AZUL_MARCA = "#0B5CFF"
+AZUL_MARINO = "#0F172A"
+_FUENTE_MONO = "'SFMono-Regular',Menlo,Consolas,'Liberation Mono','Courier New',monospace"
 
 MARCA = "ColdCare"
 LEMA = "Monitoreo de cadena de frío"
@@ -140,6 +147,29 @@ def _enlace_respaldo(boton: Boton) -> str:
     )
 
 
+def bloque_codigo(codigo: str, vigencia: str | None = None) -> str:
+    """Código de un solo uso en grande y monoespaciado, fácil de leer y copiar.
+
+    Sin imágenes: el código es texto seleccionable (se puede copiar y lo lee
+    un lector de pantalla). El `aria-label` lo deletrea dígito a dígito."""
+    deletreo = " ".join(codigo)
+    pie = (
+        f'<p class="cc-muted" style="margin:10px 0 0 0;font-family:{_FUENTE};font-size:13px;line-height:20px;color:#475569;">{_e(vigencia)}</p>'
+        if vigencia
+        else ""
+    )
+    return (
+        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:6px 0 24px 0;">'
+        f'<tr><td align="center" class="cc-codigo" bgcolor="#F1F5FF" style="padding:22px 12px 20px 12px;background-color:#F1F5FF;'
+        f'border:1px solid #D6E2FF;border-radius:10px;">'
+        f'<p class="cc-muted" style="margin:0 0 8px 0;font-family:{_FUENTE};font-size:12px;line-height:16px;font-weight:700;'
+        f'letter-spacing:1.4px;text-transform:uppercase;color:#475569;">Tu código de verificación</p>'
+        f'<p class="cc-codigo-valor" aria-label="{_e(deletreo)}" style="margin:0;font-family:{_FUENTE_MONO};font-size:38px;'
+        f'line-height:46px;font-weight:700;letter-spacing:10px;color:{AZUL_MARINO};">{_e(codigo)}</p>'
+        f"{pie}</td></tr></table>"
+    )
+
+
 def _marca() -> str:
     """Logotipo hecho con una celda (sin imagen): cuadrado azul hielo con la «C» y el nombre."""
     return (
@@ -164,8 +194,11 @@ def renderizar(
     boton: Boton | None = None,
     nota: str | None = None,
     pie: str | None = None,
+    codigo: str | None = None,
+    codigo_vigencia: str | None = None,
 ) -> str:
-    """Devuelve el documento HTML completo. `escala` es HTML ya generado por `escala_termica`."""
+    """Devuelve el documento HTML completo. `escala` es HTML ya generado por `escala_termica`.
+    `codigo`: código de verificación de un solo uso, mostrado en grande (ver `bloque_codigo`)."""
     acento, suave = TONOS[tono]
     cuerpo_parrafos = "".join(
         f'<p class="cc-texto" style="margin:.4em 0 1.1875em 0;font-family:{_FUENTE};font-size:16px;line-height:26px;'
@@ -209,6 +242,9 @@ def renderizar(
     .cc-t-aviso {{ color:#ffb866 !important; }}
     .cc-t-ok {{ color:#4cd694 !important; }}
     .cc-t-info {{ color:#8ab4ff !important; }}
+    .cc-t-marca {{ color:#8ab4ff !important; }}
+    .cc-codigo {{ background-color:#1e293b !important; border-color:#334155 !important; }}
+    .cc-codigo-valor {{ color:#ffffff !important; }}
   }}
 </style>
 </head>
@@ -224,6 +260,7 @@ def renderizar(
             {chip}
             <h1 class="cc-texto" style="margin:14px 0 14px 0;font-family:{_FUENTE};font-size:24px;line-height:32px;font-weight:700;color:#333333;text-align:left;">{_e(titulo)}</h1>
             {cuerpo_parrafos}
+            {bloque_codigo(codigo, codigo_vigencia) if codigo else ""}
             {bloque_escala}
             {_detalles(detalles or [])}
             {_boton(boton, acento) if boton else ""}

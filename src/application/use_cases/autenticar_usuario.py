@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from uuid import UUID
 
+from src.domain.entities.usuario import Usuario
 from src.domain.exceptions import CredencialesInvalidasError
 from src.domain.repositories.i_usuario_repository import IUsuarioRepository
 from src.infrastructure.security.jwt_handler import JWTHandler
@@ -36,7 +37,15 @@ class AutenticarUsuarioUseCase:
         self._jwt_handler = jwt_handler
 
     async def execute(self, email: str, password: str) -> ResultadoAutenticacion:
-        usuario = await self._usuario_repository.obtener_por_email(email)
+        return self.emitir_sesion(await self.verificar_credenciales(email, password))
+
+    async def verificar_credenciales(self, email: str, password: str) -> Usuario:
+        """Comprueba correo y contraseña sin emitir sesión. Con el segundo
+        factor activo (OTP_LOGIN_ENABLED) el token se emite solo tras el código."""
+        # El repositorio compara sin distinguir mayúsculas y, entre filas
+        # heredadas que solo difieren en ellas, prefiere la que coincide
+        # exactamente: por eso el correo no se pasa a minúsculas aquí.
+        usuario = await self._usuario_repository.obtener_por_email(email.strip())
         if usuario is None:
             await verify_password_async(password, _HASH_SENUELO)
             raise CredencialesInvalidasError("Email o contraseña incorrectos")
@@ -49,8 +58,10 @@ class AutenticarUsuarioUseCase:
         # sustituyen por Argon2id vigente; el llamador confirma la transacción.
         if necesita_rehash(usuario.password_hash):
             usuario.password_hash = await hash_password_async(password)
-            await self._usuario_repository.actualizar(usuario)
+            usuario = await self._usuario_repository.actualizar(usuario)
+        return usuario
 
+    def emitir_sesion(self, usuario: Usuario) -> ResultadoAutenticacion:
         token = self._jwt_handler.crear_token(usuario.id, usuario.email, usuario.rol)
         return ResultadoAutenticacion(
             access_token=token,

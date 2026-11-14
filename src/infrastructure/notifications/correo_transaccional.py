@@ -1,46 +1,45 @@
-"""BE-025: correos transaccionales (recuperación de contraseña) por el mismo
-SMTP que las alertas. Nunca lanza: un SMTP caído se registra y se informa
-con False."""
+"""BE-025: correos transaccionales (recuperación de contraseña, códigos de
+verificación) por el mismo transporte que las alertas: SMTP (respetando
+SMTP_SEGURIDAD), API HTTP o el relé de Apps Script, según EMAIL_TRANSPORTE.
 
-import asyncio
+Nunca lanza: un proveedor caído se registra y se informa con False."""
+
 import logging
-import smtplib
-from email.message import EmailMessage
 
 from src.infrastructure.config import Settings
+from src.infrastructure.notifications.transporte_email import (
+    MensajeCorreo,
+    TransporteEmail,
+    construir_transporte,
+)
 
 logger = logging.getLogger("infrastructure.notifications.correo_transaccional")
 
 
 class EnviadorCorreo:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, transporte: TransporteEmail | None = None) -> None:
         self._settings = settings
+        self._transporte = transporte if transporte is not None else construir_transporte(settings)
 
     @property
     def configurado(self) -> bool:
-        s = self._settings
-        return bool(s.smtp_enabled and s.smtp_host and s.smtp_user and s.smtp_password and s.smtp_from)
+        return self._transporte is not None and bool(self._settings.correo_remitente)
 
     async def enviar(self, destino: str, asunto: str, cuerpo: str, html: str | None = None) -> bool:
-        if not self.configurado:
-            logger.warning("SMTP no configurado: no se envió el correo transaccional.")
+        if not self.configurado or self._transporte is None:
+            logger.warning("Correo no configurado: no se envió el correo transaccional.")
             return False
-        mensaje = EmailMessage()
-        mensaje["Subject"] = asunto
-        mensaje["From"] = self._settings.smtp_from
-        mensaje["To"] = destino
-        mensaje.set_content(cuerpo)
-        if html:
-            mensaje.add_alternative(html, subtype="html")
+        mensaje = MensajeCorreo(
+            remitente=self._settings.correo_remitente, destinatario=destino, asunto=asunto, cuerpo=cuerpo, html=html
+        )
         try:
-            await asyncio.to_thread(self._smtp_enviar, mensaje)
-        except Exception:
-            # Sin el destinatario en el log: es un dato personal.
-            logger.exception("No se pudo enviar un correo transaccional.")
+            await self._transporte.enviar(mensaje)
+        except Exception as exc:
+            # Sin el destinatario ni el cuerpo en el log: llevan datos personales
+            # y, en los códigos de verificación, el propio secreto. El texto de un
+            # error SMTP puede citar al destinatario, así que de él solo va el tipo.
+            nombre = self._transporte.nombre
+            detalle = type(exc.__cause__ or exc).__name__ if nombre == "smtp" else str(exc)
+            logger.error("No se pudo enviar un correo transaccional (%s): %s", nombre, detalle)
             return False
         return True
-
-    def _smtp_enviar(self, mensaje: EmailMessage) -> None:
-        with smtplib.SMTP_SSL(self._settings.smtp_host, self._settings.smtp_port, timeout=10) as servidor:
-            servidor.login(self._settings.smtp_user, self._settings.smtp_password)
-            servidor.send_message(mensaje)

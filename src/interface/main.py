@@ -1359,6 +1359,11 @@ async def _ingesta_mqtt(app: FastAPI, settings) -> AsyncIterator[None]:
         yield
 
 
+# (solicitudes, ventana en segundos) por cuenta.
+LIMITE_RECUPERACION_POR_CUENTA = (3, 900)
+LIMITE_CODIGOS_LOGIN_POR_CUENTA = (8, 900)
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     es_produccion = settings.environment == "production"
@@ -1388,6 +1393,21 @@ def create_app() -> FastAPI:
     app.state.login_cuenta_rate_limiter = SlidingWindowRateLimiter(
         max_intentos=settings.login_cuenta_max_intentos,
         ventana_segundos=settings.login_cuenta_ventana_segundos,
+        max_claves=settings.security_state_max_entries,
+    )
+    # Recuperación de contraseña: cuota por CUENTA (3 solicitudes / 15 min)
+    # además de la de IP. Pasada la cuota la respuesta sigue siendo el mismo
+    # 202, solo que sin emitir ni enviar nada: no revela si la cuenta existe y
+    # no deja inundar el buzón de un tercero.
+    app.state.recuperacion_cuenta_rate_limiter = SlidingWindowRateLimiter(
+        max_intentos=LIMITE_RECUPERACION_POR_CUENTA[0],
+        ventana_segundos=LIMITE_RECUPERACION_POR_CUENTA[1],
+        max_claves=settings.security_state_max_entries,
+    )
+    # Códigos de login emitidos o reenviados por cuenta: cada uno es un correo.
+    app.state.codigo_login_emision_rate_limiter = SlidingWindowRateLimiter(
+        max_intentos=LIMITE_CODIGOS_LOGIN_POR_CUENTA[0],
+        ventana_segundos=LIMITE_CODIGOS_LOGIN_POR_CUENTA[1],
         max_claves=settings.security_state_max_entries,
     )
     # BE-009: la revocación de tokens y el consumo de tickets SSE viven en la

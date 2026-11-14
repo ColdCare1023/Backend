@@ -31,7 +31,13 @@ PUBLICOS = {
     # solicitud responde igual exista o no la cuenta y el restablecimiento se
     # autoriza con el token de un solo uso enviado al correo del usuario.
     ("POST", "/api/auth/recuperar-password"): "punto de entrada de la recuperación de contraseña",
-    ("POST", "/api/auth/restablecer-password"): "autorizado por el token de un solo uso del correo",
+    ("POST", "/api/auth/restablecer-password"): "autorizado por el token o el código de un solo uso del correo",
+    # Segundo paso del login con código (OTP_LOGIN_ENABLED): quien lo usa aún
+    # no tiene sesión. Se autoriza con el desafío opaco que solo entrega un
+    # login con contraseña correcta, más el código enviado al correo.
+    # Cubierto por tests/integration/test_login_codigo.py.
+    ("POST", "/api/auth/login/verificar"): "autorizado por el desafío del login y el código del correo",
+    ("POST", "/api/auth/login/reenviar"): "autorizado por el desafío del login; solo reenvía al correo del titular",
 }
 
 # Valores de ejemplo para los parámetros de ruta. El contenido es irrelevante:
