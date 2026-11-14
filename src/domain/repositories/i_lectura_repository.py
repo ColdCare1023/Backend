@@ -3,6 +3,7 @@ from datetime import datetime
 from uuid import UUID
 
 from src.domain.entities.lectura_termica import LecturaTermica
+from src.domain.entities.serie_termica import BucketSerie, ResumenSerie
 
 
 class ILecturaRepository(ABC):
@@ -53,3 +54,45 @@ class ILecturaRepository(ABC):
         (device_id+boot_id+seq_no) — clave preferida sobre
         obtener_por_device_y_timestamp cuando el payload la declara."""
         ...
+
+    # ── HU-31 / HU-36: serie agregada ─────────────────────────────────────
+    # No abstractos: una implementación que no los necesite (p. ej. un doble
+    # de pruebas) sigue siendo instanciable. La hora de cada lectura en la
+    # serie es la de captura: `timestamp_estimado` si el backend la reancló,
+    # `timestamp` si no; las lecturas `unsynced` sin reanclar no tienen hora
+    # de captura y quedan fuera de los intervalos (se cuentan aparte).
+
+    async def contar(
+        self,
+        device_id: str | None = None,
+        nivel_riesgo: str | None = None,
+        estado_conectividad: str | None = None,
+        riesgo_efectivo: str | None = None,
+        desde: datetime | None = None,
+        hasta: datetime | None = None,
+    ) -> int:
+        """Total de filas que `listar()` devolvería con los mismos filtros y
+        sin límite (la interfaz avisa del recorte con él)."""
+        raise NotImplementedError
+
+    async def agregar_serie(
+        self, device_id: str, desde: datetime, hasta: datetime, bucket_segundos: int
+    ) -> list[BucketSerie]:
+        """Intervalos alineados a múltiplos de `bucket_segundos` (época UNIX)
+        con al menos una lectura del nodo con hora; los vacíos no se devuelven."""
+        raise NotImplementedError
+
+    async def resumir_periodo(self, device_id: str, desde: datetime, hasta: datetime) -> ResumenSerie:
+        raise NotImplementedError
+
+    async def detectar_huecos(
+        self, device_id: str, desde: datetime, hasta: datetime, umbral_segundos: int, limite: int
+    ) -> list[tuple[datetime, datetime]]:
+        """Pares (lectura anterior, lectura siguiente) separados por más de
+        `umbral_segundos`, en orden cronológico, como mucho `limite`."""
+        raise NotImplementedError
+
+    async def ultima_hora_de_captura(self, device_id: str) -> datetime | None:
+        """Hora de captura más reciente persistida del nodo (HU-48: los
+        pendientes en LittleFS son posteriores a ella)."""
+        raise NotImplementedError

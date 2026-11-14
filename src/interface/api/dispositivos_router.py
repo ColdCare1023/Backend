@@ -22,6 +22,10 @@ from src.application.use_cases.gestionar_dispositivos import (
     RotarCredencialDispositivoUseCase,
 )
 from src.application.use_cases.prueba_posesion import espera_prueba, mensaje_desafio, preparar_desafio
+from src.application.use_cases.registrar_estado_nodo import (
+    BRECHAS_EN_ESTADO_OPERATIVO,
+    construir_vista_buffer,
+)
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.application.use_cases.retencion_compromiso import abrir_monitoreo_suspendido
 from src.application.use_cases.vigilar_sin_datos import umbral_sin_datos
@@ -37,6 +41,7 @@ from src.domain.value_objects.device_id import PATRON_DEVICE_ID
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.database.repositories.audit_log_repository import SQLAlchemyAuditLogRepository
 from src.infrastructure.database.repositories.device_repository import SQLAlchemyDeviceRepository
+from src.infrastructure.database.repositories.estado_nodo_repository import SQLAlchemyEstadoNodoRepository
 from src.infrastructure.database.repositories.incidente_repository import SQLAlchemyIncidenteRepository
 from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
 from src.infrastructure.database.repositories.trazabilidad_repository import (
@@ -45,7 +50,9 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
 from src.infrastructure.mqtt.broker_admin import BrokerAdmin, obtener_broker_admin
 from src.infrastructure.mqtt.desafio_posesion import PublicadorDesafios, obtener_publicador_desafios
 from src.interface.api.deps import DbSessionDep, SettingsDep, require_roles
+from src.interface.api.mappers import buffer_to_response
 from src.interface.api.schemas import (
+    BufferLittleFSResponse,
     CalibracionRequest,
     ConfirmarBrokerRequest,
     CredencialDispositivoResponse,
@@ -270,6 +277,8 @@ def _estado_operativo(
     n_intervalos: int,
     retencion: list[IncidenteOperativo] | None = None,
     de_lectura: list[IncidenteOperativo] | None = None,
+    umbral_puerta: int | None = None,
+    buffer: BufferLittleFSResponse | None = None,
 ) -> EstadoOperativoResponse:
     """Clasifica el nodo por su última lectura recibida (no por la IA).
 
@@ -327,7 +336,22 @@ def _estado_operativo(
         estado_operativo=estado,
         sensores=sensores,
         incidencias_operativas=incidencias,
+        umbral_puerta_abierta_segundos=umbral_puerta,
+        buffer_littlefs=buffer,
     )
+
+
+async def _buffer_littlefs(
+    device_id: str, estados_nodo: SQLAlchemyEstadoNodoRepository, lecturas: SQLAlchemyLecturaRepository
+) -> BufferLittleFSResponse | None:
+    """HU-48: último `estado_nodo` y brechas por buffer agotado del nodo."""
+    estado = await estados_nodo.obtener_estado(device_id)
+    episodios = await estados_nodo.listar_episodios(device_id, limite=BRECHAS_EN_ESTADO_OPERATIVO)
+    ultima_captura = None
+    if estado is not None and estado.pendientes and not (estado.pendientes_desde and estado.pendientes_hasta):
+        # Solo hace falta para estimar el rango de los pendientes.
+        ultima_captura = await lecturas.ultima_hora_de_captura(device_id)
+    return buffer_to_response(construir_vista_buffer(estado, episodios, ultima_captura))
 
 
 @router.get("/estado-operativo", response_model=list[EstadoOperativoResponse])
@@ -346,6 +370,7 @@ async def estado_operativo(
     ahora = datetime.now(timezone.utc)
     lecturas = SQLAlchemyLecturaRepository(session)
     incidentes = SQLAlchemyIncidenteRepository(session)
+    estados_nodo = SQLAlchemyEstadoNodoRepository(session)
     resultado = []
     for device in await SQLAlchemyDeviceRepository(session).listar():
         if not device.get("activo", True):
@@ -361,6 +386,8 @@ async def estado_operativo(
         estado = _estado_operativo(
             device, await lecturas.ultima_recibida_por_device(device["id"]), ahora,
             await incidentes.abierto(device["id"]), settings.sin_datos_n_intervalos, retencion, de_lectura,
+            umbral_puerta=settings.puerta_umbral_prolongada_segundos,
+            buffer=await _buffer_littlefs(device["id"], estados_nodo, lecturas),
         )
         if todos or estado.estado_operativo != "OPERATIVO":
             resultado.append(estado)
