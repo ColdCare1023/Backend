@@ -21,7 +21,14 @@ from uuid import uuid4
 from src.application.use_cases.generar_alerta import AvisoExcursion
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 from src.infrastructure.config import get_settings
-from src.infrastructure.notifications.correos_cuenta import correo_cuenta_creada, correo_recuperar_password
+from src.infrastructure.notifications.correos_cuenta import (
+    correo_activacion_cuenta,
+    correo_codigo_login,
+    correo_codigo_recuperacion,
+    correo_cuenta_creada,
+    correo_recuperar_password,
+    enlace_codigo,
+)
 from src.infrastructure.notifications.notificacion_service import (
     componer_correo_excursion,
     componer_correo_preventivo,
@@ -42,6 +49,18 @@ def ejemplos(frontend_url: str, remitente: str, destinatario: str) -> dict[str, 
     clave = correo_recuperar_password(
         "Brenda Gamio", f"{frontend_url or 'https://coldcare.example'}/restablecer-password#token=EJEMPLO", 30
     )
+    base_frontend = (frontend_url or "https://coldcare.example").rstrip("/")
+    pagina_codigo = f"{base_frontend}/recuperar-contrasena"
+    # Códigos de ejemplo fijos: la vista previa no emite códigos reales.
+    login = correo_codigo_login("Brenda Gamio", "482915", 10)
+    recuperacion = correo_codigo_recuperacion(
+        "Brenda Gamio", "730264", 10, enlace_codigo(pagina_codigo, destinatario, "recuperar"),
+        enlace_legado=f"{base_frontend}/restablecer-password#token=EJEMPLO", minutos_enlace=30,
+    )
+    activacion = correo_activacion_cuenta(
+        "Brenda Gamio", destinatario, "159307", 48, enlace_codigo(pagina_codigo, destinatario, "activar"), base_frontend,
+    )
+
     def _m(asunto: str, cuerpo: str, html: str) -> MensajeCorreo:
         return MensajeCorreo(remitente, destinatario, asunto, cuerpo, html=html)
 
@@ -57,6 +76,9 @@ def ejemplos(frontend_url: str, remitente: str, destinatario: str) -> dict[str, 
             replace(base, temperatura=1.2, captured_at=ahora - timedelta(hours=3)),
             remitente, destinatario, frontend_url, DISPOSITIVO,
         ),
+        "06_codigo_login": _m(login.asunto, login.cuerpo, login.html),
+        "07_codigo_recuperacion": _m(recuperacion.asunto, recuperacion.cuerpo, recuperacion.html),
+        "08_activacion_cuenta": _m(activacion.asunto, activacion.cuerpo, activacion.html),
     }
 
 

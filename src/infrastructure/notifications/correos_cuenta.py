@@ -1,8 +1,9 @@
-"""Correos de cuenta: bienvenida y contraseña olvidada (texto plano + HTML con la plantilla de ColdCare)."""
+"""Correos de cuenta: bienvenida, contraseña olvidada y códigos de verificación (texto plano + HTML con la plantilla de ColdCare)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import urlencode
 
 from src.infrastructure.notifications.plantillas_correo import Boton, renderizar
 
@@ -77,3 +78,156 @@ def correo_recuperar_password(nombre: str, enlace: str, minutos: int) -> CorreoC
         nota="¿No lo solicitaste? Ignora este mensaje: tu contraseña no cambia. Si te preocupa tu cuenta, avisa al administrador.",
     )
     return CorreoComposto(asunto, cuerpo, html)
+
+
+# ── Códigos de verificación de un solo uso ────────────────────────────────
+#
+# El código nunca va en el asunto ni en el preheader: ambos se ven en la
+# notificación del teléfono bloqueado.
+
+
+def _vigencia(minutos: int) -> str:
+    if minutos % 60 == 0 and minutos >= 120:
+        return f"{minutos // 60} horas"
+    if minutos == 60:
+        return "1 hora"
+    return f"{minutos} minutos"
+
+
+def enlace_codigo(url_codigo: str, email: str, modo: str) -> str:
+    """Página del frontend donde se ingresa el código, con el correo ya escrito."""
+    return f"{url_codigo}?{urlencode({'email': email, 'modo': modo})}"
+
+
+def correo_codigo_login(nombre: str, codigo: str, minutos: int) -> CorreoComposto:
+    """Segundo factor del inicio de sesión con contraseña."""
+    asunto = "[ColdCare] Tu código para iniciar sesión"
+    vigencia = _vigencia(minutos)
+    cuerpo = (
+        f"Hola {nombre}:\n\n"
+        "Alguien ingresó tu correo y contraseña en ColdCare. Para terminar de iniciar sesión, "
+        "escribe este código en la pantalla de verificación:\n\n"
+        f"    {codigo}\n\n"
+        f"Vence en {vigencia} y solo funciona una vez.\n\n"
+        "Si no fuiste tú, alguien conoce tu contraseña: no compartas este código, cámbiala cuanto antes "
+        "y avisa al administrador."
+    )
+    html = renderizar(
+        asunto=asunto,
+        preheader=f"Tu código para entrar a ColdCare vence en {vigencia}.",
+        tono="marca",
+        etiqueta="Verificación de acceso",
+        titulo="Confirma que eres tú",
+        parrafos=[
+            f"Hola {nombre}, para terminar de iniciar sesión en ColdCare escribe este código en la pantalla "
+            "de verificación.",
+        ],
+        codigo=codigo,
+        codigo_vigencia=f"Vence en {vigencia} · funciona una sola vez",
+        nota="¿No fuiste tú? Alguien conoce tu contraseña. No compartas este código con nadie (ColdCare nunca "
+        "te lo pedirá), cambia tu contraseña y avisa al administrador.",
+    )
+    return CorreoComposto(asunto, cuerpo, html)
+
+
+def correo_codigo_recuperacion(
+    nombre: str,
+    codigo: str,
+    minutos: int,
+    enlace_pagina: str,
+    enlace_legado: str | None = None,
+    minutos_enlace: int | None = None,
+) -> CorreoComposto:
+    """«Olvidé mi contraseña»: código de un solo uso para elegir una contraseña
+    nueva. Si se pasa `enlace_legado`, el correo incluye además el enlace de
+    un solo uso de la versión anterior (sigue funcionando)."""
+    asunto = "[ColdCare] Restablecer contraseña"
+    vigencia = _vigencia(minutos)
+    lineas = [
+        f"Hola {nombre}:",
+        "",
+        "Recibimos una solicitud para restablecer la contraseña de tu cuenta de ColdCare.",
+        "Escribe este código en la pantalla de recuperación:",
+        "",
+        f"    {codigo}",
+        "",
+        f"Vence en {vigencia} y solo funciona una vez. Pantalla de recuperación: {enlace_pagina}",
+    ]
+    if enlace_legado:
+        lineas += [
+            "",
+            f"También puedes usar este enlace en los próximos {_vigencia(minutos_enlace or minutos)} (solo funciona una vez):",
+            "",
+            enlace_legado,
+        ]
+    lineas += ["", "Si no lo solicitaste, ignora este mensaje: tu contraseña no cambia."]
+    html = renderizar(
+        asunto=asunto,
+        preheader=f"Tu código para elegir una contraseña nueva vence en {vigencia}.",
+        tono="marca",
+        etiqueta="Seguridad de la cuenta",
+        titulo="Restablece tu contraseña",
+        parrafos=[
+            f"Hola {nombre}, recibimos una solicitud para restablecer la contraseña de tu cuenta de ColdCare. "
+            "Escribe este código en la pantalla de recuperación para elegir una nueva.",
+        ],
+        codigo=codigo,
+        codigo_vigencia=f"Vence en {vigencia} · funciona una sola vez",
+        detalles=[("Pantalla de recuperación", enlace_pagina)],
+        boton=Boton("Elegir una contraseña nueva", enlace_legado or enlace_pagina),
+        nota="¿No lo solicitaste? Ignora este mensaje: tu contraseña no cambia y nadie puede usar el código sin "
+        "acceso a tu correo. Si te preocupa tu cuenta, avisa al administrador.",
+    )
+    return CorreoComposto(asunto, "\n".join(lineas), html)
+
+
+def correo_activacion_cuenta(
+    nombre: str, email: str, codigo: str, horas: int, enlace_activacion: str, frontend_url: str = ""
+) -> CorreoComposto:
+    """Bienvenida de una cuenta creada por un administrador: explica cómo
+    elegir la contraseña con el código de activación. Nunca lleva una contraseña."""
+    asunto = "[ColdCare] Tu cuenta fue creada"
+    vigencia = _vigencia(horas * 60)
+    inicio = frontend_url.rstrip("/") if frontend_url else ""
+    lineas = [
+        f"Hola {nombre},",
+        "",
+        "Un administrador creó tu cuenta en ColdCare, el sistema de monitoreo de la cadena de frío.",
+        f"Tu usuario es este correo: {email}.",
+        "",
+        "Para activarla, elige tu propia contraseña:",
+        f"  1. Abre {enlace_activacion}",
+        "  2. Escribe este código de activación:",
+        "",
+        f"    {codigo}",
+        "",
+        "  3. Elige una contraseña de al menos 10 caracteres que combine letras y números.",
+        "",
+        f"El código vence en {vigencia} y solo funciona una vez. Si vence, pide uno nuevo en la misma pantalla "
+        "con «¿Olvidaste tu contraseña?».",
+    ]
+    if inicio:
+        lineas += ["", f"Después ingresa aquí: {inicio}"]
+    lineas += ["", "Si no esperabas este mensaje, avisa al administrador."]
+    html = renderizar(
+        asunto=asunto,
+        preheader="Activa tu cuenta de ColdCare eligiendo tu contraseña.",
+        tono="marca",
+        etiqueta="Activa tu cuenta",
+        titulo=f"Bienvenido/a, {nombre}",
+        parrafos=[
+            "Un administrador creó tu cuenta en ColdCare, el sistema que vigila la temperatura de tus "
+            "refrigeradores y te avisa antes de que un lote se pierda.",
+            "Para activarla, abre la pantalla de activación y escribe este código; luego elige tu propia contraseña.",
+        ],
+        codigo=codigo,
+        codigo_vigencia=f"Vence en {vigencia} · funciona una sola vez",
+        detalles=[
+            ("Usuario", email),
+            ("Contraseña", "La eliges tú: al menos 10 caracteres, con letras y números"),
+        ],
+        boton=Boton("Activar mi cuenta", enlace_activacion),
+        nota="¿No esperabas este mensaje? Avisa al administrador: alguien pudo escribir tu correo por error. "
+        "No compartas este código: ColdCare nunca te lo pedirá.",
+    )
+    return CorreoComposto(asunto, "\n".join(lineas), html)

@@ -33,6 +33,9 @@ MATRIZ_ESPERADA: dict[tuple[str, str], frozenset[str] | str] = {
     ("POST", "/api/alertas/acciones-correctivas/{accion_id}/rectificar"): frozenset({F, T}),
     ("GET", "/api/auditoria"): frozenset({A, AU}),
     ("POST", "/api/auth/login"): PUBLICO,
+    # Segundo paso del login con código: autorizado por el desafío y el código del correo.
+    ("POST", "/api/auth/login/verificar"): PUBLICO,
+    ("POST", "/api/auth/login/reenviar"): PUBLICO,
     ("POST", "/api/auth/google"): PUBLICO,
     ("POST", "/api/auth/sse-ticket"): AUTENTICADO,
     ("POST", "/api/auth/privacidad/aceptar"): AUTENTICADO,

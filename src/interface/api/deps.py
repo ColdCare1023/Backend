@@ -5,10 +5,14 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.use_cases.codigos_verificacion import PoliticaCodigos, ServicioCodigosVerificacion
 from src.domain.entities.usuario import Usuario
 from src.domain.exceptions import CredencialesInvalidasError, PermisoDenegadoError
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.config import Settings, get_settings
+from src.infrastructure.database.repositories.codigo_verificacion_repository import (
+    SQLAlchemyCodigoVerificacionRepository,
+)
 from src.infrastructure.database.repositories.jti_repository import SQLAlchemyJtiRepository
 from src.infrastructure.database.repositories.usuario_repository import SQLAlchemyUsuarioRepository
 from src.infrastructure.database.session import get_session
@@ -118,6 +122,30 @@ def get_enviador_correo(settings: SettingsDep) -> EnviadorCorreo:
 
 
 EnviadorCorreoDep = Annotated[EnviadorCorreo, Depends(get_enviador_correo)]
+
+
+def servicio_codigos(session: AsyncSession, settings: Settings) -> ServicioCodigosVerificacion:
+    """Códigos de verificación de un solo uso con la clave y la política de Settings.
+
+    En producción sin CODIGOS_HMAC_KEY (solo admitido con el correo y el OTP
+    apagados) no hay códigos: 503 en vez de un 500 o de una clave inventada."""
+    try:
+        clave = settings.clave_codigos
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Los códigos de verificación no están configurados. Contacte al administrador.",
+        ) from exc
+    return ServicioCodigosVerificacion(
+        SQLAlchemyCodigoVerificacionRepository(session), clave, PoliticaCodigos.desde_settings(settings)
+    )
+
+
+def servicio_codigos_opcional(session: AsyncSession, settings: Settings) -> ServicioCodigosVerificacion | None:
+    try:
+        return servicio_codigos(session, settings)
+    except HTTPException:
+        return None
 
 
 def require_roles(*roles_permitidos: Rol) -> Callable[[Usuario], Usuario]:

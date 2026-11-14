@@ -26,8 +26,15 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
 )
 from src.infrastructure.database.repositories.usuario_repository import SQLAlchemyUsuarioRepository
 from src.infrastructure.notifications.bienvenida import NotificadorBienvenida
+from src.infrastructure.notifications.transporte_email import MensajeCorreo
 from src.infrastructure.security.privacidad import enmascarar_email, enmascarar_telefono
-from src.interface.api.deps import DbSessionDep, SettingsDep, require_roles
+from src.interface.api.deps import (
+    DbSessionDep,
+    SettingsDep,
+    require_roles,
+    servicio_codigos,
+    servicio_codigos_opcional,
+)
 from src.interface.api.mappers import nombre_visible
 from src.interface.api.schemas import (
     CambiarRolUsuarioRequest,
@@ -49,11 +56,11 @@ def get_notificador_bienvenida(settings: SettingsDep) -> NotificadorBienvenida:
 
 async def _avisar_alta(
     fabrica_sesiones: async_sessionmaker, notificador: NotificadorBienvenida, usuario_id: UUID, admin_id: UUID, nombre: str, email: str,
-    telefono: str | None,
+    telefono: str | None, activacion: MensajeCorreo | None = None,
 ) -> None:
-    """Después de responder: correo y SMS reales al usuario nuevo, y su resultado en la bitácora
-    (enmascarado: audit_logs es inmutable)."""
-    resultado = await notificador.notificar(nombre, email, telefono)
+    """Después de responder: correo (con el código de activación) y SMS reales al usuario nuevo,
+    y su resultado en la bitácora (enmascarado: audit_logs es inmutable)."""
+    resultado = await notificador.notificar(nombre, email, telefono, activacion)
     async with fabrica_sesiones() as session:
         await AuditarAccionCriticaUseCase(
             SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
@@ -64,6 +71,7 @@ async def _avisar_alta(
             detalle={
                 "correo": resultado.correo, "sms": resultado.sms,
                 "email": enmascarar_email(email), "telefono": enmascarar_telefono(telefono),
+                "codigo_activacion": activacion is not None,
             },
             ip_origen=None,
         )
@@ -91,6 +99,7 @@ def _to_response(usuario) -> UsuarioResponse:
 async def crear_usuario(
     body: UsuarioCreateRequest,
     session: DbSessionDep,
+    settings: SettingsDep,
     request: Request,
     tareas: BackgroundTasks,
     notificador: NotificadorBienvenida = Depends(get_notificador_bienvenida),
@@ -114,11 +123,20 @@ async def crear_usuario(
         detalle={"email": enmascarar_email(usuario.email), "rol": usuario.rol.value},
         ip_origen=request.client.host if request.client else None,
     )
+    # Código de activación (48 h) en la misma transacción que el alta: el
+    # titular elige su propia contraseña sin depender de la temporal.
+    activacion = (
+        await notificador.preparar_activacion(
+            usuario, servicio_codigos(session, settings), request.client.host if request.client else None
+        )
+        if notificador.correo_configurado
+        else None
+    )
     await session.commit()
     # Aviso real al usuario nuevo, tras confirmar el alta y sin retrasar la respuesta.
     tareas.add_task(
         _avisar_alta, async_sessionmaker(session.bind, expire_on_commit=False), notificador,
-        usuario.id, admin.id, usuario.nombre, usuario.email, usuario.telefono,
+        usuario.id, admin.id, usuario.nombre, usuario.email, usuario.telefono, activacion,
     )
     return _to_response(usuario)
 
@@ -213,11 +231,15 @@ async def cambiar_rol(
 
 
 async def _contrasena_temporal(
-    session, request: Request, admin, usuario_id: UUID, caso, accion: str, evento: str
+    session, settings, request: Request, admin, usuario_id: UUID, caso, accion: str, evento: str
 ) -> PasswordTemporalResponse:
     try:
+        # Con la contraseña nueva se borran también los códigos pendientes
+        # (activación, recuperación, login) y su tope de fallos.
         usuario, temporal = await caso(
-            SQLAlchemyUsuarioRepository(session), SQLAlchemyPasswordResetRepository(session)
+            SQLAlchemyUsuarioRepository(session),
+            SQLAlchemyPasswordResetRepository(session),
+            servicio_codigos_opcional(session, settings),
         ).execute(usuario_id, admin.id)
     except RecursoNoEncontradoError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -246,6 +268,7 @@ async def _contrasena_temporal(
 async def restablecer_password(
     usuario_id: UUID,
     session: DbSessionDep,
+    settings: SettingsDep,
     request: Request,
     admin=Depends(require_roles(Rol.ADMINISTRADOR)),
 ) -> PasswordTemporalResponse:
@@ -253,7 +276,7 @@ async def restablecer_password(
     cambiarla en el siguiente acceso y cierra las sesiones abiertas del
     usuario: la respuesta a una contraseña comprometida u olvidada sin SMTP."""
     return await _contrasena_temporal(
-        session, request, admin, usuario_id, RestablecerPasswordPorAdminUseCase,
+        session, settings, request, admin, usuario_id, RestablecerPasswordPorAdminUseCase,
         "RESTABLECER_PASSWORD_USUARIO", "PASSWORD_RESTABLECIDA_POR_ADMIN",
     )
 
@@ -262,6 +285,7 @@ async def restablecer_password(
 async def reactivar_usuario(
     usuario_id: UUID,
     session: DbSessionDep,
+    settings: SettingsDep,
     request: Request,
     admin=Depends(require_roles(Rol.ADMINISTRADOR)),
 ) -> PasswordTemporalResponse:
@@ -269,6 +293,6 @@ async def reactivar_usuario(
     nueva. Antes no existía: el correo era único y la persona no podía volver
     a tener cuenta sin intervenir la base de datos."""
     return await _contrasena_temporal(
-        session, request, admin, usuario_id, ReactivarUsuarioUseCase,
+        session, settings, request, admin, usuario_id, ReactivarUsuarioUseCase,
         "REACTIVAR_USUARIO", "REACTIVACION_USUARIO",
     )

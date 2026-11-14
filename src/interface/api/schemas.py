@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import (
     AfterValidator,
+    AliasChoices,
     BaseModel,
     ConfigDict,
     EmailStr,
@@ -63,11 +64,34 @@ class LoginGoogleRequest(_PeticionEstricta):
 
 
 class TokenResponse(BaseModel):
-    access_token: str
+    # Nulo solo cuando `requiere_codigo` es true: la sesión se abre después,
+    # en POST /api/auth/login/verificar.
+    access_token: str | None = None
     token_type: str = "bearer"
     require_privacy_consent: bool = False
     # BE-025: contraseña temporal; el frontend debe llevar al cambio.
     require_password_change: bool = False
+    # Segundo factor por correo (OTP_LOGIN_ENABLED). El frontend pide el código
+    # y lo envía junto con `desafio` (opaco, de un solo uso).
+    requiere_codigo: bool = False
+    desafio: str | None = None
+    email_enmascarado: str | None = None
+    expira_en_segundos: int | None = None
+    reenviar_en_segundos: int | None = None
+
+
+# Código de verificación: 6 dígitos; se aceptan espacios o guiones al pegarlo.
+CodigoVerificacionTexto = Annotated[str, StringConstraints(min_length=6, max_length=12, pattern=r"^[0-9\s-]+$")]
+DesafioTexto = Annotated[str, StringConstraints(min_length=20, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")]
+
+
+class VerificarCodigoLoginRequest(_PeticionEstricta):
+    desafio: DesafioTexto
+    codigo: CodigoVerificacionTexto
+
+
+class ReenviarCodigoLoginRequest(_PeticionEstricta):
+    desafio: DesafioTexto
 
 
 class SSETicketResponse(BaseModel):
@@ -115,8 +139,27 @@ class RecuperarPasswordRequest(_PeticionEstricta):
 
 
 class RestablecerPasswordRequest(_PeticionEstricta):
-    token: str = Field(min_length=20, max_length=256)
-    password_nueva: PasswordNueva
+    """Dos formas, excluyentes:
+
+    - legado (BE-025): `{token, password_nueva}` con el token del enlace;
+    - por código: `{email, codigo, password_nueva}` con el código de
+      recuperación o de activación recibido por correo.
+
+    `nueva_password` se acepta como sinónimo de `password_nueva`."""
+
+    token: str | None = Field(default=None, min_length=20, max_length=256)
+    email: EmailStr | None = None
+    codigo: CodigoVerificacionTexto | None = None
+    password_nueva: PasswordNueva = Field(validation_alias=AliasChoices("password_nueva", "nueva_password"))
+
+    @model_validator(mode="after")
+    def _token_o_codigo(self) -> "RestablecerPasswordRequest":
+        por_codigo = self.email is not None or self.codigo is not None
+        if self.token is not None and por_codigo:
+            raise ValueError("Envíe el token del enlace o el correo con el código, no ambos")
+        if self.token is None and not (self.email is not None and self.codigo is not None):
+            raise ValueError("Falta el token del enlace o el correo y el código de verificación")
+        return self
 
 
 class SolicitudRecuperacionResponse(BaseModel):

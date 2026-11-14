@@ -200,3 +200,47 @@ async def test_el_aviso_sale_a_varios_destinatarios_y_la_auditoria_los_enmascara
 
     enmascarado = enmascarar_emails("diego@gmail.com, brenda@gmail.com")
     assert "diego" not in enmascarado and "brenda" not in enmascarado and enmascarado.count("***") == 2
+
+
+# ── Códigos de verificación ───────────────────────────────────────────────
+
+
+def test_el_bloque_del_codigo_es_grande_monoespaciado_y_de_marca():
+    from src.infrastructure.notifications.plantillas_correo import AZUL_MARCA, AZUL_MARINO
+
+    html = _correo(tono="marca", codigo="048213", codigo_vigencia="Vence en 10 minutos")
+    assert "048213" in html and "monospace" in html and "font-size:38px" in html
+    assert AZUL_MARCA in html and AZUL_MARINO in html
+    assert 'aria-label="0 4 8 2 1 3"' in html and "Vence en 10 minutos" in html
+    assert not re.search(r"<img|<link|@import|url\(", html)
+    assert "048213" not in _correo(tono="marca")
+
+
+def _correos_con_codigo():
+    from src.infrastructure.notifications import correos_cuenta as c
+
+    pagina = "https://coldcare.example/recuperar-contrasena"
+    return {
+        "login": c.correo_codigo_login("Ana <b>", "123456", 10),
+        "recuperacion": c.correo_codigo_recuperacion("Ana <b>", "123456", 10, f"{pagina}?email=a%40x.pe"),
+        "activacion": c.correo_activacion_cuenta("Ana <b>", "a@x.pe", "123456", 48, f"{pagina}?modo=activar"),
+    }
+
+
+@pytest.mark.parametrize("tipo", ["login", "recuperacion", "activacion"])
+def test_los_correos_con_codigo_lo_muestran_sin_ponerlo_en_asunto_ni_preheader(tipo):
+    correo = _correos_con_codigo()[tipo]
+    assert "123456" in correo.cuerpo and "123456" in correo.html
+    assert "123456" not in correo.asunto
+    preheader = re.search(r'<span style="display:none[^>]*>([^<]*)</span>', correo.html).group(1)
+    assert "123456" not in preheader
+    assert "Ana &lt;b&gt;" in correo.html and "<b>" not in correo.html
+    assert "#0B5CFF" in correo.html
+    assert re.search(r"no (fuiste|lo solicitaste|esperabas)", correo.cuerpo + correo.html, re.IGNORECASE)
+
+
+def test_vigencias_en_minutos_y_horas():
+    from src.infrastructure.notifications.correos_cuenta import correo_activacion_cuenta, correo_codigo_login
+
+    assert "10 minutos" in correo_codigo_login("Ana", "123456", 10).cuerpo
+    assert "48 horas" in correo_activacion_cuenta("Ana", "a@x.pe", "123456", 48, "https://x.pe/r").cuerpo

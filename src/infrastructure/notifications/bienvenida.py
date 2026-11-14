@@ -1,13 +1,16 @@
 """Aviso real al crear una cuenta: correo y SMS al usuario recién registrado.
 
-Usa los mismos transportes de producción que las alertas (SMTP/Resend para el
-correo, pasarela compatible con Twilio para el SMS); no hay un canal de prueba
-aparte. Nunca incluye la contraseña: la entrega el administrador. Nunca lanza:
-cada canal devuelve su resultado y quien llama lo audita.
+Usa los mismos transportes de producción que las alertas (SMTP/Resend/Apps
+Script para el correo, pasarela compatible con Twilio para el SMS); no hay un
+canal de prueba aparte. Nunca incluye una contraseña. Con correo disponible, la
+bienvenida lleva un código de activación (48 h) para que el titular elija su
+propia contraseña en FRONTEND_URL/recuperar-contrasena. Nunca lanza: cada canal
+devuelve su resultado y quien llama lo audita.
 """
 
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from src.infrastructure.config import Settings
 from src.infrastructure.notifications.correos_cuenta import correo_cuenta_creada
@@ -18,6 +21,10 @@ from src.infrastructure.notifications.transporte_email import (
     TransporteEmail,
     construir_transporte,
 )
+
+if TYPE_CHECKING:
+    from src.application.use_cases.codigos_verificacion import ServicioCodigosVerificacion
+    from src.domain.entities.usuario import Usuario
 
 logger = logging.getLogger("infrastructure.notifications.bienvenida")
 
@@ -54,14 +61,47 @@ class NotificadorBienvenida:
         self._settings = settings
         self._transporte = transporte if transporte is not None else construir_transporte(settings)
 
-    async def notificar(self, nombre: str, email: str, telefono: str | None) -> ResultadoBienvenida:
-        return ResultadoBienvenida(correo=await self._correo(nombre, email), sms=await self._sms(telefono))
+    @property
+    def correo_configurado(self) -> bool:
+        return self._transporte is not None
 
-    async def _correo(self, nombre: str, email: str) -> str:
+    async def preparar_activacion(
+        self, usuario: "Usuario", codigos: "ServicioCodigosVerificacion", ip: str | None = None
+    ) -> MensajeCorreo | None:
+        """Emite el código de activación (en la transacción del llamador) y
+        compone el correo de bienvenida que lo lleva. None si no hay correo:
+        un código que nadie va a recibir no se emite."""
+        if self._transporte is None:
+            return None
+        from src.application.use_cases.gestionar_credenciales import EmitirCodigoActivacionUseCase
+
+        correo = await EmitirCodigoActivacionUseCase(
+            codigos, self._settings.url_codigo_cuenta, self._settings.frontend_url
+        ).execute(usuario, ip)
+        return MensajeCorreo(
+            remitente=self._settings.correo_remitente,
+            destinatario=correo.destino,
+            asunto=correo.asunto,
+            cuerpo=correo.cuerpo,
+            html=correo.html,
+        )
+
+    async def notificar(
+        self, nombre: str, email: str, telefono: str | None, activacion: MensajeCorreo | None = None
+    ) -> ResultadoBienvenida:
+        return ResultadoBienvenida(
+            correo=await self._correo(nombre, email, activacion), sms=await self._sms(telefono)
+        )
+
+    async def enviar_activacion(self, mensaje: MensajeCorreo) -> str:
+        """Solo el correo de activación (sin SMS): lo usa `scripts.asegurar_admins`."""
+        return await self._correo("", mensaje.destinatario, mensaje)
+
+    async def _correo(self, nombre: str, email: str, activacion: MensajeCorreo | None = None) -> str:
         if self._transporte is None:
             return NO_CONFIGURADO
         try:
-            await self._transporte.enviar(componer_correo(self._settings, nombre, email))
+            await self._transporte.enviar(activacion or componer_correo(self._settings, nombre, email))
         except ErrorEnvioCorreo:
             logger.exception("No se pudo enviar el correo de bienvenida.")  # sin el destinatario en el log
             return FALLIDO

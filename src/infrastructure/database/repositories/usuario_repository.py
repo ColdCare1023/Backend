@@ -76,10 +76,22 @@ class SQLAlchemyUsuarioRepository(IUsuarioRepository):
         return _to_entity(model)
 
     async def obtener_por_email(self, email: str) -> Usuario | None:
-        stmt = select(UserModel).options(joinedload(UserModel.rol)).where(UserModel.email == email)
-        result = await self._session.execute(stmt)
-        model = result.scalar_one_or_none()
-        return _to_entity(model) if model else None
+        """Sin distinguir mayúsculas ni espacios: «Ana@X.pe » es la misma cuenta
+        que «ana@x.pe». La columna conserva su UNIQUE tal cual; si por datos
+        heredados hubiera dos filas que solo difieren en mayúsculas, gana la
+        que coincide exactamente y, si ninguna, la más antigua (estable)."""
+        buscado = email.strip()
+        stmt = (
+            select(UserModel)
+            .options(joinedload(UserModel.rol))
+            .where(func.lower(UserModel.email) == buscado.lower())
+            .order_by(UserModel.created_at, UserModel.id)
+        )
+        modelos = (await self._session.execute(stmt)).scalars().unique().all()
+        if not modelos:
+            return None
+        exacto = next((m for m in modelos if m.email == buscado), modelos[0])
+        return _to_entity(exacto)
 
     async def obtener_por_id(self, usuario_id: UUID) -> Usuario | None:
         stmt = select(UserModel).options(joinedload(UserModel.rol)).where(UserModel.id == usuario_id)

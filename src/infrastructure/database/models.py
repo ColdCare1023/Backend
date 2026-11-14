@@ -4,6 +4,7 @@ from datetime import date, datetime, timezone
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -162,6 +163,8 @@ class RoleModel(Base):
 
 class UserModel(Base):
     __tablename__ = "users"
+    # Migración 0038: el login y la recuperación buscan el correo sin distinguir mayúsculas.
+    __table_args__ = (Index("ix_users_email_lower", func.lower(sa_text("email"))),)
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     nombre: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -211,6 +214,59 @@ class PasswordResetTokenModel(Base):
     expira_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     usado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = _created_at_column()
+
+
+class CodigoVerificacionModel(Base):
+    """Códigos de un solo uso (6 dígitos) enviados por correo: segundo factor
+    del login, recuperación de contraseña y activación de cuentas creadas por
+    un administrador (migración 0038).
+
+    Nunca se guarda el código: solo su HMAC-SHA256 con CODIGOS_HMAC_KEY (con
+    10^6 valores posibles, un SHA-256 sin clave se invertiría al instante). El
+    desafío opaco del login se guarda como SHA-256 (es aleatorio de 256 bits).
+    Los intentos fallidos viven aquí, no en memoria: sobreviven a reinicios y
+    valen igual en todas las instancias.
+
+    Un código reemplazado o anulado no se borra: queda marcado (`usado_en`)
+    durante CODIGO_VENTANA_FALLOS_HORAS para que sus intentos fallidos sigan
+    contando en el tope por cuenta. `emitido_en` es inmutable (el reenvío
+    solo mueve `creado_en`, que marca el último envío)."""
+
+    __tablename__ = "codigos_verificacion"
+    __table_args__ = (
+        Index("ix_codigos_verificacion_usuario_proposito", "usuario_id", "proposito"),
+        # Como mucho un código vivo por usuario y propósito, aunque lleguen
+        # dos solicitudes a la vez.
+        Index(
+            "uq_codigos_verificacion_vigente",
+            "usuario_id",
+            "proposito",
+            unique=True,
+            postgresql_where=sa_text("usado_en IS NULL"),
+            sqlite_where=sa_text("usado_en IS NULL"),
+        ),
+        CheckConstraint(
+            "proposito IN ('login', 'recuperacion', 'activacion')", name="ck_codigos_verificacion_proposito"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    usuario_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    proposito: Mapped[str] = mapped_column(String(20), nullable=False)
+    codigo_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    desafio_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    expira_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    intentos: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=sa_text("0"))
+    usado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    creado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now()
+    )
+    emitido_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now()
+    )
+    ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
 
 
 class InvalidatedJtiModel(Base):
