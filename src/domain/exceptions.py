@@ -31,7 +31,15 @@ class CadenaTrazabilidadRotaError(DomainError):
 
 
 class CredencialesInvalidasError(DomainError):
-    """Se lanza cuando la autenticación de un usuario falla."""
+    """Se lanza cuando la autenticación de un usuario falla.
+
+    HU-50: `usuario_id` (si la cuenta existe) y `motivo` son solo para la
+    bitácora; el mensaje al cliente es siempre genérico."""
+
+    def __init__(self, mensaje: str = "", *, usuario_id: object = None, motivo: str | None = None) -> None:
+        super().__init__(mensaje)
+        self.usuario_id = usuario_id
+        self.motivo = motivo
 
 
 class CodigoVerificacionInvalidoError(CredencialesInvalidasError):
@@ -70,3 +78,8 @@ class PermisoDenegadoError(DomainError):
 class RecursoNoEncontradoError(DomainError):
     """Se lanza cuando un recurso solicitado no existe."""
 
+
+
+class RectificacionSinCambiosError(DomainError):
+    """HU-28: una rectificación que deja igual la decisión, la acción y la
+    justificación vigentes no corrige nada y no se encadena."""

@@ -53,3 +53,18 @@ class ILecturaRepository(ABC):
         (device_id+boot_id+seq_no) — clave preferida sobre
         obtener_por_device_y_timestamp cuando el payload la declara."""
         ...
+
+    async def estadisticas_periodo(
+        self,
+        device_id: str | None,
+        desde: datetime | None,
+        hasta: datetime | None,
+        minimo_celsius: float,
+        maximo_celsius: float,
+    ) -> dict | None:
+        """HU-38: agregados de TODO el periodo (no de una muestra recortada):
+        total de lecturas, con temperatura interna, en rango, mín/máx/promedio
+        y lecturas por riesgo efectivo. None si el repositorio no lo soporta
+        (el llamador calcula sobre las lecturas que ya tiene)."""
+        return None
+

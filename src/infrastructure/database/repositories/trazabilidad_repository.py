@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select, text, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.entities.registro_trazabilidad import RegistroTrazabilidad
@@ -177,3 +177,22 @@ class SQLAlchemyTrazabilidadRepository(ITrazabilidadRepository):
             .values(is_after_corruption=True)
         )
         await self._session.flush()
+
+    async def listar_cadenas(self) -> list[dict]:
+        """HU-26: una fila por chain_id con su número de eslabones y el último
+        instante registrado, para elegir qué cadena verificar."""
+        stmt = (
+            select(
+                TraceabilityRecordModel.chain_id,
+                func.count(TraceabilityRecordModel.id),
+                func.max(TraceabilityRecordModel.timestamp),
+            )
+            .group_by(TraceabilityRecordModel.chain_id)
+            .order_by(TraceabilityRecordModel.chain_id)
+        )
+        filas = (await self._session.execute(stmt)).all()
+        return [
+            {"chain_id": chain_id, "total_registros": total, "ultimo_registro_en": ultimo}
+            for chain_id, total, ultimo in filas
+        ]
+

@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -268,3 +268,56 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
         result = await self._session.execute(stmt)
         model = result.scalar_one_or_none()
         return _to_entity(model) if model else None
+
+    async def estadisticas_periodo(
+        self,
+        device_id: str | None,
+        desde: datetime | None,
+        hasta: datetime | None,
+        minimo_celsius: float,
+        maximo_celsius: float,
+    ) -> dict:
+        """HU-38: agregados SQL sobre el periodo completo, con los mismos
+        filtros que `listar` (por `timestamp` de captura) pero sin su tope."""
+        filtros = []
+        if device_id:
+            filtros.append(ThermalReadingModel.device_id == device_id)
+        if desde:
+            filtros.append(ThermalReadingModel.timestamp >= desde)
+        if hasta:
+            filtros.append(ThermalReadingModel.timestamp <= hasta)
+        temperatura = ThermalReadingModel.temperatura_interna
+        en_rango = func.coalesce(
+            func.sum(case((and_(temperatura >= minimo_celsius, temperatura <= maximo_celsius), 1), else_=0)), 0
+        )
+        total, con_temperatura, conformes, minima, maxima, promedio = (
+            await self._session.execute(
+                select(
+                    func.count(ThermalReadingModel.id),
+                    func.count(temperatura),
+                    en_rango,
+                    func.min(temperatura),
+                    func.max(temperatura),
+                    func.avg(temperatura),
+                ).where(*filtros)
+            )
+        ).one()
+        # Mismo criterio que el detalle: riesgo efectivo, o la clase del modelo
+        # en lecturas antiguas que no lo tienen calculado.
+        nivel = func.coalesce(
+            ThermalReadingModel.riesgo_efectivo, ThermalReadingModel.nivel_riesgo, "sin_clasificar"
+        )
+        consulta_niveles = select(nivel, func.count(ThermalReadingModel.id)).where(*filtros).group_by(nivel)
+        por_nivel = {
+            str(clave): int(cantidad) for clave, cantidad in (await self._session.execute(consulta_niveles)).all()
+        }
+        return {
+            "total_lecturas": int(total),
+            "lecturas_con_temperatura": int(con_temperatura),
+            "lecturas_en_rango": int(conformes),
+            "temp_minima": minima,
+            "temp_maxima": maxima,
+            "temp_promedio": float(promedio) if promedio is not None else None,
+            "por_nivel": por_nivel,
+        }
+

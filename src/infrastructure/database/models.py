@@ -496,6 +496,9 @@ class AuditLogModel(Base):
     recurso: Mapped[str] = mapped_column(String(100), nullable=False)
     detalle: Mapped[dict | None] = mapped_column(JSONVariant, nullable=True)
     ip_origen: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    # HU-42/HU-50 (migración 0039): exitoso, fallido, denegado o bloqueado.
+    # NULL en filas anteriores: se deriva de la acción (no se reescriben).
+    resultado: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = _created_at_column()
 
 

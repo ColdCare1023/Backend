@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.entities.alerta_termica import AlertaTermica
@@ -192,3 +192,41 @@ class SQLAlchemyAlertaRepository(IAlertaRepository):
         result = await self._session.execute(stmt)
         model = result.scalar_one_or_none()
         return _to_entity(model) if model else None
+
+    @staticmethod
+    def _filtros_periodo(device_id: str | None, desde: datetime | None, hasta: datetime | None) -> list:
+        filtros = []
+        if device_id:
+            filtros.append(ThermalAlertModel.device_id == device_id)
+        if desde is not None:
+            filtros.append(ThermalAlertModel.created_at >= desde)
+        if hasta is not None:
+            filtros.append(ThermalAlertModel.created_at <= hasta)
+        return filtros
+
+    async def contar_por_nivel(
+        self, device_id: str | None, desde: datetime | None, hasta: datetime | None
+    ) -> dict[str, int]:
+        stmt = (
+            select(ThermalAlertModel.nivel_riesgo, func.count(ThermalAlertModel.id))
+            .where(*self._filtros_periodo(device_id, desde, hasta))
+            .group_by(ThermalAlertModel.nivel_riesgo)
+        )
+        return {str(nivel): int(cantidad) for nivel, cantidad in (await self._session.execute(stmt)).all()}
+
+    async def listar_por_nivel(
+        self,
+        nivel_riesgo: str,
+        device_id: str | None,
+        desde: datetime | None,
+        hasta: datetime | None,
+        limite: int = 10_000,
+    ) -> list[AlertaTermica]:
+        stmt = (
+            select(ThermalAlertModel)
+            .where(ThermalAlertModel.nivel_riesgo == nivel_riesgo, *self._filtros_periodo(device_id, desde, hasta))
+            .order_by(ThermalAlertModel.created_at.desc())
+            .limit(limite)
+        )
+        return [_to_entity(m) for m in (await self._session.execute(stmt)).scalars().all()]
+

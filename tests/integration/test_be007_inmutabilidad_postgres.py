@@ -152,3 +152,134 @@ def test_la_aplicacion_sigue_operando_con_los_triggers(migrada):
             await motor.dispose()
 
     asyncio.run(_flujo())
+
+
+def _rechaza_con(dsn: str, sentencia: str, *errores) -> bool:
+    try:
+        _ejecutar(dsn, sentencia)
+    except errores:
+        return True
+    return False
+
+
+def _accion_correctiva(dsn: str) -> uuid.UUID:
+    """Usuario, dispositivo, lectura, alerta y acción correctiva reales (ORM)."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from src.domain.entities.usuario import Usuario
+    from src.domain.value_objects.rol import Rol
+    from src.infrastructure.database.models import (
+        CorrectiveActionModel,
+        DeviceModel,
+        ThermalAlertModel,
+        ThermalReadingModel,
+    )
+    from src.infrastructure.database.repositories.usuario_repository import SQLAlchemyUsuarioRepository
+
+    async def _crear() -> uuid.UUID:
+        motor = create_async_engine(a_asyncpg(dsn))
+        try:
+            async with async_sessionmaker(motor, expire_on_commit=False)() as session:
+                usuario = await SQLAlchemyUsuarioRepository(session).agregar(
+                    Usuario(nombre="QF", email=f"qf-{uuid.uuid4().hex[:8]}@farmacia.example.org",
+                            password_hash="x", rol=Rol.FARMACEUTICO)
+                )
+                device = f"D-HU28-{uuid.uuid4().hex[:6]}"
+                session.add(DeviceModel(id=device))
+                await session.flush()
+                lectura = ThermalReadingModel(
+                    device_id=device, timestamp=datetime.now(tz=timezone.utc), temperatura_interna=11.0
+                )
+                session.add(lectura)
+                await session.flush()
+                alerta = ThermalAlertModel(
+                    reading_id=lectura.id, device_id=device, nivel_riesgo="excursion_critica", mensaje="x",
+                    lectura_inicial_id=lectura.id, lectura_mas_reciente_id=lectura.id,
+                )
+                session.add(alerta)
+                await session.flush()
+                accion = CorrectiveActionModel(
+                    alert_id=alerta.id, usuario_id=usuario.id, descripcion="Traslado", decision="Trasladar",
+                    justificacion="Fuera de rango",
+                )
+                session.add(accion)
+                await session.commit()
+                return accion.id
+        finally:
+            await motor.dispose()
+
+    return asyncio.run(_crear())
+
+
+def test_acciones_correctivas_no_admiten_update_ni_delete(migrada):
+    """HU-28 (migración 0028): la rectificación conserva el original porque la
+    base rechaza reescribirlo o borrarlo, no solo porque la API no lo ofrezca."""
+    fila = _accion_correctiva(migrada)
+    restringido = asyncpg.exceptions.RestrictViolationError
+    assert _rechaza_con(migrada, f"UPDATE corrective_actions SET justificacion = 'otra' WHERE id = '{fila}'", restringido)
+    assert _rechaza_con(migrada, f"DELETE FROM corrective_actions WHERE id = '{fila}'", restringido)
+
+
+def test_historial_de_configuracion_es_de_solo_anexado(migrada):
+    """HU-49 (migración 0039): valor anterior/nuevo, actor y fecha no se reescriben."""
+    fila = uuid.uuid4()
+    _ejecutar(
+        migrada,
+        "INSERT INTO devices (id, estado_conectividad, activo, firmware_version) "
+        "VALUES ('D-H49', 'online', true, '1.0.0') ON CONFLICT DO NOTHING",
+        "INSERT INTO device_config_history (id, device_id, campo, valor_anterior, valor_nuevo) "
+        f"VALUES ('{fila}', 'D-H49', 'ubicacion', 'A', 'B')",
+    )
+    restringido = asyncpg.exceptions.RestrictViolationError
+    assert _rechaza_con(migrada, f"UPDATE device_config_history SET valor_nuevo = 'X' WHERE id = '{fila}'", restringido)
+    assert _rechaza_con(migrada, f"DELETE FROM device_config_history WHERE id = '{fila}'", restringido)
+
+
+def test_audit_logs_resultado_admite_solo_los_cuatro_valores(migrada):
+    """HU-42 (migración 0039): resultado NULL (filas previas) o uno de los cuatro."""
+    _ejecutar(
+        migrada,
+        "INSERT INTO audit_logs (id, accion, recurso, detalle, resultado) "
+        f"VALUES ('{uuid.uuid4()}', 'RBAC_DENEGADO', 'GET /api/usuarios', '{{}}', 'denegado')",
+        f"INSERT INTO audit_logs (id, accion, recurso, detalle) VALUES ('{uuid.uuid4()}', 'X', 'r', '{{}}')",
+    )
+    assert _rechaza_con(
+        migrada,
+        "INSERT INTO audit_logs (id, accion, recurso, detalle, resultado) "
+        f"VALUES ('{uuid.uuid4()}', 'X', 'r', '{{}}', 'quizas')",
+        asyncpg.exceptions.CheckViolationError,
+    )
+
+
+def test_la_migracion_0039_se_revierte_en_postgres():
+    """Desplegable con vuelta atrás: downgrade quita columna, restricción,
+    índice y trigger; upgrade los repone."""
+    from alembic.config import Config
+
+    from alembic import command
+    from tests.postgres import RAIZ
+
+    async def _estado(dsn: str) -> tuple[bool, bool]:
+        conexion = await asyncpg.connect(dsn)
+        try:
+            columna = await conexion.fetchval(
+                "SELECT count(*) FROM information_schema.columns "
+                "WHERE table_name = 'audit_logs' AND column_name = 'resultado'"
+            )
+            trigger = await conexion.fetchval(
+                "SELECT count(*) FROM pg_trigger WHERE tgname = 'device_config_history_solo_anexado'"
+            )
+            return bool(columna), bool(trigger)
+        finally:
+            await conexion.close()
+
+    with base_migrada() as dsn:
+        config = Config(str(RAIZ / "alembic.ini"))
+        config.set_main_option("script_location", str(RAIZ / "alembic"))
+        assert asyncio.run(_estado(dsn)) == (True, True)
+        command.downgrade(config, "0038_codigos_verificacion")
+        assert asyncio.run(_estado(dsn)) == (False, False)
+        command.upgrade(config, "head")
+        assert asyncio.run(_estado(dsn)) == (True, True)
