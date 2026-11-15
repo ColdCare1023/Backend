@@ -15,6 +15,8 @@ texto de siempre.
 
 import json
 import logging
+import re
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -37,9 +39,13 @@ from src.infrastructure.ai.prediccion_preventiva.servicio import (
     ACTIVACION_SKLEARN_DISTINTO_DEL_MANIFIESTO,
     ACTIVACION_SKLEARN_INCOMPATIBLE,
     CODIGO_ARTEFACTO_NO_VERIFICADO,
+    CODIGO_ESTADO_NO_ADMITIDO,
     CODIGO_HASH_NO_ES_EL_REGISTRADO,
     CODIGO_INCOMPATIBLE,
+    CODIGO_MODO_DESACTIVADO,
+    CODIGO_SHA256_NO_CONFIGURADO,
     CODIGO_SIN_VERSION_ACTIVA,
+    CODIGO_VERSION_NO_CONFIGURADA,
     CODIGO_VERSION_NO_ES_LA_ACTIVA,
     MODO_ACTIVO,
     MODO_DESACTIVADO,
@@ -258,3 +264,77 @@ def test_modo_desactivado_no_registra_errores_criticos(tmp_path, registros_del_s
 
     assert servicio.disponible is False
     assert _criticos(registros_del_servicio) == []
+
+
+# ── P-9: la tabla de motivos de docs/operacion/IA_PREVENTIVA_ACTIVACION.md ──
+
+DOC_ACTIVACION = Path(__file__).resolve().parents[2] / "docs" / "operacion" / "IA_PREVENTIVA_ACTIVACION.md"
+ENCABEZADO_TABLA_MOTIVOS = "| `modelo_ia.preventivo.motivo_codigo` | Significado | Log |"
+
+
+def _log_documentado() -> dict[str, str]:
+    """Código -> columna «Log» de la tabla de motivos de no carga."""
+    filas = DOC_ACTIVACION.read_text(encoding="utf-8").split(ENCABEZADO_TABLA_MOTIVOS, 1)[1].splitlines()[2:]
+    documentado = {}
+    for fila in filas:
+        fila = fila.strip()
+        if not fila.startswith("|"):
+            break
+        celdas = [celda.strip() for celda in fila.strip("|").split("|")]
+        for codigo in re.findall(r"`([a-z0-9_]+)`", celdas[0]):
+            documentado[codigo] = celdas[-1]
+    return documentado
+
+
+def _servicio_en_estado(raiz: Path, codigo: str) -> ServicioPrediccionPreventiva:
+    if codigo == CODIGO_MODO_DESACTIVADO:
+        return ServicioPrediccionPreventiva(MODO_DESACTIVADO, None, raiz=raiz)
+    sha = _registrar(raiz, aprobar=codigo != CODIGO_ESTADO_NO_ADMITIDO)
+    activa = (VERSION, sha)
+    if codigo == CODIGO_VERSION_NO_CONFIGURADA:
+        return ServicioPrediccionPreventiva(MODO_ACTIVO, None, sha, raiz=raiz, version_activa=activa)
+    if codigo == CODIGO_SHA256_NO_CONFIGURADO:
+        return ServicioPrediccionPreventiva(MODO_ACTIVO, VERSION, None, raiz=raiz, version_activa=activa)
+    if codigo == CODIGO_SIN_VERSION_ACTIVA:
+        activa = None
+    elif codigo == CODIGO_VERSION_NO_ES_LA_ACTIVA:
+        activa = ("otra-2.0.0", sha)
+    elif codigo == CODIGO_HASH_NO_ES_EL_REGISTRADO:
+        activa = (VERSION, "f" * 64)
+    elif codigo == CODIGO_ARTEFACTO_NO_VERIFICADO:
+        _alterar_un_byte(raiz)
+    elif codigo == CODIGO_INCOMPATIBLE:
+        _editar_manifiesto_a_mano(raiz, features=["otra_feature"])
+    return ServicioPrediccionPreventiva(MODO_ACTIVO, VERSION, sha, raiz=raiz, version_activa=activa)
+
+
+@pytest.mark.parametrize(
+    "codigo",
+    [
+        CODIGO_MODO_DESACTIVADO, CODIGO_SIN_VERSION_ACTIVA, CODIGO_VERSION_NO_ES_LA_ACTIVA,
+        CODIGO_HASH_NO_ES_EL_REGISTRADO, CODIGO_SHA256_NO_CONFIGURADO, CODIGO_VERSION_NO_CONFIGURADA,
+        CODIGO_ARTEFACTO_NO_VERIFICADO, CODIGO_ESTADO_NO_ADMITIDO, CODIGO_INCOMPATIBLE,
+    ],
+)
+def test_la_columna_log_del_documento_es_lo_que_registra_el_servicio(tmp_path, registros_del_servicio, codigo):
+    """Cada motivo sale UNA vez en el log del proceso (la primera consulta del
+    estado), con el nivel que dice el documento, y otra vez cuando una
+    activación o desactivación obliga a reverificar. `modo_desactivado`, lo
+    normal hoy en producción, también deja su WARNING."""
+    documentado = _log_documentado()[codigo]
+    servicio = _servicio_en_estado(tmp_path, codigo)
+
+    for _ in range(3):
+        assert servicio.disponible is False
+    assert servicio.motivo_codigo() == codigo
+    registros = [r for r in registros_del_servicio.records if r.name == modulo_servicio.logger.name]
+
+    nivel = documentado.split()[0]
+    assert nivel in {"WARNING", "CRITICAL"}, f"{codigo}: el documento dice «{documentado}»"
+    assert [r.levelname for r in registros] == [nivel]
+    assert codigo in registros[0].getMessage()
+
+    # /activar o /desactivar fijan la versión activa y obligan a reverificar.
+    servicio.fijar_version_activa(None)
+    assert servicio.disponible is False
+    assert len([r for r in registros_del_servicio.records if r.name == modulo_servicio.logger.name]) == 2

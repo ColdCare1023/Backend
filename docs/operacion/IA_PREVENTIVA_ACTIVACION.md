@@ -39,7 +39,14 @@ reversión»); los casos IA-xxx citados son los de ese plan.
   otra petición simultánea ya la desactivó) y 422 si el motivo no es válido. Encadena
   `MODELO_IA_VERSION_DESACTIVADA` (quién, cuándo, versión, motivo y `model_hash`, enlazado al hash
   anterior de la cadena `SISTEMA`) y deja `DESACTIVAR_VERSION_MODELO_IA` en la bitácora. Es la vuelta
-  atrás que restaura la línea base (ver más abajo).
+  atrás que restaura la línea base (ver más abajo). Tras ella `/health/detalle` muestra
+  `modelo_ia.preventivo.motivo_codigo = sin_version_activa_registrada` (ese valor exacto) y
+  `modelo_ia.version_activa_registrada = null`.
+- `/activar` y `/desactivar` comparten un candado de base de datos que se toma antes de leer la
+  versión activa y la hora del cambio: si llegan a la vez se aplican uno detrás del otro. Así la
+  base, la cadena de eventos y la consulta de HU-47 esc. 2 dicen lo mismo. Ejemplo: activar Y y
+  desactivar X a la vez termina en 200/200 si se desactivó primero, o en 200/409 si Y ya había
+  reemplazado a X.
 - En modo activo, el modelo preventivo **solo carga** si `IA_PREVENTIVO_VERSION` e
   `IA_PREVENTIVO_SHA256` son los de la versión activa del registro. La comprobación se hace al
   arrancar, después de cada activación y después de cada desactivación, siempre antes de
@@ -55,7 +62,11 @@ reversión»); los casos IA-xxx citados son los de ese plan.
   | `artefacto_no_verificado` | El archivo no coincide con su manifiesto o con el hash | CRITICAL |
   | `estado_no_admitido` | El manifiesto no está en `APPROVED_FOR_DEPLOYMENT` | CRITICAL |
   | `incompatible` | Otra versión de scikit-learn, otras features u otras clases | CRITICAL |
-  | `modo_desactivado` | `IA_PREVENTIVO_MODO=desactivado` (lo normal hoy) | — |
+  | `modo_desactivado` | `IA_PREVENTIVO_MODO=desactivado` (lo normal hoy) | WARNING (una vez por proceso) |
+
+  Cada motivo sale una sola vez por proceso, en la primera consulta del modelo (`/health/detalle`
+  o la primera inferencia), y otra vez después de cada `/activar` o `/desactivar`, que obligan a
+  reverificar. Con `modo_desactivado` ese WARNING es esperado y no requiere acción.
 
   HU-46 esc. 3: un artefacto rechazado se registra como error CRITICAL en el log y, al arrancar,
   como `MODELO_RECHAZADO` encadenado en la bitácora.
@@ -302,6 +313,7 @@ backlog y la tesis es este:
 > `tests/integration/test_p03_ia_preventiva_gobernada.py`,
 > `tests/integration/test_p12_desactivar_version_modelo.py`,
 > `tests/integration/test_p12_desactivar_concurrencia_postgres.py`,
+> `tests/integration/test_p12_activar_desactivar_concurrencia_postgres.py`,
 > `tests/integration/test_hu46_e3_rechazo_critico_al_arrancar.py`,
 > `tests/unit/test_b05_hu46_e3_gobierno_preventivo.py`,
 > `tests/unit/test_hu46_preventivo_gobernado_por_registro.py` y

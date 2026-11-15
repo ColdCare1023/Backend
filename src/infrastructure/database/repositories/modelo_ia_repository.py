@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.entities.version_modelo_ia import VersionModeloIA
@@ -13,6 +13,8 @@ EVENTO_VERSION_ACTIVADA = "MODELO_IA_VERSION_ACTIVADA"
 # P-12: cada desactivación deja este evento; desde él no hay versión activa.
 EVENTO_VERSION_DESACTIVADA = "MODELO_IA_VERSION_DESACTIVADA"
 CADENA_SISTEMA = "SISTEMA"
+# Clave del candado advisory que serializa activar/desactivar (P-12).
+CANDADO_CAMBIO_DE_VERSION = "ai_model_versions"
 
 
 def _to_entity(model: ModeloIAVersionModel) -> VersionModeloIA:
@@ -70,6 +72,18 @@ class SQLAlchemyModeloIARepository(IModeloIARepository):
         result = await self._session.execute(stmt)
         model = result.scalar_one_or_none()
         return _to_entity(model) if model else None
+
+    async def bloquear_cambio_de_version(self) -> None:
+        if self._session.bind is not None and self._session.bind.dialect.name == "postgresql":
+            # Mismo patrón que la cadena de trazabilidad y los administradores:
+            # candado advisory de transacción (se libera solo al confirmar o
+            # deshacer). Sin él, /activar y /desactivar leían la versión activa
+            # y tomaban su hora sin esperarse, y la historia de HU-47 esc. 2
+            # podía contradecir a la base. El orden es siempre este candado y
+            # después el de la cadena SISTEMA (registrar_hash_encadenado).
+            await self._session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:clave))"), {"clave": CANDADO_CAMBIO_DE_VERSION}
+            )
 
     async def activar(self, version: str, cuando: datetime) -> VersionModeloIA:
         anterior = await self.obtener_activa()

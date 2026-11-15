@@ -202,6 +202,9 @@ class ActivarVersionModeloUseCase:
         self._modelo = modelo
 
     async def execute(self, version: str, admin_id: UUID) -> VersionModeloIA:
+        # P-12: lo primero es el candado común con /desactivar; la versión
+        # activa y la hora del cambio se leen después, ya serializadas.
+        await self._modelo_repository.bloquear_cambio_de_version()
         objetivo = await self._modelo_repository.obtener_por_version(version)
         if objetivo is None:
             raise RecursoNoEncontradoError(
@@ -263,7 +266,12 @@ class DesactivarVersionModeloUseCase:
     cualquier activación (la regla 2-8 °C con el legado experimental).
 
     El cambio es condicional y atómico en el repositorio: de dos peticiones
-    simultáneas solo una desactiva; la otra recibe VersionNoActivaError (409)."""
+    simultáneas solo una desactiva; la otra recibe VersionNoActivaError (409).
+    Además comparte con ActivarVersionModeloUseCase el candado
+    bloquear_cambio_de_version(), tomado antes de leer la versión activa y la
+    hora: un /activar y un /desactivar simultáneos se aplican uno detrás del
+    otro, y las filas, los eventos encadenados y la consulta de HU-47 esc. 2
+    terminan diciendo lo mismo."""
 
     def __init__(
         self,
@@ -276,6 +284,8 @@ class DesactivarVersionModeloUseCase:
         self._modelo = modelo
 
     async def execute(self, version: str, admin_id: UUID, motivo: str) -> VersionModeloIA:
+        # Mismo candado que /activar, antes de leer nada y de tomar la hora.
+        await self._modelo_repository.bloquear_cambio_de_version()
         objetivo = await self._modelo_repository.obtener_por_version(version)
         if objetivo is None:
             raise RecursoNoEncontradoError(f"La versión {version} no está registrada")
