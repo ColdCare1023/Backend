@@ -108,7 +108,10 @@ class Settings(BaseSettings):
     # se ejecutan a la vez en el proceso, y streams SSE simultáneos por
     # usuario. Por encima, 503/429 en vez de agotar memoria o conexiones.
     operaciones_costosas_concurrentes: int = 2
-    sse_max_streams_por_usuario: int = 3
+    # HU-32 esc. 3: pestañas o dispositivos con el dashboard en tiempo real a la
+    # vez por cuenta (SSE_MAX_STREAMS_POR_USUARIO). Pasado el tope, el ticket y
+    # el stream responden 429 `demasiados_flujos`.
+    sse_max_streams_por_usuario: int = Field(default=3, ge=1, le=100)
 
     # Mínimo privilegio de dispositivos: en estricto, solo device_id
     # provisionados en la tabla `devices` pueden registrar lecturas.

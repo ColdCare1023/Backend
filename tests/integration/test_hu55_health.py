@@ -1,4 +1,4 @@
-"""HU-56: /health (liveness para Railway) y /health/detalle (operador)."""
+"""HU-55 («HU-56» en la numeración antigua): /health (liveness para Railway) y /health/detalle (operador)."""
 
 from tests.conftest import auth_header
 
@@ -36,3 +36,20 @@ def test_health_detalle_degradado_si_la_api_del_broker_fallo(client, token_admin
 
     assert cuerpo["broker_api"] == "error"
     assert cuerpo["status"] == "degradado"
+
+
+def test_health_detalle_informa_el_comando_de_arranque(client, token_admin, monkeypatch):
+    """HU-12 esc. 4 / HU-55 esc. 1: el operador comprueba en producción que el
+    proceso arrancó con scripts.arrancar_api (1 worker, proxy de confianza) y
+    no con un comando escrito a mano en el panel de la plataforma."""
+    monkeypatch.delenv("COLDCARE_ARRANQUE", raising=False)
+    monkeypatch.delenv("COLDCARE_WORKERS", raising=False)
+    sin_lanzador = client.get("/health/detalle", headers=auth_header(token_admin)).json()
+    assert sin_lanzador["arranque"] == {"lanzador": None, "workers": None}
+
+    monkeypatch.setenv("COLDCARE_ARRANQUE", "scripts.arrancar_api")
+    monkeypatch.setenv("COLDCARE_WORKERS", "1")
+    cuerpo = client.get("/health/detalle", headers=auth_header(token_admin)).json()
+    assert cuerpo["arranque"] == {"lanzador": "scripts.arrancar_api", "workers": 1}
+    # El bloque del proxy sigue presente (B-11).
+    assert {"esquema", "ip_cliente", "forwarded_allow_ips"} <= set(cuerpo["proxy"])

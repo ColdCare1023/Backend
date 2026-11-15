@@ -14,7 +14,7 @@ mensajes de la API) también.
 | HU-53 (correo, `test_hu53_notificacion.py`, `despachador.py`) | Aviso por correo de excursión crítica | **HU-52** |
 | HU-54 (SMS, `notificacion_service.py`) | Aviso por SMS (opcional) | **HU-53** |
 | HU-33 (`test_hu33_estado_operativo.py`, SIN_DATOS en `/api/dispositivos/estado-operativo`) | Estado operativo y ausencia de datos | **HU-54** (en v3.3, HU-33 son las tarjetas KPI) |
-| HU-56 (`test_hu56_health.py`, `test_hu56_config_despliegue.py`, README «Despliegue») | Despliegue en Railway | **HU-55** |
+| HU-56 (README «Despliegue», comentarios de `config.py`, `main.py` y `mqtt_client.py`) | Despliegue en Railway | **HU-55** (las pruebas ya se llaman `test_hu55_health.py` y `test_hu55_config_despliegue.py`) |
 | HU-47 en aislamiento de corrupción, banner y snapshot forense (`gestionar_corrupcion_cadena.py`, `trazabilidad_router.py`) | Verificación e integridad de la cadena | **HU-26** |
 | HU-47 en evidencia de inferencia (`ia_router.py`, `probabilidades_ia`) | Consulta de trazabilidad de la inferencia | HU-47 (coincide) |
 | HU-52 (conmutación a respaldo de energía, `CONMUTACION_RESPALDO`) | Mini UPS, retirada del alcance | sin HU (el evento se conserva por compatibilidad con firmware antiguo) |

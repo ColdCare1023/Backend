@@ -1,4 +1,4 @@
-"""HU-56: configuración que exige el despliegue en Railway."""
+"""HU-55 («HU-56» en la numeración antigua): configuración que exige el despliegue en Railway."""
 
 import pytest
 

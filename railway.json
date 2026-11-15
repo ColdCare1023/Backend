@@ -5,6 +5,7 @@
     "dockerfilePath": "infra-local/backend/Dockerfile"
   },
   "deploy": {
+    "startCommand": "python -m scripts.arrancar_api",
     "preDeployCommand": [
       "alembic upgrade head"
     ],

@@ -77,6 +77,7 @@ from src.interface.api.schemas import (
     TokenResponse,
     VerificarCodigoLoginRequest,
 )
+from src.interface.api.sse_router import rechazar_si_flujos_agotados
 from src.interface.limitador_auditoria import LIMITE_AUDITORIA
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -476,17 +477,30 @@ async def login_google(
     )
 
 
-@router.post("/sse-ticket", response_model=SSETicketResponse)
+@router.post(
+    "/sse-ticket",
+    response_model=SSETicketResponse,
+    responses={429: {"description": "La cuenta ya tiene abiertos los flujos SSE permitidos (`demasiados_flujos`)."}},
+)
 async def emitir_ticket_sse(
+    request: Request,
     usuario: CurrentUserDep,
     token: Annotated[str, Depends(oauth2_scheme)],
     jwt_handler: JWTHandlerDep,
+    settings: SettingsDep,
 ) -> SSETicketResponse:
     """Ticket efímero para abrir el stream SSE (EventSource no envía headers).
 
     El ticket queda atado al access token que lo pidió: al cerrar sesión, el
     stream que se abrió con él deja de emitir.
+
+    HU-32 esc. 3: con la cuenta en su tope de flujos simultáneos
+    (SSE_MAX_STREAMS_POR_USUARIO) responde 429 `demasiados_flujos` aquí, donde
+    el frontend puede leerlo, en vez de emitir un ticket que el stream rechazaría.
     """
+    rechazar_si_flujos_agotados(
+        request.app.state.sse_streams_por_usuario, usuario.id, settings.sse_max_streams_por_usuario
+    )
     payload = jwt_handler.decodificar_token(token)
     return SSETicketResponse(
         ticket=jwt_handler.crear_ticket_sse(

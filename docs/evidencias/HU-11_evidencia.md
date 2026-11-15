@@ -24,3 +24,25 @@ Pruebas: `test_mismo_timestamp_con_otra_identidad_se_guardan_ambas`,
 `test_reenvio_es_duplicate_y_contenido_distinto_es_conflicto`.
 El lado firmware (espera de PUBACK, reintento con la misma identidad, paso a buffer) está en
 ColdCare1023/IoT `docs/evidencias/HU-11_evidencia.md`.
+
+## Qué significa «mismo payload» (esc. 2 y 3)
+
+La identidad lógica de una lectura es `device_id + boot_id + seq_no`. Al
+reintentar, el firmware conserva esa identidad y los mismos valores medidos,
+pero vuelve a serializar el JSON (por ejemplo `captured_at` y el orden de los
+campos pueden salir distintos byte a byte). Por eso el backend no compara
+bytes: dos mensajes son «el mismo payload» si tienen la **misma identidad y
+los mismos valores**, es decir, `temperatura_interna`, `temperatura_ambiental`
+y `humedad_ambiental` iguales con una tolerancia de 0,005 (un `null` solo
+iguala a otro `null`) y el mismo estado de puerta (`_payload_en_conflicto`,
+`src/interface/main.py`).
+
+| Llega de nuevo la identidad… | Resultado |
+|---|---|
+| con los mismos valores | Duplicado inocuo: no se inserta otra fila; acuse `duplicate` |
+| con algún valor distinto | Conflicto: se conserva la original, la recibida queda auditada (`LECTURA_CONFLICTO`), se abre el incidente `COLISION_CLAVE` y el acuse es `rejected` (el nodo la pasa a cuarentena, no la borra) |
+
+El acuse lleva `content_sha256` de los bytes exactos recibidos (IOT-008): el
+nodo solo libera el registro que publicó, aunque el backend lo considere el
+mismo payload por identidad y valores.
+

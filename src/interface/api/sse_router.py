@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import datetime, timezone
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -16,6 +17,27 @@ router = APIRouter(prefix="/api/sse", tags=["sse"])
 
 # Devuelve False en cuanto la sesión que abrió el stream deja de ser válida.
 SesionVigente = Callable[[], Awaitable[bool]]
+
+# HU-32 esc. 3 / BE-019: la cuenta ya tiene abiertos SSE_MAX_STREAMS_POR_USUARIO
+# flujos (3 por defecto). Código estable, no un texto: el frontend lo traduce
+# («Demasiadas pestañas en tiempo real») en vez de quedarse en «Reconectando…».
+DETALLE_DEMASIADOS_FLUJOS = "demasiados_flujos"
+SEGUNDOS_REINTENTO_FLUJOS = 15
+
+
+def rechazar_si_flujos_agotados(abiertos: dict, usuario_id: UUID, maximo: int) -> None:
+    """429 `demasiados_flujos` si la cuenta ya tiene `maximo` flujos abiertos.
+
+    Lo comprueban la emisión del ticket (POST /api/auth/sse-ticket, que el
+    frontend sí puede leer) y la apertura del stream (EventSource no expone el
+    cuerpo ni el estado de un error, así que ahí solo cubre la carrera entre
+    dos pestañas que pidieron ticket a la vez)."""
+    if abiertos.get(usuario_id, 0) >= maximo:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=DETALLE_DEMASIADOS_FLUJOS,
+            headers={"Retry-After": str(SEGUNDOS_REINTENTO_FLUJOS)},
+        )
 
 
 async def sesion_del_ticket_vigente(fabrica, ticket: TicketSSE) -> bool:
@@ -113,12 +135,7 @@ async def stream_lecturas(
     # usuario no puede abrir un número ilimitado de ellos.
     abiertos = request.app.state.sse_streams_por_usuario
     usuario = datos_ticket.usuario_id
-    if abiertos.get(usuario, 0) >= settings.sse_max_streams_por_usuario:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Demasiadas conexiones en tiempo real abiertas para esta cuenta.",
-            headers={"Retry-After": "15"},
-        )
+    rechazar_si_flujos_agotados(abiertos, usuario, settings.sse_max_streams_por_usuario)
     abiertos[usuario] = abiertos.get(usuario, 0) + 1
     liberado = False
 

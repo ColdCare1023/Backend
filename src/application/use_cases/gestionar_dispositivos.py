@@ -481,6 +481,47 @@ class ActualizarResponsableDispositivoUseCase:
 # HU-43/HU-44: operaciones sobre el usuario del nodo en el broker.
 OPERACION_BROKER_APROVISIONAR = "aprovisionar"
 OPERACION_BROKER_RETIRAR = "retirar"
+# Expulsión de la sesión MQTT abierta (`DELETE /clients/{id}`). No deja nada
+# pendiente: la sesión ya no existe o el nodo se reconectará con la credencial
+# vigente; solo se registra su resultado.
+OPERACION_BROKER_EXPULSAR_SESION = "expulsar_sesion"
+
+# Eventos (bitácora y cadena del dispositivo) del resultado de una llamada a la
+# API del broker. BROKER_OPERACION_PENDIENTE (lo que el broker no confirmó)
+# lo registra RegistrarResultadoBrokerUseCase.
+EVENTO_BROKER_SINCRONIZADO = "BROKER_OPERACION_SINCRONIZADA"
+EVENTO_BROKER_FALLIDO = "BROKER_OPERACION_FALLIDA"
+
+
+class RegistrarSincronizacionBrokerUseCase:
+    """HU-43 esc. 4 / HU-44 esc. 3: el resultado de una operación que la API del
+    broker SÍ ejecutó (o que falló sin dejar nada pendiente, como una expulsión)
+    queda como eslabón de la cadena del dispositivo, igual que
+    BROKER_OPERACION_PENDIENTE y BROKER_CONSOLA_CONFIRMADA. Antes solo dejaba
+    rastro lo que quedaba pendiente: un aprovisionamiento por API no tenía
+    evidencia del resultado de sincronización que piden los criterios."""
+
+    def __init__(self, registrar_hash: RegistrarHashEncadenadoUseCase) -> None:
+        self._registrar_hash = registrar_hash
+
+    async def execute(
+        self, device_id: str, operacion: str, exitosa: bool, actor_id: UUID | None, detalle: dict
+    ) -> str:
+        """Devuelve la acción registrada (sincronizada o fallida)."""
+        evento = EVENTO_BROKER_SINCRONIZADO if exitosa else EVENTO_BROKER_FALLIDO
+        await self._registrar_hash.execute(
+            tipo_evento=evento,
+            payload={
+                **detalle,
+                "device_id": device_id,
+                "operacion": operacion,
+                "actor_id": str(actor_id) if actor_id else None,
+            },
+            device_id=device_id,
+            usuario_id=actor_id,
+            timestamp=datetime.now(tz=timezone.utc),
+        )
+        return evento
 
 
 class RegistrarResultadoBrokerUseCase:
