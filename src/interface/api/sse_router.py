@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/sse", tags=["sse"])
 SesionVigente = Callable[[], Awaitable[bool]]
 
 # HU-32 esc. 3 / BE-019: la cuenta ya tiene abiertos SSE_MAX_STREAMS_POR_USUARIO
-# flujos (3 por defecto). Código estable, no un texto: el frontend lo traduce
+# flujos (10 por defecto). Código estable, no un texto: el frontend lo traduce
 # («Demasiadas pestañas en tiempo real») en vez de quedarse en «Reconectando…».
 DETALLE_DEMASIADOS_FLUJOS = "demasiados_flujos"
 SEGUNDOS_REINTENTO_FLUJOS = 15

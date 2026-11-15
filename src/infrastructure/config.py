@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     @field_validator("database_url")
     @classmethod
     def _normalizar_database_url(cls, valor: str) -> str:
-        """HU-56: Railway (y Heroku, Render…) entregan `postgres://` o
+        """HU-55: Railway (y Heroku, Render…) entregan `postgres://` o
         `postgresql://`, que SQLAlchemy resolvería con psycopg2 —no instalado—
         en vez de asyncpg. asyncpg tampoco entiende `sslmode`, sino `ssl`.
         Normalizar aquí cubre a la vez la app y Alembic (env.py lee Settings)."""

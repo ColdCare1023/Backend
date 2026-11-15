@@ -105,3 +105,17 @@ def test_un_tope_fuera_de_rango_se_rechaza_al_arrancar(monkeypatch, valor):
     monkeypatch.setenv("SSE_MAX_STREAMS_POR_USUARIO", valor)
     with pytest.raises(ValidationError):
         Settings()
+
+
+def test_el_comentario_del_tope_dice_el_valor_por_defecto():
+    """P2 de la revalidación: el comentario de `sse_router` decía «3 por
+    defecto» cuando el valor por defecto ya era 10."""
+    import re
+    from pathlib import Path
+
+    from src.interface.api import sse_router
+
+    fuente = Path(sse_router.__file__).read_text(encoding="utf-8")
+    comentario = re.search(r"SSE_MAX_STREAMS_POR_USUARIO\s*\n#\s*flujos \((\d+) por defecto\)", fuente)
+    assert comentario is not None
+    assert int(comentario.group(1)) == Settings.model_fields["sse_max_streams_por_usuario"].default == 10

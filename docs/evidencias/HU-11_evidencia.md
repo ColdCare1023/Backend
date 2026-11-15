@@ -21,11 +21,19 @@ Entorno: `infra-local/` (PostgreSQL 16, EMQX 5.8.6 con TLS 8883 y CA propia, bac
 
 Pruebas: `test_mismo_timestamp_con_otra_identidad_se_guardan_ambas`,
 `test_misma_identidad_con_valores_distintos_es_conflicto`, `test_reenvio_identico_no_es_conflicto`,
+`test_reenvio_con_captured_at_reserializado_no_es_conflicto`,
 `test_reenvio_es_duplicate_y_contenido_distinto_es_conflicto`.
 El lado firmware (espera de PUBACK, reintento con la misma identidad, paso a buffer) está en
 ColdCare1023/IoT `docs/evidencias/HU-11_evidencia.md`.
 
 ## Qué significa «mismo payload» (esc. 2 y 3)
+
+En esta HU, «el mismo payload» (esc. 2) y «la misma identidad con payload diferente» (esc. 3) se
+leen así: **misma identidad lógica y mismos valores medidos**, no los mismos bytes. El firmware
+vuelve a serializar `captured_at` en cada reintento, así que `captured_at` no entra en la
+comparación (prueba `test_reenvio_con_captured_at_reserializado_no_es_conflicto`: el reintento con
+`captured_at` en otro formato o con otro valor es un duplicado, sin `LECTURA_CONFLICTO`). Solo un
+payload antiguo, sin `boot_id` ni `seq_no`, se identifica por `device_id + captured_at`.
 
 La identidad lógica de una lectura es `device_id + boot_id + seq_no`. Al
 reintentar, el firmware conserva esa identidad y los mismos valores medidos,
