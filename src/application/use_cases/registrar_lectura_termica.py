@@ -27,6 +27,7 @@ from src.domain.repositories.i_lectura_repository import ILecturaRepository
 from src.domain.repositories.i_trazabilidad_repository import ITrazabilidadRepository
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 from src.domain.value_objects.rango_termico import RANGO_TERMICO_BPA
+from src.infrastructure.ai.prediccion_preventiva.configuracion import CALIDAD_MODELO_NO_DISPONIBLE
 from src.infrastructure.ai.random_forest_service import (
     ESTADO_COMPLETADA,
     ESTADO_FALLIDA,
@@ -56,6 +57,26 @@ async def credencial_en_cuarentena(device_repository: IDeviceRepository, device_
     # La retención dura mientras la marca siga puesta: confirmar la consola no
     # basta, el nodo debe probar que tiene el token nuevo (prueba_posesion.py).
     return bool(credencial and credencial.get("rotacion_por_compromiso"))
+
+
+def _a_utc(valor: datetime) -> datetime:
+    return valor if valor.tzinfo is not None else valor.replace(tzinfo=timezone.utc)
+
+
+def continua_excursion(lectura: LecturaTermica, historial: list, ventana_minutos: int) -> bool:
+    """IA-D18: la lectura anterior del dispositivo (`historial`, de la más
+    reciente a la más antigua) también estaba fuera de 2-8 °C con temperatura
+    válida, y la separa de esta como mucho la ventana de normalización. Una
+    lectura sin temperatura válida o un hueco más largo cortan la continuidad:
+    no se sabe si la excursión terminó entre medio."""
+    if not historial:
+        return False
+    previa = historial[0]
+    return (
+        previa.tiene_temperatura_interna_valida()
+        and previa.es_excursion_confirmada()
+        and _a_utc(lectura.timestamp) - _a_utc(previa.timestamp) <= timedelta(minutes=ventana_minutos)
+    )
 
 
 def _motivo_fallo_ia(exc: Exception) -> str:
@@ -229,6 +250,30 @@ class RegistrarLecturaTermicaUseCase:
                 estado_inferencia=ESTADO_FALLIDA,
                 motivo_no_inferencia=motivo,
             )
+
+    def _normal_confirmado(self, lectura: LecturaTermica, prediccion) -> bool:
+        """HU-20 esc. 3 / HU-34 esc. 4: ¿cuenta esta lectura en rango para la
+        ventana de normalización de un episodio preventivo?
+
+        Si un modelo decide el riesgo (preventivo activo con modelo cargado, o
+        legado activo), solo cuenta la lectura que el tablero muestra como
+        Normal: «Sin clasificación IA» (historial insuficiente, reloj sin
+        sincronizar, inferencia fallida o tiempo agotado) no es Normal, y el
+        episodio no se cierra con una ventana que el modelo no observó.
+
+        Sin modelo que decida (línea base: preventivo desactivado, en sombra o
+        sin modelo cargado —sin versión activa, artefacto rechazado—, con el
+        legado experimental o desactivado) decide la regla 2-8 °C, como antes:
+        si no, una alerta preventiva abierta antes de la vuelta atrás no se
+        cerraría nunca."""
+        preventivo = self._prediccion_preventiva
+        modelo_decide = self._ia_legado_modo == "activo" or (
+            preventivo is not None
+            and preventivo.modo == "activo"
+            # None en modo activo = la predicción falló o agotó el tiempo.
+            and (prediccion is None or prediccion.estado != CALIDAD_MODELO_NO_DISPONIBLE)
+        )
+        return not modelo_decide or lectura.estado_riesgo() == NivelRiesgo.NORMAL.value
 
     async def execute(self, lectura: LecturaTermica) -> LecturaTermica:
         # HU-05: received_at es el instante en que EL BACKEND recibió el
@@ -457,6 +502,12 @@ class RegistrarLecturaTermicaUseCase:
                 temperatura_interna=lectura_guardada.temperatura_interna,
                 received_at=lectura_guardada.received_at,
                 time_quality=lectura_guardada.time_quality,
+                # IA-D18: un episodio crítico ATENDIDO solo absorbe la excursión
+                # que continúa la anterior; si no, se abre una alerta nueva.
+                continua_excursion=continua_excursion(
+                    lectura_guardada, historial, self._generar_alerta.ventana_normalizacion_minutos
+                ),
+                normal_confirmado=self._normal_confirmado(lectura_guardada, prediccion),
             )
             if alerta is not None:
                 await self._registrar_hash.execute(

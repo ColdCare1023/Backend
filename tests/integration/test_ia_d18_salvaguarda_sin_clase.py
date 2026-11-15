@@ -28,7 +28,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import select
 
+from src.application.use_cases.generar_alerta import CIERRE_NORMALIZACION, AvisoExcursion
 from src.domain.entities.prediccion_preventiva import PrediccionPreventiva
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 from src.infrastructure.ai import random_forest_service as rf
@@ -42,6 +44,7 @@ from src.infrastructure.ai.prediccion_preventiva.configuracion import (
 )
 from src.infrastructure.ai.prediccion_preventiva.servicio import MODO_ACTIVO, MODO_DESACTIVADO
 from src.infrastructure.config import get_settings
+from src.infrastructure.database.models import TraceabilityRecordModel
 from src.infrastructure.database.repositories.device_repository import SQLAlchemyDeviceRepository
 from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
 from src.interface import main
@@ -393,3 +396,216 @@ async def test_sin_temperatura_valida_el_riesgo_queda_sin_resolver_como_antes(
     assert sin_sensor.estado_riesgo() == "falla_sensor"
     assert _alertas(client, token_farmaceutico) == []
     assert notificaciones.avisos == []
+
+
+# ── Continuidad tras la atención y ventana preventiva sin clase (re-verificación) ──
+
+
+async def _cerradas(factory) -> list[dict]:
+    """Payloads ALERTA_CERRADA del dispositivo, en orden de la cadena."""
+    async with factory() as session:
+        filas = (
+            await session.execute(select(TraceabilityRecordModel).order_by(TraceabilityRecordModel.chain_seq))
+        ).scalars().all()
+    return [f.payload for f in filas if f.tipo_evento == "ALERTA_CERRADA" and f.payload["device_id"] == DEVICE_ID]
+
+
+async def _atendida_y_despues(
+    client, token_qf, factory, hace_min: int, pasos: list[tuple[float, float | None]]
+) -> tuple[str, list, list[dict]]:
+    """Excursión de 8,5 °C hace `hace_min` minutos → ATENDIDA → `pasos`
+    (minutos desde la excursión, temperatura). Devuelve el id de la atendida,
+    los avisos de excursión encolados después de atenderla y las pendientes."""
+    async with factory() as session:
+        await SQLAlchemyDeviceRepository(session).obtener_o_crear(DEVICE_ID)
+        await session.commit()
+    notificaciones = _Notificaciones()
+    inicio = datetime.now(tz=timezone.utc).replace(microsecond=0) - timedelta(minutes=hace_min)
+
+    await _mqtt(notificaciones, inicio, 8.5)
+    [primera] = _alertas(client, token_qf, estado="pendiente")
+    _atender(client, token_qf, primera["id"])
+    avisos_previos = len(notificaciones.avisos)
+
+    for minutos, temperatura in pasos:
+        await _mqtt(notificaciones, inicio + timedelta(minutes=minutos), temperatura)
+
+    # Los avisos del incidente `sensor_fault` también pasan por el despachador.
+    avisos = [a for a in notificaciones.avisos[avisos_previos:] if isinstance(a, AvisoExcursion)]
+    return primera["id"], avisos, _alertas(client, token_qf, estado="pendiente")
+
+
+_SIN_CONTINUIDAD = {
+    # Sonda 1 del verificador: dos lecturas sin temperatura interna entre la
+    # atención y la excursión nueva (no hay ninguna lectura válida en rango).
+    "falla_de_sensor": (9, [(2, None), (3, None), (7, 8.5)]),
+    # Sonda 2: 80 minutos sin lecturas después de atenderla.
+    "hueco_sin_lecturas": (90, [(80, 9.5)]),
+}
+
+
+@pytest.mark.parametrize("escenario", list(_SIN_CONTINUIDAD))
+async def test_excursion_sin_continuidad_tras_atendida_abre_alerta_pendiente_nueva(
+    client, token_farmaceutico, db_session_factory, ingesta, escenario
+):
+    """IA-D18 (P0): sin una lectura válida en rango entre medio, la excursión que
+    llega después de una lectura no válida o de un hueco largo no se suma a la
+    alerta ATENDIDA: esta se cierra (`sin_continuidad_tras_atencion`) y se abre
+    una alerta PENDIENTE nueva con su aviso."""
+    ingesta(_ServicioPreventivo())
+    hace_min, pasos = _SIN_CONTINUIDAD[escenario]
+
+    atendida_id, avisos, pendientes = await _atendida_y_despues(
+        client, token_farmaceutico, db_session_factory, hace_min, pasos
+    )
+
+    assert len(pendientes) == 1, pendientes
+    nueva = pendientes[0]
+    assert nueva["id"] != atendida_id
+    assert nueva["nivel_riesgo"] == NivelRiesgo.EXCURSION_CRITICA.value
+    assert nueva["episodio_abierto"] is True
+    assert [str(a.alerta_id) for a in avisos] == [nueva["id"]]
+    atendida = next(a for a in _alertas(client, token_farmaceutico) if a["id"] == atendida_id)
+    assert (atendida["estado"], atendida["episodio_abierto"]) == ("atendida", False)
+    [cierre] = await _cerradas(db_session_factory)
+    assert cierre["alerta_id"] == atendida_id
+    # Valor en la cadena (no la constante): es parte del contrato del evento.
+    assert cierre["motivo_cierre"] == "sin_continuidad_tras_atencion"
+
+
+async def test_excursion_continua_tras_atendida_sigue_en_el_mismo_episodio(
+    client, token_farmaceutico, db_session_factory, ingesta
+):
+    """La excursión que nunca se interrumpió (8,5 °C → atendida → 8,6 °C 30 s
+    después) sigue siendo el mismo episodio, como hasta ahora: sin alerta nueva
+    ni aviso, y el pico se actualiza."""
+    ingesta(_ServicioPreventivo())
+
+    atendida_id, avisos, pendientes = await _atendida_y_despues(
+        client, token_farmaceutico, db_session_factory, 9, [(0.5, 8.6)]
+    )
+
+    assert pendientes == []
+    assert avisos == []
+    [atendida] = _alertas(client, token_farmaceutico)
+    assert atendida["id"] == atendida_id
+    assert (atendida["estado"], atendida["episodio_abierto"]) == ("atendida", True)
+    assert atendida["temperatura_pico"] == 8.6
+    assert await _cerradas(db_session_factory) == []
+
+
+class _ServicioConmutable(_ServicioPreventivo):
+    """Modelo activo cuya respuesta en rango cambia durante la prueba."""
+
+    def __init__(self) -> None:
+        super().__init__(CALIDAD_OK, None, clase=NivelRiesgo.RIESGO_PREVENTIVO)
+
+    def preventivo(self) -> None:
+        self._estado, self._motivo, self._clase = CALIDAD_OK, None, NivelRiesgo.RIESGO_PREVENTIVO
+
+    def normal(self) -> None:
+        self._estado, self._motivo, self._clase = CALIDAD_OK, None, NivelRiesgo.NORMAL
+
+    def ciego(self) -> None:
+        self._estado, self._motivo, self._clase = (
+            CALIDAD_HISTORIAL_INSUFICIENTE, "ventana_15min_sin_cobertura_suficiente", None
+        )
+
+    def sin_modelo(self) -> None:
+        """Versión desactivada o artefacto rechazado: no hay modelo cargado."""
+        self._estado, self._motivo, self._clase = CALIDAD_MODELO_NO_DISPONIBLE, "modelo_no_cargado", None
+
+
+async def _preventiva(client, token, factory, servicio: _ServicioConmutable, t0: datetime, pasos) -> dict:
+    """Abre una alerta preventiva a 7,5 °C en `t0` y aplica `pasos`: (minuto,
+    respuesta del modelo, temperatura). Devuelve la alerta resultante."""
+    async with factory() as session:
+        await SQLAlchemyDeviceRepository(session).obtener_o_crear(DEVICE_ID)
+        await session.commit()
+    servicio.preventivo()
+    await _mqtt(_Notificaciones(), t0, 7.5)
+    [alerta] = _alertas(client, token)
+    assert (alerta["nivel_riesgo"], alerta["episodio_abierto"]) == ("riesgo_preventivo", True)
+    return await _seguir(client, token, servicio, t0, pasos)
+
+
+async def _seguir(client, token, servicio: _ServicioConmutable, t0: datetime, pasos) -> dict:
+    for minuto, respuesta, temperatura in pasos:
+        getattr(servicio, respuesta)()
+        await _mqtt(_Notificaciones(), t0 + timedelta(minutes=minuto), temperatura)
+    [alerta] = _alertas(client, token)
+    return alerta
+
+
+def _t0_preventiva() -> datetime:
+    return datetime.now(tz=timezone.utc).replace(second=0, microsecond=0) - timedelta(minutes=40)
+
+
+def _minuto(t0: datetime, minuto: int) -> str:
+    return (t0 + timedelta(minutes=minuto)).strftime("%Y-%m-%dT%H:%M")
+
+
+async def test_la_preventiva_no_se_resuelve_mientras_el_modelo_no_ve(
+    client, token_farmaceutico, db_session_factory, ingesta
+):
+    """HU-20 esc. 3 / HU-34 esc. 4: 12 minutos con HISTORIAL_INSUFICIENTE (p. ej.
+    tras reiniciar el nodo) no son una ventana en Normal: la alerta preventiva
+    sigue abierta. Después, 10 minutos de «normal» del modelo la resuelven."""
+    servicio, t0 = _ServicioConmutable(), _t0_preventiva()
+    ingesta(servicio)
+
+    ciegos = [(m, "ciego", 7.5) for m in range(1, 13)]
+    alerta = await _preventiva(client, token_farmaceutico, db_session_factory, servicio, t0, ciegos)
+
+    assert alerta["episodio_abierto"] is True
+    assert alerta["normalizacion_desde"] is None
+    assert await _cerradas(db_session_factory) == []
+
+    alerta = await _seguir(client, token_farmaceutico, servicio, t0, [(m, "normal", 5.0) for m in range(13, 24)])
+
+    assert alerta["episodio_abierto"] is False
+    [cierre] = await _cerradas(db_session_factory)
+    assert cierre["motivo_cierre"] == CIERRE_NORMALIZACION
+    assert cierre["normalizacion_desde"].startswith(_minuto(t0, 13))
+
+
+async def test_una_lectura_sin_clase_reinicia_la_ventana_preventiva(
+    client, token_farmaceutico, db_session_factory, ingesta
+):
+    """Normal del modelo → sin clase → normal: la ventana vuelve a empezar en la
+    primera lectura Normal posterior; el tramo sin clase no cuenta."""
+    servicio, t0 = _ServicioConmutable(), _t0_preventiva()
+    ingesta(servicio)
+
+    pasos = [(1, "normal", 5.0), (2, "ciego", 5.0), (5, "ciego", 5.0), (11, "normal", 5.0)]
+    alerta = await _preventiva(client, token_farmaceutico, db_session_factory, servicio, t0, pasos)
+
+    assert alerta["episodio_abierto"] is True  # 10 min desde el minuto 1, pero no seguidos
+    assert alerta["normalizacion_desde"].startswith(_minuto(t0, 11))
+
+    alerta = await _seguir(client, token_farmaceutico, servicio, t0, [(21, "normal", 5.0)])
+
+    assert alerta["episodio_abierto"] is False
+    [cierre] = await _cerradas(db_session_factory)
+    assert cierre["motivo_cierre"] == CIERRE_NORMALIZACION
+    assert cierre["normalizacion_desde"].startswith(_minuto(t0, 11))
+
+
+@pytest.mark.parametrize("legado", ["desactivado", "experimental"])
+async def test_sin_modelo_vuelve_la_linea_base_y_la_preventiva_se_resuelve_con_la_regla(
+    client, token_farmaceutico, db_session_factory, ingesta, legado
+):
+    """Vuelta atrás (P-12, R-A con IA_LEGADO_MODO=desactivado, o legado rechazado):
+    sin un modelo que decida, la regla 2-8 °C vuelve a mandar como antes de la
+    activación, y la alerta preventiva abierta se resuelve tras la ventana. Si
+    se exigiera la clase de un modelo que ya no está, no se cerraría nunca."""
+    servicio, t0 = _ServicioConmutable(), _t0_preventiva()
+    ingesta(servicio, legado)
+
+    sin_modelo = [(m, "sin_modelo", 5.0) for m in range(1, 12)]
+    alerta = await _preventiva(client, token_farmaceutico, db_session_factory, servicio, t0, sin_modelo)
+
+    assert alerta["episodio_abierto"] is False
+    [cierre] = await _cerradas(db_session_factory)
+    assert cierre["motivo_cierre"] == CIERRE_NORMALIZACION
+    assert cierre["normalizacion_desde"].startswith(_minuto(t0, 1))
