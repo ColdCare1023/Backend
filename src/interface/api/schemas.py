@@ -805,6 +805,10 @@ class RegistrarVersionModeloRequest(_PeticionEstricta):
     horizonte_min: int | None = Field(default=None, ge=1, le=24 * 60)
     metricas: dict[str, float | int] | None = None
     particiones: dict[str, str | int | float | list[str]] | None = None
+    # HU-46 esc. 1: registrar y marcar como versión activa en una sola
+    # operación (mismas validaciones y auditoría que /activar). Por omisión
+    # solo se registra, como antes.
+    activar: bool = False
 
 
 class VersionModeloResponse(BaseModel):
@@ -845,6 +849,9 @@ class InferenciaLecturaResponse(BaseModel):
     confianza: float | None
     origen_clasificacion: str | None
     version_era_activa_y_aprobada_en_ese_momento: bool | None
+    # HU-18 esc. 1 / HU-47 esc. 1: False = salida de predict_proba que el
+    # manifiesto del modelo no declara calibrada; None = no consta.
+    probabilidades_calibradas: bool | None = None
     # HU-47 esc. 2: versión registrada que estaba activa al clasificar (None si
     # ninguna). Si difiere de `modelo_version`, la clase no salió del modelo aprobado.
     version_activa_en_ese_momento: str | None = None

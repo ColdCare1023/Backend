@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import functools
 import hashlib
 import json
 import logging
@@ -106,7 +107,7 @@ from src.interface.api.sse_router import router as sse_router
 from src.interface.api.trazabilidad_router import router as trazabilidad_router
 from src.interface.api.usuarios_router import router as usuarios_router
 from src.interface.limitador_auditoria import LIMITE_AUDITORIA, auditar_suprimidos
-from src.interface.tareas import VigilanteSinDatos, tipo_sse
+from src.interface.tareas import VigilanteRespaldos, VigilanteSinDatos, tipo_sse
 
 logger = logging.getLogger("interface.main")
 
@@ -972,7 +973,9 @@ async def _procesar_lectura_mqtt(
         lectura_repository = SQLAlchemyLecturaRepository(session)
         alerta_repository = SQLAlchemyAlertaRepository(session)
         trazabilidad_repository = SQLAlchemyTrazabilidadRepository(session)
-        clasificar_use_case = ClasificarRiesgoTermicoUseCase(get_random_forest_service(), settings.ia_legado_modo)
+        # HU-46: el legado solo decide si es la versión activa y aprobada del registro.
+        modo_legado = gobierno.modo_legado_efectivo(settings)
+        clasificar_use_case = ClasificarRiesgoTermicoUseCase(get_random_forest_service(), modo_legado)
         servicio_preventivo = obtener_servicio_preventivo(
             settings.ia_preventivo_modo, settings.ia_preventivo_version, settings.ia_preventivo_sha256
         )
@@ -987,7 +990,7 @@ async def _procesar_lectura_mqtt(
             ventana_normalizacion_alerta_minutos=settings.alerta_ventana_normalizacion_minutos,
             minutos_normales_preventiva=settings.alerta_preventiva_minutos_normales,
             antiguedad_maxima_horas=settings.lectura_antiguedad_max_horas,
-            ia_legado_modo=settings.ia_legado_modo,
+            ia_legado_modo=modo_legado,
             ia_timeout_s=settings.ia_inferencia_timeout_s,
             ia_prueba_retardo_s=settings.ia_prueba_retardo_s,
             ia_prueba_excepcion=settings.ia_prueba_excepcion,
@@ -1296,12 +1299,53 @@ async def _auditar_modelos_rechazados(settings) -> None:
             SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
         )
         for rechazo in rechazos:
-            logger.warning("Modelo rechazado (%s): %s", rechazo["modelo"], rechazo["motivo"])
+            # HU-46 esc. 3: el rechazo del modelo que decide (modo activo) es
+            # un error crítico; el de uno experimental o en sombra, un aviso.
+            decide = (
+                settings.ia_preventivo_modo == "activo"
+                if rechazo["modelo"] == "preventivo"
+                else settings.ia_legado_modo == "activo"
+            )
+            logger.log(
+                logging.CRITICAL if decide else logging.WARNING,
+                "Modelo rechazado (%s): %s", rechazo["modelo"], rechazo["motivo"],
+            )
             await auditoria.execute(
                 usuario_id=None, accion="MODELO_RECHAZADO", recurso=f"ia/{rechazo['modelo']}",
                 detalle=rechazo, ip_origen=None,
             )
         await session.commit()
+
+
+def _estado_respaldos(vigilante: VigilanteRespaldos | None) -> dict:
+    if vigilante is None:
+        return {"vigilancia_activa": False, "estado": None, "ultimo_completado": None, "ultima_pasada": None}
+    return {
+        "vigilancia_activa": vigilante.activo,
+        # None = al día o sin nada que vigilar; `fallido` | `vencido` = alerta crítica en el log.
+        "estado": vigilante.estado,
+        "ultimo_completado": vigilante.ultimo_completado.isoformat() if vigilante.ultimo_completado else None,
+        "ultima_pasada": vigilante.ultima_pasada.isoformat() if vigilante.ultima_pasada else None,
+    }
+
+
+@functools.lru_cache(maxsize=1)
+def _alembic_head() -> str | None:
+    """HU-55 esc. 1: última migración que trae ESTE código (el directorio
+    `alembic/` va en la imagen). Comparada con `alembic_revision` dice si el
+    pre-deploy `alembic upgrade head` llegó a correr. Se calcula una vez; None
+    si no se puede leer (nunca tumba /health/detalle)."""
+    try:
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+
+        raiz = Path(__file__).resolve().parents[2]
+        config = Config(str(raiz / "alembic.ini"))
+        config.set_main_option("script_location", str(raiz / "alembic"))
+        return ScriptDirectory.from_config(config).get_current_head()
+    except Exception:  # pragma: no cover - imagen sin alembic/ o con varias cabezas
+        logger.warning("No se pudo leer la cabeza de las migraciones de Alembic.", exc_info=True)
+        return None
 
 
 def _entero_o_none(valor: str | None) -> int | None:
@@ -1318,6 +1362,10 @@ def _estado_modelos_ia(settings, version_activa: str | None = None) -> dict:
     Las claves de primer nivel siguen describiendo el modelo legado; las
     aditivas `preventivo.*` y `en_uso` dicen qué modelo decide el riesgo y si
     es la versión activa del registro (`version_activa` viene de la base)."""
+    try:
+        modo_legado_efectivo = gobierno.modo_legado_efectivo(settings)
+    except Exception:  # defensa en profundidad: el estado no tumba el endpoint
+        modo_legado_efectivo = "experimental" if settings.ia_legado_modo == "activo" else settings.ia_legado_modo
     if settings.ia_legado_modo == "desactivado":
         legado = {"disponible": False, "version": None, "motivo_rechazo": None, "motivo_codigo": CODIGO_DESACTIVADO}
     else:
@@ -1355,7 +1403,7 @@ def _estado_modelos_ia(settings, version_activa: str | None = None) -> dict:
             "aprobado": preventivo["disponible"] and preventivo["es_version_activa_registrada"]
             and preventivo["version"] == version_activa,
         }
-    elif settings.ia_legado_modo == "activo":
+    elif modo_legado_efectivo == "activo":
         en_uso = {
             "modelo": "legado", "version": legado.get("version"), "disponible": bool(legado.get("disponible")),
             "aprobado": bool(legado.get("disponible")) and bool(legado.get("hash_aprobado_fijado"))
@@ -1366,6 +1414,9 @@ def _estado_modelos_ia(settings, version_activa: str | None = None) -> dict:
     return {
         **legado,
         "modo_legado": settings.ia_legado_modo,
+        # HU-46: `activo` sin versión aprobada (o con el preventivo gobernando)
+        # opera como `experimental`.
+        "modo_legado_efectivo": modo_legado_efectivo,
         "preventivo": preventivo,
         "version_activa_registrada": version_activa,
         "en_uso": en_uso,
@@ -1418,13 +1469,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         _session_factory, app.state.sse_broadcaster, app.state.notificaciones,
         settings.sin_datos_periodo_segundos, settings.sin_datos_n_intervalos,
     )
+    # HU-29 esc. 3: alerta crítica en este log si el respaldo programado falla.
+    app.state.vigilante_respaldos = VigilanteRespaldos(
+        _session_factory, settings.respaldo_vigilancia_periodo_segundos, settings.respaldo_max_antiguedad_horas,
+    )
     if settings.environment != "test":
         await app.state.notificaciones.iniciar()
         app.state.vigilante_sin_datos.iniciar()
+        app.state.vigilante_respaldos.iniciar()
     try:
         async with _ingesta_mqtt(app, settings):
             yield
     finally:
+        await app.state.vigilante_respaldos.detener()
         await app.state.vigilante_sin_datos.detener()
         await app.state.notificaciones.detener()
 
@@ -1597,6 +1654,9 @@ def create_app() -> FastAPI:
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             "db": db,
             "alembic_revision": revision,
+            # HU-55 esc. 1: cabeza de migraciones del código desplegado. Si no
+            # coincide con `alembic_revision`, el pre-deploy no se aplicó.
+            "alembic_head": _alembic_head(),
             # Resultado de BrokerAdmin.verificar_api() al arrancar.
             "broker_api": broker_api,
             "mqtt": {
@@ -1629,6 +1689,8 @@ def create_app() -> FastAPI:
                 "activa": vigilante is not None and vigilante.activo,
                 "ultima_pasada": vigilante.ultima_pasada.isoformat() if vigilante and vigilante.ultima_pasada else None,
             },
+            # HU-29 esc. 3: resultado del respaldo programado visto desde el backend.
+            "respaldos": _estado_respaldos(getattr(request.app.state, "vigilante_respaldos", None)),
             # HU-16 esc. 2: modelo no disponible y por qué (sin rutas ni secretos).
             "modelo_ia": modelo_ia,
         }

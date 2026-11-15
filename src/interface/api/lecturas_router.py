@@ -16,6 +16,7 @@ from src.domain.exceptions import DispositivoNoAutorizadoError, LecturaInvalidaE
 from src.domain.value_objects.device_id import PATRON_DEVICE_ID
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 from src.domain.value_objects.rol import Rol
+from src.infrastructure.ai import gobierno
 from src.infrastructure.ai.random_forest_service import get_random_forest_service
 from src.infrastructure.database.repositories.alerta_repository import SQLAlchemyAlertaRepository
 from src.infrastructure.database.repositories.audit_log_repository import SQLAlchemyAuditLogRepository
@@ -59,7 +60,9 @@ async def ingestar_lectura(
     lectura_repository = SQLAlchemyLecturaRepository(session)
     alerta_repository = SQLAlchemyAlertaRepository(session)
     trazabilidad_repository = SQLAlchemyTrazabilidadRepository(session)
-    clasificar_use_case = ClasificarRiesgoTermicoUseCase(get_random_forest_service(), settings.ia_legado_modo)
+    # HU-46: el legado solo decide si es la versión activa y aprobada del registro.
+    modo_legado = gobierno.modo_legado_efectivo(settings)
+    clasificar_use_case = ClasificarRiesgoTermicoUseCase(get_random_forest_service(), modo_legado)
 
     use_case = RegistrarLecturaTermicaUseCase(
         lectura_repository,
@@ -72,7 +75,7 @@ async def ingestar_lectura(
         ventana_normalizacion_alerta_minutos=settings.alerta_ventana_normalizacion_minutos,
         minutos_normales_preventiva=settings.alerta_preventiva_minutos_normales,
         antiguedad_maxima_horas=settings.lectura_antiguedad_max_horas,
-        ia_legado_modo=settings.ia_legado_modo,
+        ia_legado_modo=modo_legado,
         ia_timeout_s=settings.ia_inferencia_timeout_s,
         ia_prueba_retardo_s=settings.ia_prueba_retardo_s,
         ia_prueba_excepcion=settings.ia_prueba_excepcion,

@@ -110,8 +110,10 @@ class Settings(BaseSettings):
     operaciones_costosas_concurrentes: int = 2
     # HU-32 esc. 3: pestañas o dispositivos con el dashboard en tiempo real a la
     # vez por cuenta (SSE_MAX_STREAMS_POR_USUARIO). Pasado el tope, el ticket y
-    # el stream responden 429 `demasiados_flujos`.
-    sse_max_streams_por_usuario: int = Field(default=3, ge=1, le=100)
+    # el stream responden 429 `demasiados_flujos`. El criterio pide que «todas
+    # las instancias» del cliente se actualicen: 10 cubre el uso real de una
+    # cuenta (varias pestañas y dispositivos) sin anular la protección BE-019.
+    sse_max_streams_por_usuario: int = Field(default=10, ge=1, le=100)
 
     # Mínimo privilegio de dispositivos: en estricto, solo device_id
     # provisionados en la tabla `devices` pueden registrar lecturas.
@@ -258,6 +260,14 @@ class Settings(BaseSettings):
     # revisa a todos los nodos cada SIN_DATOS_PERIODO_SEGUNDOS.
     sin_datos_n_intervalos: int = Field(default=3, ge=2, le=20)
     sin_datos_periodo_segundos: int = Field(default=30, ge=5, le=600)
+    # HU-29 esc. 3: el backend revisa periódicamente el resultado de la tarea
+    # programada de respaldo (servicio cron aparte) y deja una alerta CRÍTICA
+    # en SU log si el último respaldo falló. Con RESPALDO_MAX_ANTIGUEDAD_HORAS
+    # > 0 también avisa si en ese plazo no hubo ningún respaldo completado (el
+    # cron no corrió). 0 (por defecto) desactiva solo esa segunda revisión:
+    # mientras el cron no exista, no hay alerta que dar.
+    respaldo_vigilancia_periodo_segundos: int = Field(default=3600, ge=60, le=86400)
+    respaldo_max_antiguedad_horas: int = Field(default=0, ge=0, le=24 * 30)
 
     # HU-35 / HU-04 esc. 3: segundos de apertura continua a partir de los
     # cuales el dashboard destaca la puerta abierta como prolongada.

@@ -215,7 +215,12 @@ class ServicioPrediccionPreventiva:
                     else CODIGO_ARTEFACTO_NO_VERIFICADO if isinstance(exc, registro.ErrorRegistro)
                     else CODIGO_ERROR_CARGA
                 )
-                logger.warning("Modelo preventivo no disponible (%s): %s", self.modo, self._motivo_no_disponible)
+                # HU-46 esc. 3: en modo activo, un artefacto que no se carga
+                # (hash distinto del registrado, versión no activa...) deja
+                # sin clasificación preventiva: es un error crítico. En sombra
+                # o desactivado no clasifica nada en producción: aviso.
+                nivel = logging.CRITICAL if self.modo == MODO_ACTIVO else logging.WARNING
+                logger.log(nivel, "Modelo preventivo no disponible (%s): %s", self.modo, self._motivo_no_disponible)
 
     def _exigir_version_activa_registrada(self) -> None:
         """HU-46 esc. 3 / HU-16 esc. 1: en modo activo solo se carga la versión

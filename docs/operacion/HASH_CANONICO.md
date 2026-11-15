@@ -76,6 +76,16 @@ esta fórmula y no se recalculan (un registro de auditoría inmutable no
 reescribe su hash). La redacción del backlog («v1 y v2 sobre
 canonical({chain_id, …})») describe v2; para v1 rige esta fórmula.
 
+Para saber si una base tiene eslabones v1 (y, por tanto, si la nota anterior
+aplica a la evidencia real), basta con esta consulta de solo lectura:
+
+```sql
+SELECT hash_version, count(*) FROM traceability_records GROUP BY 1 ORDER BY 1;
+```
+
+Si no aparece la versión 1, toda la evidencia de esa base sigue la fórmula
+del backlog (v2 o v3). Los eslabones nuevos nunca son v1.
+
 ### v2 (SHA-256 sin clave)
 
 ```

@@ -12,7 +12,10 @@ class IAlertaRepository(ABC):
     async def agregar(self, alerta: AlertaTermica) -> AlertaTermica: ...
 
     @abstractmethod
-    async def obtener_por_id(self, alerta_id: UUID) -> AlertaTermica | None: ...
+    async def obtener_por_id(self, alerta_id: UUID, refrescar: bool = False) -> AlertaTermica | None:
+        """`refrescar`: releer de la base aunque la sesión ya tenga la fila
+        (tras un UPDATE atómico como `reconocer_si_pendiente`)."""
+        ...
 
     @abstractmethod
     async def listar(

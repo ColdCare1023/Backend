@@ -221,10 +221,14 @@ async def registrar_version_modelo(
     body: RegistrarVersionModeloRequest,
     session: DbSessionDep,
     request: Request,
+    settings: SettingsDep,
     admin=Depends(require_roles(Rol.ADMINISTRADOR)),
 ) -> VersionModeloResponse:
-    """HU-46 Escenario 1: registra una versión aprobada del modelo. No la
-    activa — ver POST /modelo/versiones/{version}/activar."""
+    """HU-46 Escenario 1: registra una versión aprobada del modelo. Con
+    `activar=true` además la marca como versión activa de producción, con las
+    mismas validaciones y auditoría que POST /modelo/versiones/{version}/activar;
+    si la activación se rechaza (409), no queda ni registrada ni activa y el
+    rechazo queda en la bitácora. Sin `activar` solo la registra."""
     repositorio = SQLAlchemyModeloIARepository(session)
     use_case = RegistrarVersionModeloUseCase(
         repositorio, RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session))
@@ -255,8 +259,63 @@ async def registrar_version_modelo(
         detalle={"version": body.version, "model_hash": body.model_hash},
         ip_origen=request.client.host if request.client else None,
     )
+    if not body.activar:
+        await session.commit()
+        return _version_a_response(registrada)
+
+    ip_origen = request.client.host if request.client else None
+    try:
+        activada = await _ejecutar_activacion(session, settings, body.version, admin.id)
+    except ActivacionBloqueadaError as exc:
+        # Registrar y activar es una sola operación: nada queda a medias.
+        await session.rollback()
+        await _auditar_rechazo_activacion(
+            session, admin.id, body.version, ip_origen,
+            {"motivo": "criterios_no_cumplidos", "motivos": exc.motivos, "al_registrar": True},
+        )
+        await session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"La versión no se registró ni se activó: {exc}",
+        ) from exc
+    await AuditarAccionCriticaUseCase(
+        SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+    ).execute(
+        usuario_id=admin.id,
+        accion="ACTIVAR_VERSION_MODELO_IA",
+        recurso=f"ia/modelo/versiones/{body.version}/activar",
+        detalle={"version": body.version, "al_registrar": True},
+        ip_origen=ip_origen,
+    )
     await session.commit()
-    return _version_a_response(registrada)
+    # HU-46 esc. 3: desde aquí solo se carga el artefacto de la versión activa.
+    gobierno.aplicar_version_activa(settings, activada)
+    return _version_a_response(activada)
+
+
+async def _ejecutar_activacion(session, settings, version: str, admin_id):
+    """HU-16 esc. 4 / HU-46: se valida el artefacto que realmente se cargará
+    (el preventivo con IA_PREVENTIVO_MODO=activo; si no, el legado)."""
+    use_case = ActivarVersionModeloUseCase(
+        SQLAlchemyModeloIARepository(session),
+        RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session)),
+        settings.ia_criterio_principal,
+        verificar_artefacto=gobierno.verificador_de_activacion(settings),
+        modelo=gobierno.modelo_gobernado(settings),
+    )
+    return await use_case.execute(version, admin_id)
+
+
+async def _auditar_rechazo_activacion(session, admin_id, version: str, ip_origen, detalle: dict) -> None:
+    await AuditarAccionCriticaUseCase(
+        SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+    ).execute(
+        usuario_id=admin_id,
+        accion="ACTIVAR_VERSION_MODELO_IA_RECHAZADO",
+        recurso=f"ia/modelo/versiones/{version}/activar",
+        detalle=detalle,
+        ip_origen=ip_origen,
+    )
 
 
 @router.get("/modelo/versiones", response_model=list[VersionModeloResponse])
@@ -280,39 +339,17 @@ async def activar_version_modelo(
     — la versión activa vigente permanece intacta. Escenario 4 de HU-18: una
     versión sin métricas, H y particiones, o que no cumple el criterio
     principal, tampoco se activa (409)."""
-    repositorio = SQLAlchemyModeloIARepository(session)
-    # HU-16 esc. 4 / HU-46: se valida el artefacto que realmente se cargará
-    # (el preventivo con IA_PREVENTIVO_MODO=activo; si no, el legado).
-    use_case = ActivarVersionModeloUseCase(
-        repositorio, RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session)),
-        settings.ia_criterio_principal,
-        verificar_artefacto=gobierno.verificador_de_activacion(settings),
-        modelo=gobierno.modelo_gobernado(settings),
-    )
+    ip_origen = request.client.host if request.client else None
     try:
-        activada = await use_case.execute(version, admin.id)
+        activada = await _ejecutar_activacion(session, settings, version, admin.id)
     except ActivacionBloqueadaError as exc:
-        await AuditarAccionCriticaUseCase(
-            SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
-        ).execute(
-            usuario_id=admin.id,
-            accion="ACTIVAR_VERSION_MODELO_IA_RECHAZADO",
-            recurso=f"ia/modelo/versiones/{version}/activar",
-            detalle={"motivo": "criterios_no_cumplidos", "motivos": exc.motivos},
-            ip_origen=request.client.host if request.client else None,
+        await _auditar_rechazo_activacion(
+            session, admin.id, version, ip_origen, {"motivo": "criterios_no_cumplidos", "motivos": exc.motivos}
         )
         await session.commit()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except RecursoNoEncontradoError as exc:
-        await AuditarAccionCriticaUseCase(
-            SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
-        ).execute(
-            usuario_id=admin.id,
-            accion="ACTIVAR_VERSION_MODELO_IA_RECHAZADO",
-            recurso=f"ia/modelo/versiones/{version}/activar",
-            detalle={"motivo": "version_no_registrada"},
-            ip_origen=request.client.host if request.client else None,
-        )
+        await _auditar_rechazo_activacion(session, admin.id, version, ip_origen, {"motivo": "version_no_registrada"})
         await session.commit()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -354,7 +391,8 @@ async def consultar_inferencia_lectura(
 
 
 @router.api_route(
-    "/inferencia/{lectura_id}", methods=["PUT", "PATCH", "DELETE"], include_in_schema=False
+    # HU-47 esc. 3: cualquier método de escritura, incluido POST.
+    "/inferencia/{lectura_id}", methods=["POST", "PUT", "PATCH", "DELETE"], include_in_schema=False
 )
 async def rechazar_modificacion_inferencia(
     lectura_id: UUID,

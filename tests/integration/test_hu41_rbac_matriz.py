@@ -78,6 +78,8 @@ MATRIZ_ESPERADA: dict[tuple[str, str], frozenset[str] | str] = {
     ("GET", "/api/ia/modelo/versiones"): frozenset({A, AU}),
     ("POST", "/api/ia/modelo/versiones/{version}/activar"): frozenset({A}),
     ("GET", "/api/ia/inferencia/{lectura_id}"): frozenset({AU, F}),
+    # HU-47 esc. 3: todo intento de escritura (también POST) se rechaza con 405 y se audita.
+    ("POST", "/api/ia/inferencia/{lectura_id}"): AUTENTICADO,
     ("PUT", "/api/ia/inferencia/{lectura_id}"): AUTENTICADO,
     ("PATCH", "/api/ia/inferencia/{lectura_id}"): AUTENTICADO,
     ("DELETE", "/api/ia/inferencia/{lectura_id}"): AUTENTICADO,

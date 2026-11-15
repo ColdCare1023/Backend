@@ -30,6 +30,18 @@ class ITrazabilidadRepository(ABC):
         cadenas distintas no se bloquean entre sí."""
         ...
 
+    async def bloquear_cadena(self, chain_id: str) -> None:
+        """HU-25/HU-27: toma el candado de la cadena `chain_id` hasta el fin de
+        la transacción, el mismo que toma `obtener_ultimo_eslabon`.
+
+        Todo camino que actualiza la fila de una alerta y después encadena un
+        eslabón en la cadena de su dispositivo debe tomarlo ANTES del UPDATE:
+        así sigue el orden de la ingesta (candado de la cadena, luego fila de
+        la alerta) y dos transacciones nunca se esperan en sentido inverso
+        (deadlock en PostgreSQL). Por defecto no hace nada (repositorios en
+        memoria y SQLite, que serializan con el candado de proceso)."""
+        return None
+
     @abstractmethod
     def iterar_todos_ordenados(self, chain_id: str | None = None) -> AsyncIterator[RegistroTrazabilidad]:
         """BE-019: mismo orden que listar_todos_ordenados, sin materializarlo."""

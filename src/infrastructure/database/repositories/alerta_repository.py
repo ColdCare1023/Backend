@@ -68,8 +68,8 @@ class SQLAlchemyAlertaRepository(IAlertaRepository):
         await self._session.refresh(model)
         return _to_entity(model)
 
-    async def obtener_por_id(self, alerta_id: UUID) -> AlertaTermica | None:
-        model = await self._session.get(ThermalAlertModel, alerta_id)
+    async def obtener_por_id(self, alerta_id: UUID, refrescar: bool = False) -> AlertaTermica | None:
+        model = await self._session.get(ThermalAlertModel, alerta_id, populate_existing=refrescar)
         return _to_entity(model) if model else None
 
     async def listar(

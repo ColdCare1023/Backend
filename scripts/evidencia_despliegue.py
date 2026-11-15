@@ -100,7 +100,11 @@ def recolectar(
         "https": evidencia["https"],
         "liveness_ok": (evidencia.get("health") or {}).get("status_code") == 200,
         "db_ok": cuerpo.get("db") == "ok",
-        "migraciones_aplicadas": bool(cuerpo.get("alembic_revision")),
+        # HU-55 esc. 1: la base está en la cabeza de migraciones del código
+        # desplegado (no basta con tener alguna revisión: una base en 0041 con
+        # código de 0042 significa que el pre-deploy no corrió).
+        "migraciones_aplicadas": bool(cuerpo.get("alembic_revision"))
+        and cuerpo.get("alembic_revision") == cuerpo.get("alembic_head"),
         "mqtt_conectado": bool((cuerpo.get("mqtt") or {}).get("conectado")),
         "arranque_reproducible": arranque.get("lanzador") == LANZADOR and arranque.get("workers") == WORKERS,
         "proxy_ve_https": proxy.get("esquema") == "https",

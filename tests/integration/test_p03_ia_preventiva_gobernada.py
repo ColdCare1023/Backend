@@ -315,6 +315,15 @@ async def test_la_evidencia_de_la_version_preventiva_activa_dice_aprobada(
     assert cuerpo["politica_operativa"] == "aprobada"
     assert cuerpo["ia_experimental"] is False
     assert cuerpo["horizonte_min"] == 30 and cuerpo["feature_schema_version"] == "termico_minimo"
+    # HU-18 esc. 1 / HU-47 esc. 1: probabilidades de ambas clases, aunque el
+    # manifiesto no las declare calibradas (y la evidencia lo dice).
+    probabilidades = cuerpo["probabilidades_por_clase"]
+    assert set(probabilidades) == {"normal", "riesgo_preventivo"}
+    assert abs(sum(probabilidades.values()) - 1) < 1e-6
+    assert cuerpo["probabilidades_calibradas"] is False
+    clase = cuerpo["clasificacion_final"]
+    assert cuerpo["confianza"] == pytest.approx(probabilidades[clase], abs=1e-4)
+    assert cuerpo["timestamp_inferencia"] is not None and cuerpo["vector_features"]
 
 
 def _tres_lecturas(client, token, device: str) -> dict:
@@ -347,3 +356,165 @@ def test_reactivar_una_version_conserva_la_evidencia_de_sus_periodos(
         cuerpo = client.get(f"/api/ia/inferencia/{lectura['id']}", headers=auth_header(token_farmaceutico)).json()
         assert cuerpo["version_activa_en_ese_momento"] == VERSION_LEGADO
         assert cuerpo["version_era_activa_y_aprobada_en_ese_momento"] is True
+
+
+# ── HU-46/HU-16: un legado sin versión aprobada no decide ───────────────────
+
+
+class _LegadoQueSiempreAnticipa(RandomForestRiesgoService):
+    """El legado real (mismo artefacto y hash) cuya inferencia siempre dice
+    riesgo_preventivo: así se ve si su clase decide o solo queda de evidencia."""
+
+    def inferir(self, features):
+        from src.infrastructure.ai.random_forest_service import (
+            ESTADO_COMPLETADA,
+            ORIGEN_MODELO,
+            ResultadoInferencia,
+        )
+        from src.infrastructure.ai.reglas_riesgo import clasificar_por_regla
+
+        return ResultadoInferencia(
+            NivelRiesgo.RIESGO_PREVENTIVO, 0.9, ORIGEN_MODELO, ESTADO_COMPLETADA,
+            probabilidades_por_clase={"normal": 0.1, "riesgo_preventivo": 0.9},
+            vector_features={"temperatura_interna": features.temperatura_interna},
+            nivel_regla=clasificar_por_regla(features),
+        )
+
+
+@pytest.fixture
+def legado_en_modo_activo(monkeypatch):
+    anterior = os.environ.get("IA_LEGADO_MODO")
+    os.environ["IA_LEGADO_MODO"] = "activo"
+    get_settings.cache_clear()
+    monkeypatch.setattr(rf, "_instancia", _LegadoQueSiempreAnticipa())
+    monkeypatch.setattr(modulo_servicio, "_instancia", None)
+    try:
+        yield
+    finally:
+        if anterior is None:
+            os.environ.pop("IA_LEGADO_MODO", None)
+        else:
+            os.environ["IA_LEGADO_MODO"] = anterior
+        get_settings.cache_clear()
+
+
+def _preventivas(client, token, device: str) -> list[dict]:
+    alertas = client.get("/api/alertas", params={"device_id": device}, headers=auth_header(token)).json()
+    return [a for a in alertas if a["nivel_riesgo"] == "riesgo_preventivo"]
+
+
+def test_legado_activo_sin_version_registrada_no_decide_y_con_ella_si(
+    client, token_admin, token_tecnico, token_farmaceutico, legado_en_modo_activo
+):
+    """IA_LEGADO_MODO=activo sin versión activa registrada: el legado no está
+    aprobado, así que su clase es evidencia experimental y no abre alertas
+    preventivas. Tras registrar y activar su hash, sí decide."""
+    sin_aprobar = _tres_lecturas(client, token_tecnico, "FARM-P03-LEG-1")
+    assert sin_aprobar["ia_experimental"] is True
+    assert sin_aprobar["riesgo_efectivo"] == "normal"
+    assert _preventivas(client, token_farmaceutico, "FARM-P03-LEG-1") == []
+    modelo = client.get("/health/detalle", headers=auth_header(token_admin)).json()["modelo_ia"]
+    assert (modelo["modo_legado"], modelo["modo_legado_efectivo"]) == ("activo", "experimental")
+    assert modelo["en_uso"]["modelo"] == "regla_2_8"
+
+    client.post("/api/ia/modelo/versiones", json=_cuerpo_version(VERSION_LEGADO, HASH_LEGADO), headers=auth_header(token_admin))
+    assert client.post(
+        f"/api/ia/modelo/versiones/{VERSION_LEGADO}/activar", headers=auth_header(token_admin)
+    ).status_code == 200
+
+    aprobada = _tres_lecturas(client, token_tecnico, "FARM-P03-LEG-2")
+    assert aprobada["ia_experimental"] is False
+    assert aprobada["riesgo_efectivo"] == "riesgo_preventivo"
+    assert len(_preventivas(client, token_farmaceutico, "FARM-P03-LEG-2")) == 1
+    modelo = client.get("/health/detalle", headers=auth_header(token_admin)).json()["modelo_ia"]
+    assert modelo["modo_legado_efectivo"] == "activo"
+    assert modelo["en_uso"]["modelo"] == "legado" and modelo["en_uso"]["aprobado"] is True
+
+
+def test_legado_activo_con_el_preventivo_gobernando_queda_experimental(preventivo_activo):
+    from src.infrastructure.ai import gobierno
+
+    class _Ajustes:
+        ia_legado_modo = "activo"
+        ia_preventivo_modo = "activo"
+
+    assert gobierno.modo_legado_efectivo(_Ajustes()) == "experimental"
+    _Ajustes.ia_legado_modo = "desactivado"
+    assert gobierno.modo_legado_efectivo(_Ajustes()) == "desactivado"
+
+
+# ── HU-46 esc. 3: el rechazo del preventivo activo es un error crítico ──────
+
+
+def test_hash_distinto_del_registrado_es_error_critico_en_modo_activo(tmp_path, caplog, monkeypatch):
+    import logging
+
+    # alembic.fileConfig (test_migraciones) deshabilita los loggers existentes.
+    monkeypatch.setattr(modulo_servicio.logger, "disabled", False)
+    sha = _registrar_preventivo(tmp_path)
+    servicio = ServicioPrediccionPreventiva(MODO_ACTIVO, VERSION, sha, raiz=tmp_path, version_activa=(VERSION, "f" * 64))
+    with caplog.at_level(logging.DEBUG):
+        assert servicio.disponible is False
+
+    assert servicio.motivo_codigo() == "hash_distinto_del_registrado"
+    niveles = {r.levelname for r in caplog.records if "preventivo" in r.getMessage().lower()}
+    assert "CRITICAL" in niveles
+
+
+def test_en_sombra_el_preventivo_no_disponible_es_solo_un_aviso(tmp_path, caplog, monkeypatch):
+    import logging
+
+    monkeypatch.setattr(modulo_servicio.logger, "disabled", False)
+    servicio = ServicioPrediccionPreventiva("sombra", "version-inexistente", raiz=tmp_path)
+    with caplog.at_level(logging.DEBUG):
+        assert servicio.disponible is False
+
+    niveles = {r.levelname for r in caplog.records if "preventivo" in r.getMessage().lower()}
+    assert niveles == {"WARNING"}
+
+
+# ── HU-46 esc. 1: registrar y marcar como activa en una sola operación ──────
+
+
+async def test_registrar_con_activar_la_deja_activa_y_auditada(client, token_admin, legado_aislado, db_session_factory):
+    cuerpo = {**_cuerpo_version(VERSION_LEGADO, HASH_LEGADO), "activar": True}
+    respuesta = client.post("/api/ia/modelo/versiones", json=cuerpo, headers=auth_header(token_admin))
+
+    assert respuesta.status_code == 201, respuesta.text
+    assert respuesta.json()["activa"] is True and respuesta.json()["activada_en"] is not None
+    versiones = client.get("/api/ia/modelo/versiones", headers=auth_header(token_admin)).json()
+    assert [(v["version"], v["activa"]) for v in versiones] == [(VERSION_LEGADO, True)]
+    async with db_session_factory() as session:
+        acciones = [a.accion for a in (await session.execute(select(AuditLogModel))).scalars().all()]
+    assert {"REGISTRAR_VERSION_MODELO_IA", "ACTIVAR_VERSION_MODELO_IA"} <= set(acciones)
+    (cambio,) = await _eslabones(db_session_factory, "MODELO_IA_VERSION_ACTIVADA")
+    assert cambio.payload["version_nueva"] == VERSION_LEGADO and cambio.payload["version_anterior"] is None
+
+
+async def test_registrar_con_activar_rechazada_no_deja_nada_a_medias(
+    client, token_admin, legado_aislado, db_session_factory
+):
+    client.post("/api/ia/modelo/versiones", json={**_cuerpo_version(VERSION_LEGADO, HASH_LEGADO), "activar": True},
+                headers=auth_header(token_admin))
+    otra = {**_cuerpo_version("legado-otro-artefacto", "e" * 64), "activar": True}
+
+    respuesta = client.post("/api/ia/modelo/versiones", json=otra, headers=auth_header(token_admin))
+
+    assert respuesta.status_code == 409
+    versiones = client.get("/api/ia/modelo/versiones", headers=auth_header(token_admin)).json()
+    # Ni registrada ni activa: la versión aprobada vigente sigue activa.
+    assert [(v["version"], v["activa"]) for v in versiones] == [(VERSION_LEGADO, True)]
+    async with db_session_factory() as session:
+        rechazos = [
+            a for a in (await session.execute(select(AuditLogModel))).scalars().all()
+            if a.accion == "ACTIVAR_VERSION_MODELO_IA_RECHAZADO"
+        ]
+    assert len(rechazos) == 1 and rechazos[0].detalle["al_registrar"] is True
+    assert rechazos[0].resultado == "fallido"
+
+
+def test_registrar_sin_activar_conserva_el_comportamiento_anterior(client, token_admin, legado_aislado):
+    respuesta = client.post(
+        "/api/ia/modelo/versiones", json=_cuerpo_version(VERSION_LEGADO, HASH_LEGADO), headers=auth_header(token_admin)
+    )
+    assert respuesta.status_code == 201 and respuesta.json()["activa"] is False

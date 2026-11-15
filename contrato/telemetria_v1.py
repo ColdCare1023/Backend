@@ -128,6 +128,9 @@ class EventoV1(BaseModel):
         "config_modificada", "reinicio_manual", "consola_desbloqueada", "consola_desbloqueo_fallido",
         # IOT-004: ciclo de la actualización OTA.
         "ota_iniciada", "ota_instalada", "ota_confirmada", "ota_rechazada", "ota_fallida", "ota_revertida",
+        # HU-13 esc. 2 (firmware v1.2.1): aviso previo a un DISCONNECT voluntario,
+        # con `detail.motivo`. Se audita y no cambia la conectividad del nodo.
+        "desconexion_ordenada",
     ]
     # El LWT lo publica el broker: no lleva hora ni detalle. Desde HU-13 el
     # firmware incluye el boot_id de la sesión; uno anterior se acepta sin él.

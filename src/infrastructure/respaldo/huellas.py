@@ -30,15 +30,33 @@ class _Ejecutor(Protocol):
     async def execute(self, sentencia, parametros=None): ...
 
 
-# Columnas de evidencia por tabla. `traceability_records` incluye el hash y el
-# hash previo: si la cadena restaurada no es la misma, aquí se nota.
+# Columnas con las que se calcularon las huellas hasta HU-29 v2 (manifiestos con
+# `columnas` de entonces y los anteriores sin ellas). Se congelan aquí: ampliar
+# TABLAS_EVIDENCIA no debe cambiar cómo se verifica un respaldo ya hecho.
+_LECTURAS_V2 = (
+    "id", "device_id", "timestamp", "temperatura_interna", "temperatura_ambiental",
+    "humedad_ambiental", "apertura_refrigerador", "reading_id", "boot_id", "seq_no",
+    "riesgo_efectivo", "excursion_confirmada", "origen",
+)
+_TRAZABILIDAD_V2 = ("id", "tipo_evento", "device_id", "chain_id", "previous_hash", "hash_actual")
+
+# Columnas de evidencia por tabla (HU-29 esc. 2: «se recuperan al 100 %»).
+# `traceability_records` incluye el contenido del eslabón (payload, timestamp,
+# chain_seq, versión de la fórmula y actor), no solo los hashes: una
+# restauración que altere la evidencia sin tocar el hash se nota aquí. Las
+# lecturas incluyen la evidencia de la inferencia (HU-18/HU-47).
 TABLAS_EVIDENCIA: dict[str, tuple[str, ...]] = {
     "thermal_readings": (
-        "id", "device_id", "timestamp", "temperatura_interna", "temperatura_ambiental",
-        "humedad_ambiental", "apertura_refrigerador", "reading_id", "boot_id", "seq_no",
-        "riesgo_efectivo", "excursion_confirmada", "origen",
+        *_LECTURAS_V2,
+        "nivel_riesgo", "estado_conectividad", "payload", "modelo_version", "confianza_ia",
+        "origen_clasificacion", "estado_inferencia", "inferido_en", "motivo_no_inferencia",
+        "schema_version", "time_quality", "received_at", "uptime_ms", "timestamp_estimado",
+        "registrado_por", "probabilidades_ia", "vector_features_ia", "created_at",
     ),
-    "traceability_records": ("id", "tipo_evento", "device_id", "chain_id", "previous_hash", "hash_actual"),
+    "traceability_records": (
+        *_TRAZABILIDAD_V2,
+        "payload", "timestamp", "chain_seq", "hash_version", "usuario_id", "created_at",
+    ),
     # HU-42: `resultado` (exitoso/fallido/denegado/bloqueado, migración 0039)
     # es parte de la evidencia de la bitácora: una restauración que lo pierda
     # o lo altere debe notarse.
@@ -66,6 +84,13 @@ TABLAS_EVIDENCIA: dict[str, tuple[str, ...]] = {
         "motivo_rectificacion", "created_at",
     ),
     "device_config_history": ("id", "device_id", "campo", "valor_anterior", "valor_nuevo", "actor_id", "created_at"),
+    # HU-46/HU-47: registro de versiones del modelo IA (metadata crítica). La
+    # historia de activaciones vive en traceability_records (payload).
+    "ai_model_versions": (
+        "id", "version", "model_hash", "feature_schema_version", "dataset_version",
+        "scikit_learn_version", "python_version", "trained_at", "aprobado_por", "aprobado_en",
+        "activa", "activada_en", "desactivada_en",
+    ),
 }
 # Columnas con las que se calcularon las huellas de los manifiestos generados
 # antes de que el manifiesto declarara las suyas (`columnas`): las tres tablas
@@ -73,8 +98,8 @@ TABLAS_EVIDENCIA: dict[str, tuple[str, ...]] = {
 # antiguo usa exactamente estas (ni una tabla más), o la comparación fallaría
 # aunque la restauración fuera exacta.
 TABLAS_EVIDENCIA_LEGADO: dict[str, tuple[str, ...]] = {
-    "thermal_readings": TABLAS_EVIDENCIA["thermal_readings"],
-    "traceability_records": TABLAS_EVIDENCIA["traceability_records"],
+    "thermal_readings": _LECTURAS_V2,
+    "traceability_records": _TRAZABILIDAD_V2,
     "audit_logs": ("id", "usuario_id", "accion", "recurso", "detalle", "created_at"),
 }
 LOTE = 5_000

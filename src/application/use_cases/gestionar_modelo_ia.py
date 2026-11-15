@@ -223,6 +223,13 @@ class ActivarVersionModeloUseCase:
         return activada
 
 
+def _probabilidades_calibradas(lectura) -> bool | None:
+    if lectura.probabilidades_ia is None:
+        return None
+    valor = (lectura.payload or {}).get("puntuacion_calibrada")
+    return valor if isinstance(valor, bool) else None
+
+
 class ConsultarInferenciaLecturaUseCase:
     """HU-47: consulta de solo lectura de la evidencia completa de la
     inferencia asociada a una lectura térmica concreta."""
@@ -273,6 +280,10 @@ class ConsultarInferenciaLecturaUseCase:
             "modelo_version": lectura.modelo_version,
             "vector_features": lectura.vector_features_ia,
             "probabilidades_por_clase": lectura.probabilidades_ia,
+            # True/False: el modelo preventivo declaró (o no) su salida
+            # predict_proba como calibrada. None: no consta (modelo legado o
+            # lectura anterior a este campo).
+            "probabilidades_calibradas": _probabilidades_calibradas(lectura),
             "clasificacion_final": lectura.nivel_riesgo,
             "confianza": lectura.confianza_ia,
             "origen_clasificacion": lectura.origen_clasificacion,

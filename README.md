@@ -122,8 +122,9 @@ Para probar la configuración de producción antes de subirla: `docker compose -
 en `infra-local/` (backend en `http://localhost:8001`, mismos validadores que en Railway).
 
 `GET /health` es solo *liveness* (no consulta la base de datos, para que una caída de PostgreSQL no provoque
-reinicios en bucle). `GET /health/detalle` (solo administrador) informa base de datos, revisión de Alembic,
-estado de la conexión MQTT, la cola de notificaciones, `arranque` (lanzador y workers), `proxy` (esquema e IP
+reinicios en bucle). `GET /health/detalle` (solo administrador) informa base de datos, revisión de Alembic
+(`alembic_revision`) y la última migración que trae el código desplegado (`alembic_head`; si no coinciden, el
+*pre-deploy* `alembic upgrade head` no se aplicó y `scripts.evidencia_despliegue` lo marca), estado de la conexión MQTT, la cola de notificaciones, `arranque` (lanzador y workers), `proxy` (esquema e IP
 que ve el backend) y `modelo_ia` (HU-16): si el modelo está disponible,
 su versión, el motivo del rechazo cuando el artefacto no supera la verificación (checksum, hash de la versión
 activa o compatibilidad), la versión de scikit-learn con que se entrenó frente a la instalada y el modo del
@@ -193,5 +194,6 @@ broker no deja la ingesta parada un minuto aunque haya habido cortes antes.
 | `SMS_*` | — | | **Retiradas** (HU-53 fuera del alcance): se ignoran sin impedir el arranque; se pueden borrar del entorno |
 | `BROKER_API_URL`, `BROKER_API_KEY`, `BROKER_API_SECRET` | — | `https://…/api/v5` | API de administración de EMQX: expulsa sesiones y, en modo `api`, crea y retira las credenciales de los nodos. Cada resultado queda en la bitácora (`BROKER_OPERACION_SINCRONIZADA`, `BROKER_OPERACION_PENDIENTE`, `BROKER_OPERACION_FALLIDA`) |
 | `BROKER_USUARIOS_MODO` | — | `manual` | `manual` en EMQX Serverless (usuarios a mano en la consola, pendiente visible); `api` en EMQX 5 completo o Dedicated |
-| `SSE_MAX_STREAMS_POR_USUARIO` | — | `3` | Flujos SSE simultáneos por cuenta (pestañas o dispositivos con el dashboard abierto; 1 a 100). Pasado el tope, `POST /api/auth/sse-ticket` y `GET /api/sse/lecturas` responden 429 con `detail: "demasiados_flujos"` y `Retry-After` |
+| `RESPALDO_MAX_ANTIGUEDAD_HORAS` | — | `0` | HU-29 esc. 3: con N > 0, el backend deja una alerta `CRITICAL` en su log si en N h no hubo ningún `RESPALDO_COMPLETADO` (recomendado 26 una vez creado el cron). Un `RESPALDO_FALLIDO` posterior al último completado siempre la deja. Periodo de revisión: `RESPALDO_VIGILANCIA_PERIODO_SEGUNDOS` (3600) |
+| `SSE_MAX_STREAMS_POR_USUARIO` | — | `10` | Flujos SSE simultáneos por cuenta (pestañas o dispositivos con el dashboard abierto; 1 a 100). Pasado el tope, `POST /api/auth/sse-ticket` y `GET /api/sse/lecturas` responden 429 con `detail: "demasiados_flujos"` y `Retry-After` |
 | `GOOGLE_OAUTH_ENABLED`, `GOOGLE_CLIENT_ID` | si se habilita | | RF-17 |

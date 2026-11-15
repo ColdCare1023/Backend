@@ -216,9 +216,8 @@ class DespachadorNotificaciones:
                 return ResultadoEnvio("fallido", alerta.notificacion_intentos)
 
             dispositivo = await SQLAlchemyDeviceRepository(session).obtener(aviso.device_id) or {}
-            auditoria = AuditarAccionCriticaUseCase(
-                SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
-            )
+            trazabilidad = SQLAlchemyTrazabilidadRepository(session)
+            auditoria = AuditarAccionCriticaUseCase(SQLAlchemyAuditLogRepository(session), trazabilidad)
             primer_intento = alerta.notificacion_intentos == 0
             # Telegram es para la excursión real; el aviso preventivo va solo por correo.
             if primer_intento and not aviso.es_preventivo:
@@ -245,6 +244,10 @@ class DespachadorNotificaciones:
             try:
                 await self._transporte.enviar(mensaje)
             except Exception as exc:
+                # Orden de bloqueos de la ingesta (HU-25): cadena del equipo y
+                # después la fila de la alerta. Se toma tras el envío, para no
+                # retener la cadena mientras responde el proveedor de correo.
+                await trazabilidad.bloquear_cadena(aviso.device_id)
                 intentos = await alertas.registrar_intento_fallido(aviso.alerta_id)
                 await self._auditar(
                     auditoria,
@@ -263,6 +266,7 @@ class DespachadorNotificaciones:
                 return ResultadoEnvio("fallido", intentos)
 
             ahora = datetime.now(tz=timezone.utc)
+            await trazabilidad.bloquear_cadena(aviso.device_id)
             await alertas.marcar_notificada(aviso.alerta_id, ahora)
             latencia = None
             if aviso.received_at is not None:
@@ -298,9 +302,8 @@ class DespachadorNotificaciones:
                 return ResultadoEnvio("fallido", incidente.notificacion_intentos)
 
             dispositivo = await SQLAlchemyDeviceRepository(session).obtener(aviso.device_id) or {}
-            auditoria = AuditarAccionCriticaUseCase(
-                SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
-            )
+            trazabilidad = SQLAlchemyTrazabilidadRepository(session)
+            auditoria = AuditarAccionCriticaUseCase(SQLAlchemyAuditLogRepository(session), trazabilidad)
             if incidente.notificacion_intentos == 0:
                 await self._avisar_sin_datos_por_canales_opcionales(aviso, dispositivo, auditoria)
 
@@ -324,6 +327,7 @@ class DespachadorNotificaciones:
             try:
                 await self._transporte.enviar(mensaje)
             except Exception as exc:
+                await trazabilidad.bloquear_cadena(aviso.device_id)  # mismo orden que la ingesta
                 intentos = await incidentes.registrar_intento_fallido(aviso.incidente_id)
                 await self._auditar(
                     auditoria,
@@ -341,6 +345,7 @@ class DespachadorNotificaciones:
                     self._programar_reintento(aviso, intentos)
                 return ResultadoEnvio("fallido", intentos)
 
+            await trazabilidad.bloquear_cadena(aviso.device_id)
             await incidentes.marcar_notificado(aviso.incidente_id, datetime.now(tz=timezone.utc))
             await self._auditar(
                 auditoria,

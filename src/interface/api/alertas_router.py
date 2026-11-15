@@ -100,7 +100,7 @@ async def revisar_alerta(
     (/revisar) se conserva por compatibilidad; el efecto ahora es un
     reconocimiento formal con máquina de estados, no solo un booleano."""
     alerta_repository = SQLAlchemyAlertaRepository(session)
-    use_case = MarcarAlertaRevisadaUseCase(alerta_repository)
+    use_case = MarcarAlertaRevisadaUseCase(alerta_repository, SQLAlchemyTrazabilidadRepository(session))
     try:
         alerta = await use_case.execute(alerta_id, usuario.id)
     except RecursoNoEncontradoError as exc:

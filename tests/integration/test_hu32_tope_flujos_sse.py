@@ -1,6 +1,6 @@
 """HU-32 esc. 3: tope de flujos SSE simultáneos por cuenta (BE-019).
 
-El tope existía (3 por cuenta) pero el frontend no podía distinguirlo: el 429
+El tope existía (entonces 3 por cuenta) pero el frontend no podía distinguirlo: el 429
 llegaba al EventSource, que no expone el cuerpo ni el código de estado, y la
 pestaña quedaba en «Reconectando…» indefinidamente. Ahora:
 
@@ -9,7 +9,8 @@ pestaña quedaba en «Reconectando…» indefinidamente. Ahora:
   abierto, antes de emitir un ticket que no podría usar;
 - `GET /api/sse/lecturas` responde el mismo código si la carrera entre dos
   pestañas lo hace llegar hasta ahí;
-- el tope se configura con `SSE_MAX_STREAMS_POR_USUARIO` (por defecto 3)."""
+- el tope se configura con `SSE_MAX_STREAMS_POR_USUARIO` (por defecto 10, para
+  que «todas las instancias» del cliente reciban el evento en el uso real)."""
 
 import pytest
 from pydantic import ValidationError
@@ -81,9 +82,20 @@ def test_el_tope_es_por_cuenta(client, app, token_tecnico, token_farmaceutico):
 
 
 def test_sse_max_streams_por_usuario_se_lee_del_entorno(monkeypatch):
-    assert Settings().sse_max_streams_por_usuario == 3
+    assert Settings().sse_max_streams_por_usuario == 10
     monkeypatch.setenv("SSE_MAX_STREAMS_POR_USUARIO", "6")
     assert Settings().sse_max_streams_por_usuario == 6
+
+
+def test_por_defecto_cuatro_pestanas_de_una_cuenta_reciben_el_tiempo_real(client, app, token_tecnico, monkeypatch):
+    """HU-32 esc. 3: «todas las instancias del cliente» se actualizan. Con el
+    tope anterior (3) la cuarta pestaña veía «Demasiadas pestañas»."""
+    monkeypatch.delenv("SSE_MAX_STREAMS_POR_USUARIO", raising=False)
+    monkeypatch.setattr(get_settings(), "sse_max_streams_por_usuario", Settings().sse_max_streams_por_usuario)
+    _ticket, usuario = _usuario(client, token_tecnico)
+    app.state.sse_streams_por_usuario[usuario] = 3
+
+    assert client.post("/api/auth/sse-ticket", headers=auth_header(token_tecnico)).status_code == 200
 
 
 @pytest.mark.parametrize("valor", ["0", "-1", "101"])

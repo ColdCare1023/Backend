@@ -14,7 +14,8 @@ nada de esto se crea desde el código. Las evidencias que hay que archivar está
 3. Ejecuta `pg_dump --format=custom --snapshot=<id>` sobre ese snapshot.
 4. Dentro de la misma transacción calcula la huella (filas y SHA-256 en orden de clave) de
    `thermal_readings`, `traceability_records`, `audit_logs`, `users`, `devices`, `thermal_alerts`,
-   `corrective_actions` y `device_config_history`. Las tablas se recorren por clave, no con OFFSET.
+   `corrective_actions`, `device_config_history` y `ai_model_versions` (9 tablas; en los eslabones
+   entra también su contenido: payload, hora y `chain_seq`). Las tablas se recorren por clave, no con OFFSET.
    El volcado y la huella describen el mismo instante aunque el nodo siga publicando.
 5. Escribe `coldcare_<UTC>.dump` y `coldcare_<UTC>.manifiesto.json` y deja `RESPALDO_COMPLETADO`
    en `audit_logs`.
@@ -24,6 +25,15 @@ nada de esto se crea desde el código. Las evidencias que hay que archivar está
 Cuando falla (escenario 3), registra el log `CRITICAL RESPALDO FALLIDO`, intenta dejar
 `RESPALDO_FALLIDO` en `audit_logs` y termina con código de salida 2. Railway marca esa ejecución
 como fallida.
+
+El backend (servicio de la API) también lo detecta: cada `RESPALDO_VIGILANCIA_PERIODO_SEGUNDOS`
+(3600 por defecto) lee el último resultado en `audit_logs` y, si el último respaldo falló, deja en
+**su** log `CRITICAL ALERTA OPERATIVA: el último respaldo programado de PostgreSQL falló…` (una vez
+por fallo) y `/health/detalle` → `respaldos.estado = "fallido"`. Una vez creado el cron, defina
+también `RESPALDO_MAX_ANTIGUEDAD_HORAS=26` en el servicio de la API: si en 26 h no hay ningún
+`RESPALDO_COMPLETADO` (el cron no corrió), el backend deja la misma alerta crítica con
+`respaldos.estado = "vencido"`. Con 0 (por defecto) esa segunda revisión está apagada, para no
+alertar mientras el cron aún no existe.
 
 La imagen del cron es `Dockerfile.respaldo` y no la de la API. Lleva Python 3.12, el lockfile y
 `postgresql-client-${PG_MAJOR}` del repositorio oficial apt.postgresql.org (17 por defecto). El
@@ -81,7 +91,7 @@ diario de los puntos siguientes.
 ### Comprobación del escenario 1
 
 - Logs de la ejecución: `Respaldo completado: coldcare_<UTC>.dump (<bytes> bytes)`.
-- Fila `RESPALDO_COMPLETADO` en Auditoría, con el SHA-256 y el número de filas de las 8 tablas.
+- Fila `RESPALDO_COMPLETADO` en Auditoría, con el SHA-256 y el número de filas de las 9 tablas.
 - Contenido del volumen (con el servicio vinculado mediante `railway link` y `railway service`):
   `railway volume files list /`.
 
@@ -117,8 +127,8 @@ Hay que hacerlo una vez por sprint y antes de cada entrega, siempre contra una b
    python -m scripts.verificar_restauracion --manifiesto simulacro/coldcare_<UTC>.manifiesto.json
    ```
 4. El resultado se escribe en `simulacro/coldcare_<UTC>.restauracion.json`. Debe tener
-   `archivo_integro: true` y `coincide: true`, con `coinciden_filas` y `coincide_huella` en las 8
-   tablas. El código de salida es 0. Si algo no coincide, sale con 2 y un log crítico.
+   `archivo_integro: true` y `coincide: true`, con `coinciden_filas` y `coincide_huella` en las 9
+   tablas (8 en un respaldo anterior a este cambio, que declara sus columnas). El código de salida es 0. Si algo no coincide, sale con 2 y un log crítico.
 5. Archiva en `docs/evidencias/HU-29/` el `.restauracion.json`, el manifiesto (sin el `.dump`, que
    contiene datos personales) y las capturas de los escenarios 1 y 3.
 
@@ -131,7 +141,7 @@ genera un respaldo local con el mismo código. Después se siguen los pasos 2 a 
 - `tests/integration/test_hu29_snapshot_postgres.py`: usa PostgreSQL, `pg_dump` y `pg_restore`
   reales (pgserver o `TEST_POSTGRES_URL`). Inserta filas entre el volcado y la huella y comprueba
   que la restauración da `coincide=true`. Con el código anterior daba `coincide=false`.
-- `tests/integration/test_hu29_respaldo_restauracion.py`: comprueba la huella, las 8 tablas, la
+- `tests/integration/test_hu29_respaldo_restauracion.py`: comprueba la huella, las 9 tablas, el contenido de los eslabones, la
   paginación por clave, los manifiestos antiguos y el fallo crítico.
 - `tests/unit/test_hu29_servicio_cron_respaldo.py`: comprueba `Dockerfile.respaldo`,
   `railway.respaldo.json` y la retención.

@@ -48,6 +48,7 @@ class RegistrarAccionCorrectivaUseCase:
     ) -> None:
         self._accion_repository = accion_repository
         self._alerta_repository = alerta_repository
+        self._trazabilidad_repository = trazabilidad_repository
         self._registrar_hash = RegistrarHashEncadenadoUseCase(trazabilidad_repository)
         self._auditoria = AuditarAccionCriticaUseCase(audit_log_repository, trazabilidad_repository)
         # Si la última ejecución reconoció la alerta (estaba PENDIENTE).
@@ -63,6 +64,12 @@ class RegistrarAccionCorrectivaUseCase:
         if alerta is None:
             raise RecursoNoEncontradoError(f"Alerta {alert_id} no encontrada")
 
+        # Orden de bloqueos (HU-25/HU-27): primero la cadena del dispositivo y
+        # después la fila de la alerta, igual que la ingesta (eslabón de la
+        # lectura -> episodio abierto). Al revés, una lectura del mismo equipo
+        # que llega mientras se registra la acción produce un deadlock en
+        # PostgreSQL y la acción se aborta con 500.
+        await self._trazabilidad_repository.bloquear_cadena(alerta.device_id)
         ahora = datetime.now(tz=timezone.utc)
         if alerta.estado == EstadoAlerta.PENDIENTE and await self._alerta_repository.reconocer_si_pendiente(
             alert_id, usuario_id, ahora

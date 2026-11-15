@@ -222,6 +222,14 @@ async def test_fallos_del_proveedor_se_reintentan_y_auditan(entorno):
     assert "SMTPServerDisconnected" in fallidos[0]["error"]
     assert len(await _acciones(entorno, "NOTIFICACION_ENVIADA")) == 1
     assert (await _alerta(entorno)).notificacion_intentos == 2
+    # HU-42 esc. 1 / HU-52 esc. 2: el fallo queda auditado como fallido.
+    async with entorno() as session:
+        resultados_bitacora = {
+            f.accion: f.resultado
+            for f in (await session.execute(select(AuditLogModel))).scalars()
+            if f.accion.startswith("NOTIFICACION_")
+        }
+    assert resultados_bitacora == {"NOTIFICACION_FALLIDA": "fallido", "NOTIFICACION_ENVIADA": "exitoso"}
 
 
 @pytest.mark.asyncio

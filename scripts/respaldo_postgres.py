@@ -10,8 +10,9 @@ Uso (servicio cron de Railway, docs/operacion/RESPALDO_RAILWAY.md):
    el volcado ve exactamente ese snapshot.
 3. Dentro de la MISMA transacción calcula la huella (filas + SHA-256 por
    tabla) de las tablas de evidencia (`TABLAS_EVIDENCIA`): thermal_readings,
-   traceability_records, audit_logs, users, devices, thermal_alerts,
-   corrective_actions y device_config_history. Volcado y huella describen el
+   traceability_records (con el contenido de cada eslabón), audit_logs, users,
+   devices, thermal_alerts, corrective_actions, device_config_history y
+   ai_model_versions. Volcado y huella describen el
    mismo instante aunque el nodo siga publicando: una lectura que entre
    durante o después del pg_dump no está en ninguno de los dos.
 4. Escribe `<destino>/coldcare_<UTC>.manifiesto.json` (SHA-256 del archivo,

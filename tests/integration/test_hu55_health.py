@@ -27,6 +27,25 @@ def test_health_detalle_informa_bd_y_mqtt(client, token_admin):
     assert cuerpo["broker_api"] == "sin_configurar"
 
 
+def test_health_detalle_informa_la_cabeza_de_migraciones_del_codigo(client, token_admin):
+    """HU-55 esc. 1: con `alembic_head` la evidencia de despliegue comprueba que
+    la base está en la última migración del código, no solo en alguna."""
+    from pathlib import Path
+
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    raiz = Path(__file__).resolve().parents[2]
+    config = Config(str(raiz / "alembic.ini"))
+    config.set_main_option("script_location", str(raiz / "alembic"))
+    esperada = ScriptDirectory.from_config(config).get_current_head()
+
+    cuerpo = client.get("/health/detalle", headers=auth_header(token_admin)).json()
+
+    assert esperada and cuerpo["alembic_head"] == esperada
+    assert cuerpo["alembic_head"].startswith("0042")
+
+
 def test_health_detalle_degradado_si_la_api_del_broker_fallo(client, token_admin, app):
     app.state.broker_api = False
     try:

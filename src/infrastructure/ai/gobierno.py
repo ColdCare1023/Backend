@@ -34,6 +34,25 @@ def modelo_gobernado(settings) -> str:
     return MODELO_PREVENTIVO if settings.ia_preventivo_modo == MODO_ACTIVO else MODELO_LEGADO
 
 
+def modo_legado_efectivo(settings) -> str:
+    """HU-46 («solo modelos aprobados clasifiquen en producción») y HU-16.
+
+    `IA_LEGADO_MODO=activo` deja que el Random Forest legado decida el riesgo
+    efectivo y abra alertas preventivas SOLO si es el modelo que gobierna el
+    registro y la versión activa registrada fijó su hash aprobado. En otro caso
+    (el preventivo es el gobernado, o no hay versión activa registrada) se
+    degrada a `experimental`: su clase queda como evidencia marcada y no
+    decide. Los modos `experimental` y `desactivado` no cambian."""
+    modo = settings.ia_legado_modo
+    if modo != "activo":
+        return modo
+    if modelo_gobernado(settings) == MODELO_PREVENTIVO:
+        return "experimental"
+    if get_random_forest_service().hash_aprobado is None:
+        return "experimental"
+    return modo
+
+
 def servicio_preventivo(settings) -> ServicioPrediccionPreventiva:
     return obtener_servicio_preventivo(
         settings.ia_preventivo_modo, settings.ia_preventivo_version, settings.ia_preventivo_sha256

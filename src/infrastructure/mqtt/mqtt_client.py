@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import logging
 import ssl
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -21,6 +22,15 @@ TOPIC_EVENTOS = "farmacias/+/eventos"
 # minutos retrasaría demasiado la reanudación de la ingesta (RF-05).
 RECONEXION_ESPERA_INICIAL_SEGUNDOS = 1.0
 RECONEXION_ESPERA_MAXIMA_SEGUNDOS = 60.0
+# HU-12 esc. 3: solo una sesión que se sostuvo al menos este tiempo devuelve la
+# espera a la inicial. Una que cae enseguida (p. ej. dos instancias con el
+# mismo client_id durante el solape de un redeploy: el broker expulsa a una
+# para aceptar a la otra) sigue el backoff en vez de reintentar cada segundo.
+RECONEXION_SESION_ESTABLE_SEGUNDOS = 30.0
+
+# Reloj monotónico de las sesiones (sustituible en pruebas sin tocar el del
+# bucle de eventos).
+_monotonic = time.monotonic
 
 # HU-12: colas por equipo. Topes para que la memoria no crezca sin límite.
 MAX_COLAS_DISPOSITIVO = 256
@@ -47,10 +57,17 @@ class EstadoConexionMQTT:
     # Sesiones que llegaron a conectar desde el arranque. La reconexión lo usa
     # para saber si el intento anterior conectó y debe volver a la espera inicial.
     sesiones_establecidas: int = 0
+    # Duración (s) de la última sesión que conectó y ya terminó.
+    ultima_sesion_s: float | None = None
+    _conectado_en: float | None = None
 
     def marcar(self, conectado: bool) -> None:
         if conectado and not self.conectado:
             self.sesiones_establecidas += 1
+            self._conectado_en = _monotonic()
+        elif not conectado and self.conectado and self._conectado_en is not None:
+            self.ultima_sesion_s = _monotonic() - self._conectado_en
+            self._conectado_en = None
         if conectado != self.conectado or self.desde is None:
             self.conectado = conectado
             self.desde = datetime.now(tz=timezone.utc)
@@ -208,10 +225,11 @@ async def consumir_con_reconexion(settings: Settings, manejador: MensajeHandler)
     recibir lecturas de los ESP32 indefinidamente (RF-05/RF-06). Es el peor
     modo de fallo posible aquí, porque no es visible desde fuera.
 
-    HU-12 esc. 3: la espera crece (1, 2, 4… 60 s) solo mientras los intentos
-    fallan sin conectar. Una sesión que llegó a conectar reinicia la espera a
-    1 s: si no, tras varios cortes una caída breve del broker dejaba la ingesta
-    parada hasta 60 s aunque el broker ya estuviera disponible.
+    HU-12 esc. 3: la espera crece (1, 2, 4… 60 s) mientras los intentos fallan
+    sin conectar o las sesiones caen enseguida. Una sesión que se sostuvo al
+    menos RECONEXION_SESION_ESTABLE_SEGUNDOS reinicia la espera a 1 s: si no,
+    tras varios cortes una caída breve del broker dejaba la ingesta parada
+    hasta 60 s aunque el broker ya estuviera disponible.
     """
     espera = RECONEXION_ESPERA_INICIAL_SEGUNDOS
     while True:
@@ -236,8 +254,10 @@ async def consumir_con_reconexion(settings: Settings, manejador: MensajeHandler)
 
 def _espera_tras_sesion(espera: float, sesiones_previas: int) -> float:
     """Espera antes del próximo intento: la inicial si el intento que acaba de
-    terminar llegó a conectar; si no, la que tocaba según el backoff."""
-    if ESTADO_CONEXION.sesiones_establecidas > sesiones_previas:
+    terminar conectó y se sostuvo; si no, la que tocaba según el backoff."""
+    conecto = ESTADO_CONEXION.sesiones_establecidas > sesiones_previas
+    duracion = ESTADO_CONEXION.ultima_sesion_s
+    if conecto and duracion is not None and duracion >= RECONEXION_SESION_ESTABLE_SEGUNDOS:
         return RECONEXION_ESPERA_INICIAL_SEGUNDOS
     return espera
 

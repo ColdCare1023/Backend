@@ -17,6 +17,7 @@ def _detalle(**cambios) -> dict:
         "status": "ok",
         "db": "ok",
         "alembic_revision": "0042_bigint_identidad",
+        "alembic_head": "0042_bigint_identidad",
         "mqtt": {"habilitado": True, "tarea_activa": True, "conectado": True},
         "arranque": {"lanzador": "scripts.arrancar_api", "workers": 1},
         "proxy": {"esquema": "https", "ip_cliente": "8.8.4.4", "forwarded_allow_ips": "100.64.0.0/10"},
@@ -55,6 +56,10 @@ def test_despliegue_correcto_pasa_todas_las_verificaciones():
         ({"proxy": {"esquema": "https", "ip_cliente": "100.64.3.7"}}, "ip_cliente_publica"),
         ({"proxy": {"esquema": "https", "ip_cliente": "10.0.0.4"}}, "ip_cliente_publica"),
         ({"mqtt": {"conectado": False}}, "mqtt_conectado"),
+        # HU-55 esc. 1: el pre-deploy no corrió (base en 0041, código en 0042).
+        ({"alembic_revision": "0041_hu20_normalizacion_preventiva"}, "migraciones_aplicadas"),
+        # Un backend anterior que no informa su cabeza no se da por migrado.
+        ({"alembic_head": None}, "migraciones_aplicadas"),
     ],
 )
 def test_cada_desvio_se_detecta(cambios, verificacion):

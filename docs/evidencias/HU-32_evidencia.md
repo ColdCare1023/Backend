@@ -19,7 +19,7 @@ con el frontend apuntando directo al backend, como en producción.
 
 Cada flujo SSE retiene una cola y una conexión durante horas, así que una
 cuenta puede tener abiertos a la vez como máximo `SSE_MAX_STREAMS_POR_USUARIO`
-flujos (pestañas o dispositivos con el dashboard; **3 por defecto**,
+flujos (pestañas o dispositivos con el dashboard; **10 por defecto**,
 configurable de 1 a 100 en las variables del servicio). El escenario 3 («más
 de una pestaña o dispositivo») se cumple hasta ese número.
 

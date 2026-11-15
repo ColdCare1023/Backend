@@ -30,6 +30,23 @@ def test_hu47_intento_de_modificar_la_inferencia_queda_auditado(client, token_au
     assert len(registros) == 1
 
 
+def test_hu47_post_sobre_la_inferencia_tambien_queda_auditado(client, token_auditor, token_admin):
+    """HU-47 esc. 3: cualquier intento de escritura (también POST) se impide y
+    queda en la bitácora con su método."""
+    lectura_id = uuid.uuid4()
+    metodos = []
+    for metodo in ("post", "put", "delete"):
+        respuesta = getattr(client, metodo)(f"/api/ia/inferencia/{lectura_id}", headers=auth_header(token_auditor))
+        assert respuesta.status_code == 405, metodo
+        assert respuesta.headers["allow"] == "GET"
+        metodos.append(metodo.upper())
+    registros = client.get(
+        "/api/auditoria", params={"accion": "INTENTO_MODIFICAR_INFERENCIA"}, headers=auth_header(token_admin)
+    ).json()
+    assert sorted(r["detalle"]["metodo"] for r in registros) == sorted(metodos)
+    assert {r["resultado"] for r in registros} == {"denegado"}
+
+
 def test_hu46_no_se_activa_si_el_artefacto_desplegado_es_otro(client, token_admin):
     client.post(
         "/api/ia/modelo/versiones",

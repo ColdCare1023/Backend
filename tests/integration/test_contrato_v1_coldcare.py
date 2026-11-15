@@ -262,6 +262,41 @@ async def test_evento_puerta_v1_se_audita_con_occurred_at(entorno):
 
 
 @pytest.mark.asyncio
+async def test_desconexion_ordenada_se_audita_y_no_marca_offline(entorno):
+    """HU-13 esc. 2: antes de un DISCONNECT voluntario (rotación, relevo,
+    reversión OTA) el firmware v1.2.1 publica `desconexion_ordenada` con su
+    motivo. Antes el contrato lo rechazaba y solo quedaba un aviso en el log.
+    Se audita en la cadena del equipo, va por SSE y no se toma como caída."""
+    from src.infrastructure.database.models import DeviceModel, TraceabilityRecordModel
+
+    async with entorno() as session:
+        (await session.get(DeviceModel, DEV)).estado_conectividad = "online"
+        await session.commit()
+    mudo = _Mudo()
+    datos = {"schema_version": "1.0", "device_id": DEV, "event_type": "desconexion_ordenada", "boot_id": 7,
+             "occurred_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+             "time_quality": "sntp_synced", "uptime_s": 900, "detail": {"motivo": "rotacion_credencial"}}
+    await main._procesar_evento_mqtt(_Mensaje(f"farmacias/{DEV}/eventos", json.dumps(datos)), mudo)
+
+    async with entorno() as session:
+        auditados = (
+            await session.execute(select(AuditLogModel).where(AuditLogModel.accion == "DESCONEXION_ORDENADA"))
+        ).scalars().all()
+        eslabones = (
+            await session.execute(
+                select(TraceabilityRecordModel).where(TraceabilityRecordModel.tipo_evento == "AUDIT_LOG")
+            )
+        ).scalars().all()
+        dispositivo = await session.get(DeviceModel, DEV)
+    assert len(auditados) == 1
+    assert auditados[0].detalle["detalle"] == {"motivo": "rotacion_credencial"}
+    assert auditados[0].resultado == "exitoso"
+    assert [e.chain_id for e in eslabones if e.payload["accion"] == "DESCONEXION_ORDENADA"] == [DEV]
+    assert [t for _, t in mudo.eventos] == ["desconexion_ordenada"]  # sin cambio de conectividad
+    assert dispositivo.estado_conectividad == "online"
+
+
+@pytest.mark.asyncio
 async def test_evento_estado_nodo_va_por_sse_sin_auditar(entorno):
     mudo = _Mudo()
     datos = {"schema_version": "1.0", "device_id": DEV, "event_type": "estado_nodo", "boot_id": 42,

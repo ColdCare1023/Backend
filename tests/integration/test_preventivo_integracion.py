@@ -161,7 +161,11 @@ async def test_modo_activo_decide_el_nivel_y_la_excursion_sigue_siendo_critica(d
     # Con el preventivo activo y aprobado manda el modelo: el riesgo efectivo es preventivo.
     assert subida.riesgo_efectivo == NivelRiesgo.RIESGO_PREVENTIVO
     assert subida.modelo_version == VERSION
-    assert subida.confianza_ia is None, "una puntuación no calibrada no se presenta como probabilidad"
+    # HU-18 esc. 1: se guardan las probabilidades de ambas clases (predict_proba)
+    # y la lectura deja constancia de que el manifiesto no las declara calibradas.
+    assert set(subida.probabilidades_ia) == {"normal", "riesgo_preventivo"}
+    assert subida.confianza_ia == round(subida.probabilidades_ia["riesgo_preventivo"], 4)
+    assert subida.payload["puntuacion_calibrada"] is False
     critica = lecturas[-1]
     assert critica.nivel_riesgo is None
     assert critica.riesgo_efectivo == NivelRiesgo.EXCURSION_CRITICA

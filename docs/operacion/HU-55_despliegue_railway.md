@@ -44,7 +44,7 @@ del Dockerfile: Railpack no instala `postgresql-client`.
 | `BROKER_USUARIOS_MODO` | `manual` (Serverless no tiene API de usuarios) |
 | `IA_LEGADO_MODO` | `experimental` (o `desactivado`, decisión D-2) |
 | `FORWARDED_ALLOW_IPS` | ver «Proxy» |
-| `SSE_MAX_STREAMS_POR_USUARIO` | opcional, por defecto `3` (flujos SSE por cuenta; pasado el tope, 429 `demasiados_flujos`) |
+| `SSE_MAX_STREAMS_POR_USUARIO` | opcional, por defecto `10` (flujos SSE por cuenta; pasado el tope, 429 `demasiados_flujos`) |
 | `CODIGOS_HMAC_KEY`, `OTP_LOGIN_ENABLED`, `PASSWORD_RESET_URL` | ver `docs/operacion/CODIGOS_VERIFICACION.md` y la tabla del README |
 | `EMAIL_*` / `SMTP_*`, `FRONTEND_URL` | si se habilita el correo (HU-52) |
 

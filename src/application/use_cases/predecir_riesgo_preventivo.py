@@ -88,14 +88,25 @@ class PredecirRiesgoPreventivoUseCase:
             lectura.motivo_no_inferencia = None
             lectura.modelo_version = prediccion.modelo_version
             lectura.vector_features_ia = prediccion.vector_features
-            # Una puntuación no calibrada no se presenta como probabilidad.
-            if prediccion.puntuacion_calibrada and prediccion.puntuacion is not None:
+            # HU-18 esc. 1 / HU-47 esc. 1: se almacenan las probabilidades de
+            # AMBAS clases que devolvió predict_proba. Si el manifiesto no las
+            # declara calibradas, la evidencia lo dice (`puntuacion_calibrada`
+            # en el payload y `probabilidades_calibradas` en la API) en vez de
+            # ocultarlas.
+            if prediccion.puntuacion is not None:
                 p = prediccion.puntuacion
-                lectura.probabilidades_ia = {NivelRiesgo.NORMAL.value: 1 - p, NivelRiesgo.RIESGO_PREVENTIVO.value: p}
+                lectura.probabilidades_ia = {
+                    NivelRiesgo.NORMAL.value: round(1 - p, 6),
+                    NivelRiesgo.RIESGO_PREVENTIVO.value: round(p, 6),
+                }
                 lectura.confianza_ia = round(p if prediccion.clase == NivelRiesgo.RIESGO_PREVENTIVO else 1 - p, 4)
             else:
                 lectura.probabilidades_ia = None
                 lectura.confianza_ia = None
+            lectura.payload = {
+                **(lectura.payload or {}),
+                "puntuacion_calibrada": bool(prediccion.puntuacion_calibrada),
+            }
             return True
         if prediccion.estado in _ORIGEN_POR_ESTADO:
             lectura.nivel_riesgo = None
