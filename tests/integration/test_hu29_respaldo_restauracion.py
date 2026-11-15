@@ -3,12 +3,14 @@ el respaldo falla. El pg_dump/pg_restore real se ejerce contra PostgreSQL en
 el entorno desplegado (docs/operacion/HU-29_respaldo_y_restauracion.md)."""
 
 import logging
+import uuid
 from datetime import datetime, timezone
 
 import pytest
 
 from scripts import respaldo_postgres
 from src.infrastructure.database.models import AuditLogModel, DeviceModel, ThermalReadingModel
+from src.infrastructure.respaldo import huellas as huellas_modulo
 from src.infrastructure.respaldo.huellas import (
     TABLAS_EVIDENCIA,
     TABLAS_EVIDENCIA_LEGADO,
@@ -118,4 +120,78 @@ async def test_columnas_desconocidas_en_un_manifiesto_se_rechazan(db_session_fac
         with pytest.raises(ValueError):
             await huellas_evidencia(session, {"audit_logs": ("id", "1; DROP TABLE audit_logs")})
         with pytest.raises(ValueError):
-            await huellas_evidencia(session, {"users": ("id",)})
+            await huellas_evidencia(session, {"otra_tabla": ("id",)})
+
+
+# ── P0-4 (b): tablas de evidencia ampliadas y paginación por clave ──────────
+
+
+def test_la_huella_cubre_usuarios_equipos_alertas_acciones_y_configuracion():
+    """HU-29 esc. 2: «los usuarios y la metadata crítica se recuperan al 100 %»."""
+    for tabla in ("users", "devices", "thermal_alerts", "corrective_actions", "device_config_history"):
+        assert tabla in TABLAS_EVIDENCIA
+        assert "id" in TABLAS_EVIDENCIA[tabla]
+    # Un manifiesto anterior (sin `columnas`) se verifica solo con sus tres tablas.
+    assert set(TABLAS_EVIDENCIA_LEGADO) == {"thermal_readings", "traceability_records", "audit_logs"}
+
+
+async def test_un_usuario_perdido_en_la_restauracion_se_detecta(db_session_factory, crear_usuario):
+    from src.domain.value_objects.rol import Rol
+    from src.infrastructure.database.models import UserModel
+
+    await _poblar(db_session_factory)
+    await crear_usuario("QF Respaldo", "qf.respaldo@coldcare.test", "Clave-Segura-123", Rol.FARMACEUTICO)
+    async with db_session_factory() as session:
+        antes = await huellas_evidencia(session)
+        await session.execute(UserModel.__table__.delete())
+        despues = await huellas_evidencia(session)
+
+    resultado = comparar_huellas(antes, despues)
+    assert resultado["coincide"] is False
+    assert resultado["tablas"]["users"]["coinciden_filas"] is False
+
+
+class _InsertaTrasLaPrimeraPagina:
+    """Simula al nodo publicando mientras se recorre la tabla: tras leer la
+    primera página de lecturas, entra una fila cuyo id ordena ANTES que todas."""
+
+    def __init__(self, session) -> None:
+        self._session = session
+        self._paginas = 0
+
+    async def execute(self, sentencia, *args, **kwargs):
+        resultado = await self._session.execute(sentencia, *args, **kwargs)
+        consulta = str(sentencia)
+        if "FROM thermal_readings" in consulta and "LIMIT" in consulta:
+            self._paginas += 1
+            if self._paginas == 1:
+                await self._session.execute(ThermalReadingModel.__table__.insert().values(
+                    id=uuid.UUID(int=0), device_id="FARM-HU29-01", timestamp=datetime(2026, 10, 2, tzinfo=timezone.utc),
+                    temperatura_interna=4.0, origen="dispositivo",
+                ))
+        return resultado
+
+
+async def test_la_paginacion_por_clave_no_duplica_ni_salta_filas(db_session_factory, monkeypatch):
+    """Con OFFSET, una fila nueva con id menor desplaza las páginas: la última
+    fila leída vuelve a entrar y otra se salta. Por clave (`id > última`), la
+    huella es la del estado en que empezó el recorrido."""
+    async with db_session_factory() as session:
+        session.add(DeviceModel(id="FARM-HU29-01"))
+        await session.flush()
+        for minuto in range(3):
+            session.add(ThermalReadingModel(
+                device_id="FARM-HU29-01", timestamp=datetime(2026, 10, 1, 0, minuto, tzinfo=timezone.utc),
+                temperatura_interna=5.0 + minuto, origen="dispositivo",
+            ))
+        await session.commit()
+    async with db_session_factory() as session:
+        esperada = await huellas_evidencia(session, {"thermal_readings": TABLAS_EVIDENCIA["thermal_readings"]})
+    monkeypatch.setattr(huellas_modulo, "LOTE", 1)
+
+    async with db_session_factory() as session:
+        recorrida = await huellas_evidencia(
+            _InsertaTrasLaPrimeraPagina(session), {"thermal_readings": TABLAS_EVIDENCIA["thermal_readings"]}
+        )
+
+    assert recorrida == esperada

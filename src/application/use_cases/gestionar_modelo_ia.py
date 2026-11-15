@@ -150,11 +150,23 @@ class RegistrarVersionModeloUseCase:
         return registrada
 
 
+# HU-46 esc. 4: evento encadenado de cada activación. Es también la historia
+# de qué versión estaba activa en cada instante (HU-47 esc. 2).
+EVENTO_VERSION_ACTIVADA = "MODELO_IA_VERSION_ACTIVADA"
+MOTIVO_ARTEFACTO_DISTINTO = "el artefacto desplegado no coincide con el hash registrado"
+
+
 class ActivarVersionModeloUseCase:
     """HU-46 Escenario 2: activar una versión NO registrada se rechaza — la
     versión activa vigente se mantiene, y el intento queda auditado por el
     llamador (ver ia_router.py) además del evento de trazabilidad que este
-    caso de uso genera cuando SÍ tiene éxito."""
+    caso de uso genera cuando SÍ tiene éxito.
+
+    `verificar_artefacto` (HU-16 esc. 4) recibe la versión candidata y
+    devuelve por qué el artefacto que realmente se cargará NO es el suyo: el
+    preventivo con IA_PREVENTIVO_MODO=activo, el legado en otro caso
+    (infrastructure/ai/gobierno.py). `hash_artefacto` se conserva por
+    compatibilidad: compara con el hash de un único artefacto."""
 
     def __init__(
         self,
@@ -162,11 +174,15 @@ class ActivarVersionModeloUseCase:
         registrar_hash: RegistrarHashEncadenadoUseCase,
         criterio_principal: str = CRITERIO_POR_INCIDENTE,
         hash_artefacto: Callable[[], str | None] | None = None,
+        verificar_artefacto: Callable[[VersionModeloIA], list[str]] | None = None,
+        modelo: str = "legado",
     ) -> None:
         self._modelo_repository = modelo_repository
         self._registrar_hash = registrar_hash
         self._criterio = criterio_principal
         self._hash_artefacto = hash_artefacto
+        self._verificar_artefacto = verificar_artefacto
+        self._modelo = modelo
 
     async def execute(self, version: str, admin_id: UUID) -> VersionModeloIA:
         objetivo = await self._modelo_repository.obtener_por_version(version)
@@ -177,9 +193,11 @@ class ActivarVersionModeloUseCase:
         # HU-46 / HU-18 Escenario 4: sin métricas, H y particiones, o sin
         # cumplir el criterio principal, la versión no entra en producción.
         motivos = motivos_bloqueo_activacion(objetivo, self._criterio)
-        # HU-16 esc. 4: no se activa una versión cuyo artefacto no es el desplegado.
-        if self._hash_artefacto is not None and self._hash_artefacto() != objetivo.model_hash:
-            motivos.append("el artefacto desplegado no coincide con el hash registrado")
+        # HU-16 esc. 4: no se activa una versión cuyo artefacto no es el que se cargará.
+        if self._verificar_artefacto is not None:
+            motivos.extend(self._verificar_artefacto(objetivo))
+        elif self._hash_artefacto is not None and self._hash_artefacto() != objetivo.model_hash:
+            motivos.append(MOTIVO_ARTEFACTO_DISTINTO)
         if motivos:
             raise ActivacionBloqueadaError(version, motivos)
 
@@ -188,12 +206,16 @@ class ActivarVersionModeloUseCase:
         activada = await self._modelo_repository.activar(version, cuando)
 
         await self._registrar_hash.execute(
-            tipo_evento="MODELO_IA_VERSION_ACTIVADA",
+            tipo_evento=EVENTO_VERSION_ACTIVADA,
             payload={
                 "version_anterior": anterior.version if anterior is not None else None,
                 "version_nueva": version,
                 "admin_id": str(admin_id),
                 "criterio_principal": self._criterio,
+                # Qué artefacto aprueba (preventivo o legado) y su hash: el
+                # cambio de versión queda encadenado con lo que se cargará.
+                "modelo": self._modelo,
+                "model_hash": objetivo.model_hash,
             },
             usuario_id=admin_id,
             timestamp=cuando,

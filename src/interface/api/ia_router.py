@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
@@ -16,10 +17,14 @@ from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEnc
 from src.domain.entities.version_modelo_ia import VersionModeloIA
 from src.domain.exceptions import DomainError, RecursoNoEncontradoError
 from src.domain.value_objects.rol import Rol
+from src.infrastructure.ai import gobierno
 from src.infrastructure.ai.features import FeaturesRiesgoTermico
 from src.infrastructure.ai.prediccion_preventiva import registro as registro_preventivo
 from src.infrastructure.ai.prediccion_preventiva.servicio import obtener_servicio_preventivo
-from src.infrastructure.ai.random_forest_service import get_random_forest_service
+from src.infrastructure.ai.random_forest_service import (
+    CODIGOS_RECHAZO,
+    get_random_forest_service,
+)
 from src.infrastructure.config import get_settings
 from src.infrastructure.database.repositories.audit_log_repository import SQLAlchemyAuditLogRepository
 from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
@@ -92,7 +97,21 @@ class ClasificacionResponse(BaseModel):
     estado_inferencia: str
 
 
-@router.get("/modelo")
+def _no_disponible(detalle: str, codigo: str, rechazado: bool) -> JSONResponse:
+    """503 del modelo legado: `detail` como siempre y, aditivos, `motivo`
+    (no_entrenado, sin_metricas, checksum_invalido, hash_distinto_de_la_version_activa,
+    sin_verificacion_de_integridad, incompatible, error_de_lectura) y
+    `rechazado_por_verificacion`."""
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": detalle, "motivo": codigo, "rechazado_por_verificacion": rechazado},
+    )
+
+
+@router.get(
+    "/modelo",
+    responses={503: {"description": "Modelo no disponible: `motivo` distingue no entrenado de rechazado."}},
+)
 async def obtener_metadata_modelo(
     _usuario=Depends(require_roles(Rol.FARMACEUTICO, Rol.AUDITOR)),
 ) -> dict:
@@ -102,17 +121,22 @@ async def obtener_metadata_modelo(
     servicio = get_random_forest_service()
     metricas = servicio.metricas_entrenamiento()
     # HU-16 esc. 2: un artefacto alterado o que no es el de la versión activa
-    # deja el modelo «no disponible» (503), nunca un 500.
-    if servicio.motivo_rechazo() is not None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="El modelo Random Forest no está disponible: el artefacto no superó la verificación de "
+    # deja el modelo «no disponible» (503), nunca un 500. P1-7: el cuerpo dice
+    # además, con un código estable, si fue un rechazo por verificación o si
+    # simplemente no hay modelo entrenado (`detail` se conserva igual).
+    codigo = servicio.motivo_codigo()
+    if codigo in CODIGOS_RECHAZO:
+        return _no_disponible(
+            "El modelo Random Forest no está disponible: el artefacto no superó la verificación de "
             "integridad o compatibilidad al cargarse.",
+            codigo,
+            rechazado=True,
         )
-    if not servicio.modelo_disponible or metricas is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="El modelo Random Forest no está entrenado en este entorno.",
+    if codigo is not None or metricas is None:
+        return _no_disponible(
+            "El modelo Random Forest no está entrenado en este entorno.",
+            codigo or "sin_metricas",
+            rechazado=False,
         )
     return {
         "modelo_disponible": True,
@@ -257,10 +281,13 @@ async def activar_version_modelo(
     versión sin métricas, H y particiones, o que no cumple el criterio
     principal, tampoco se activa (409)."""
     repositorio = SQLAlchemyModeloIARepository(session)
+    # HU-16 esc. 4 / HU-46: se valida el artefacto que realmente se cargará
+    # (el preventivo con IA_PREVENTIVO_MODO=activo; si no, el legado).
     use_case = ActivarVersionModeloUseCase(
         repositorio, RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session)),
         settings.ia_criterio_principal,
-        get_random_forest_service().hash_artefacto,
+        verificar_artefacto=gobierno.verificador_de_activacion(settings),
+        modelo=gobierno.modelo_gobernado(settings),
     )
     try:
         activada = await use_case.execute(version, admin.id)
@@ -300,7 +327,7 @@ async def activar_version_modelo(
     )
     await session.commit()
     # HU-46 esc. 3: desde aquí solo se carga el artefacto de la versión activa.
-    get_random_forest_service().fijar_hash_aprobado(activada.model_hash)
+    gobierno.aplicar_version_activa(settings, activada)
     return _version_a_response(activada)
 
 

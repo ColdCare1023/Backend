@@ -52,6 +52,30 @@ ESTADO_MODELO_NO_DISPONIBLE = "modelo_no_disponible"
 # verificación (checksum, hash de la versión activa o compatibilidad).
 MOTIVO_MODELO_RECHAZADO = "modelo_rechazado_por_verificacion"
 
+# HU-16 (P1-7): código estable de POR QUÉ el modelo no está disponible, para
+# que la interfaz distinga «rechazado por verificación» de «no entrenado» sin
+# interpretar el texto del motivo. Los rechazados son los que no se usan
+# porque fallaron una verificación (degradan /health/detalle).
+CODIGO_NO_ENTRENADO = "no_entrenado"
+CODIGO_SIN_VERIFICACION = "sin_verificacion_de_integridad"
+CODIGO_CHECKSUM_INVALIDO = "checksum_invalido"
+CODIGO_HASH_VERSION_ACTIVA = "hash_distinto_de_la_version_activa"
+CODIGO_INCOMPATIBLE = "incompatible"
+CODIGO_ERROR_LECTURA = "error_de_lectura"
+CODIGO_DESACTIVADO = "desactivado"
+CODIGOS_RECHAZO = frozenset({
+    CODIGO_SIN_VERIFICACION, CODIGO_CHECKSUM_INVALIDO, CODIGO_HASH_VERSION_ACTIVA,
+    CODIGO_INCOMPATIBLE, CODIGO_ERROR_LECTURA,
+})
+
+
+class ArtefactoRechazadoError(RuntimeError):
+    """El artefacto no superó una verificación; `codigo` es uno de CODIGOS_RECHAZO."""
+
+    def __init__(self, codigo: str, mensaje: str) -> None:
+        super().__init__(mensaje)
+        self.codigo = codigo
+
 
 @dataclass(frozen=True, slots=True)
 class ResultadoInferencia:
@@ -128,6 +152,8 @@ class RandomForestRiesgoService:
         # hashear el archivo en cada lectura: solo fijar_hash_aprobado() (o
         # un reinicio con otro artefacto) lo reevalúa.
         self._motivo_rechazo: str | None = None
+        # Código estable del rechazo (CODIGOS_RECHAZO), junto al texto.
+        self._codigo_rechazo: str | None = None
 
     def _validar_compatibilidad(self, modelo, metadata: dict | None) -> None:
         """Comprueba, al cargar, que el artefacto declara el checksum, las
@@ -137,29 +163,34 @@ class RandomForestRiesgoService:
         exige que la metadata declare `model_hash` y que el estimador cargado
         sea consistente con el contrato de features/clases del backend."""
         if metadata is None:
+            # v1 cargado bajo el hash de la versión activa: sin metadata no se
+            # validan los nombres de features, pero sí el estimador (abajo).
             logger.warning(
                 "Modelo cargado sin metadata (formato v1 sin versión embebida); "
-                "no se puede validar compatibilidad de features/clases/checksum."
+                "no se puede validar el orden declarado de features."
             )
-            return
-        if not metadata.get("model_hash"):
+            metadata = {}
+        elif not metadata.get("model_hash"):
             logger.warning("El artefacto no declara model_hash — no auditable (hallazgo AI-05).")
         features_declaradas = metadata.get("feature_names")
         if features_declaradas is not None and list(features_declaradas) != list(FEATURE_NAMES):
-            raise RuntimeError(
+            raise ArtefactoRechazadoError(
+                CODIGO_INCOMPATIBLE,
                 "El modelo cargado fue entrenado con un orden de features distinto al "
                 f"que espera el backend. Esperado: {list(FEATURE_NAMES)}. "
                 f"Declarado en metadata: {list(features_declaradas)}."
             )
         n_features_modelo = getattr(modelo, "n_features_in_", None)
         if n_features_modelo is not None and n_features_modelo != len(FEATURE_NAMES):
-            raise RuntimeError(
+            raise ArtefactoRechazadoError(
+                CODIGO_INCOMPATIBLE,
                 f"El modelo espera {n_features_modelo} features pero el backend "
                 f"construye {len(FEATURE_NAMES)}."
             )
         clases_modelo = getattr(modelo, "classes_", None)
         if clases_modelo is not None and not set(clases_modelo).issubset(_CLASES_ESPERADAS):
-            raise RuntimeError(
+            raise ArtefactoRechazadoError(
+                CODIGO_INCOMPATIBLE,
                 f"El modelo predice clases desconocidas: {set(clases_modelo) - _CLASES_ESPERADAS}. "
                 f"Esperadas: {sorted(_CLASES_ESPERADAS)}."
             )
@@ -173,7 +204,8 @@ class RandomForestRiesgoService:
         esperado = metadata.get("model_hash")
         actual = hashlib.sha256(self._model_path.read_bytes()).hexdigest()
         if not isinstance(esperado, str) or actual != esperado:
-            raise RuntimeError(
+            raise ArtefactoRechazadoError(
+                CODIGO_CHECKSUM_INVALIDO,
                 "Checksum SHA-256 inválido para el artefacto del modelo; "
                 "se rechaza antes de deserializarlo."
             )
@@ -192,6 +224,7 @@ class RandomForestRiesgoService:
             self._modelo = None
             self._metadata = None
             self._motivo_rechazo = None
+            self._codigo_rechazo = None
 
     @property
     def hash_aprobado(self) -> str | None:
@@ -202,19 +235,36 @@ class RandomForestRiesgoService:
         if self._hash_aprobado is None:
             return
         if self.hash_artefacto() != self._hash_aprobado:
-            raise RuntimeError(
+            raise ArtefactoRechazadoError(
+                CODIGO_HASH_VERSION_ACTIVA,
                 "El artefacto del modelo no coincide con el hash de la versión activa aprobada."
             )
 
     def _leer_y_validar(self) -> tuple[object, dict | None]:
         """Verifica la integridad ANTES de deserializar y la compatibilidad
         después. Lanza RuntimeError (u otra excepción de lectura) si el
-        artefacto no puede usarse; quien llama la convierte en «no disponible»."""
+        artefacto no puede usarse; quien llama la convierte en «no disponible».
+
+        joblib/pickle ejecuta código al cargar: un archivo solo se deserializa
+        si su integridad quedó verificada por la metadata externa (v3) o por
+        el hash de la versión activa registrada (HU-46). Un artefacto v1/v2
+        sin ninguna de las dos no se carga (P1-7)."""
         self._validar_hash_aprobado()
         metadata_externa = None
         if self._metadata_path.exists():
-            metadata_externa = json.loads(self._metadata_path.read_text(encoding="utf-8"))
+            try:
+                metadata_externa = json.loads(self._metadata_path.read_text(encoding="utf-8"))
+            except ValueError as exc:
+                raise ArtefactoRechazadoError(
+                    CODIGO_ERROR_LECTURA, "La metadata externa del modelo no es JSON válido."
+                ) from exc
             self._validar_checksum_externo(metadata_externa)
+        elif self._hash_aprobado is None:
+            raise ArtefactoRechazadoError(
+                CODIGO_SIN_VERIFICACION,
+                "El artefacto no tiene metadata externa ni una versión activa registrada contra la cual "
+                "verificar su SHA-256; no se deserializa.",
+            )
         artefacto = joblib.load(self._model_path)
         # Formato v2: dict {"modelo", "metadata"} (metadata embebida,
         # con la circularidad de auto-referencia documentada en
@@ -242,6 +292,9 @@ class RandomForestRiesgoService:
                         modelo, metadata = self._leer_y_validar()
                     except Exception as exc:
                         self._motivo_rechazo = (str(exc) or type(exc).__name__)[:200]
+                        self._codigo_rechazo = (
+                            exc.codigo if isinstance(exc, ArtefactoRechazadoError) else CODIGO_ERROR_LECTURA
+                        )
                         # HU-46 esc. 3: un artefacto que no supera la verificación
                         # es un error crítico, no una advertencia.
                         logger.critical("Modelo Random Forest rechazado; no se sirven clasificaciones: %s",
@@ -256,6 +309,13 @@ class RandomForestRiesgoService:
         inválido), o None si carga bien o no hay artefacto en este entorno."""
         self._cargar_modelo()
         return self._motivo_rechazo
+
+    def motivo_codigo(self) -> str | None:
+        """Código estable de por qué el modelo no está disponible: uno de
+        CODIGOS_RECHAZO, CODIGO_NO_ENTRENADO (no hay artefacto) o None si cargó."""
+        if self._cargar_modelo() is not None:
+            return None
+        return self._codigo_rechazo or CODIGO_NO_ENTRENADO
 
     @property
     def modelo_disponible(self) -> bool:
@@ -277,6 +337,8 @@ class RandomForestRiesgoService:
             "disponible": disponible,
             "version": metadata.get("model_version") if disponible else None,
             "motivo_rechazo": self._motivo_rechazo,
+            # P1-7: código estable (no_entrenado, checksum_invalido, ...).
+            "motivo_codigo": self.motivo_codigo(),
             "artefacto_presente": self._model_path.exists(),
             "hash_aprobado_fijado": self._hash_aprobado is not None,
             # Un modelo entrenado con otra versión de scikit-learn puede

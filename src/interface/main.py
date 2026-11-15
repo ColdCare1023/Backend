@@ -56,8 +56,9 @@ from src.domain.exceptions import (
 )
 from src.domain.repositories.i_incidente_repository import TIPO_COLISION_CLAVE
 from src.domain.value_objects.rol import Rol
+from src.infrastructure.ai import gobierno
 from src.infrastructure.ai.prediccion_preventiva.servicio import obtener_servicio_preventivo
-from src.infrastructure.ai.random_forest_service import get_random_forest_service
+from src.infrastructure.ai.random_forest_service import CODIGO_DESACTIVADO, get_random_forest_service
 from src.infrastructure.config import get_settings
 from src.infrastructure.database.repositories.alerta_repository import SQLAlchemyAlertaRepository
 from src.infrastructure.database.repositories.audit_log_repository import (
@@ -1275,15 +1276,19 @@ async def _auditar_modelos_rechazados(settings) -> None:
     evidencia de que el artefacto fue alterado o no es el aprobado."""
     rechazos: list[dict] = []
     if settings.ia_legado_modo != "desactivado":
-        motivo = get_random_forest_service().motivo_rechazo()
+        legado = get_random_forest_service()
+        motivo = legado.motivo_rechazo()
         if motivo:
-            rechazos.append({"modelo": "legado", "motivo": motivo})
+            rechazos.append({"modelo": "legado", "motivo": motivo, "motivo_codigo": legado.motivo_codigo()})
     servicio = obtener_servicio_preventivo(
         settings.ia_preventivo_modo, settings.ia_preventivo_version, settings.ia_preventivo_sha256
     )
     motivo = servicio.motivo_rechazo()
     if motivo:
-        rechazos.append({"modelo": "preventivo", "motivo": motivo, "version": settings.ia_preventivo_version})
+        rechazos.append({
+            "modelo": "preventivo", "motivo": motivo, "version": settings.ia_preventivo_version,
+            "motivo_codigo": servicio.motivo_codigo(),
+        })
     if not rechazos:
         return
     async with _session_factory() as session:
@@ -1299,36 +1304,73 @@ async def _auditar_modelos_rechazados(settings) -> None:
         await session.commit()
 
 
-def _estado_modelos_ia(settings) -> dict:
+def _estado_modelos_ia(settings, version_activa: str | None = None) -> dict:
     """HU-16: estado de los modelos de IA para /health/detalle. Nunca lanza:
-    un modelo alterado se informa como no disponible con su motivo."""
+    un modelo alterado se informa como no disponible con su motivo.
+
+    Las claves de primer nivel siguen describiendo el modelo legado; las
+    aditivas `preventivo.*` y `en_uso` dicen qué modelo decide el riesgo y si
+    es la versión activa del registro (`version_activa` viene de la base)."""
     if settings.ia_legado_modo == "desactivado":
-        legado = {"disponible": False, "version": None, "motivo_rechazo": None}
+        legado = {"disponible": False, "version": None, "motivo_rechazo": None, "motivo_codigo": CODIGO_DESACTIVADO}
     else:
         try:
             legado = get_random_forest_service().estado()
         except Exception as exc:  # defensa en profundidad: el estado no tumba el endpoint
-            legado = {"disponible": False, "version": None, "motivo_rechazo": f"error_al_consultar:{type(exc).__name__}"}
+            legado = {
+                "disponible": False, "version": None, "motivo_rechazo": f"error_al_consultar:{type(exc).__name__}",
+                "motivo_codigo": "error_al_consultar",
+            }
     try:
-        preventivo = obtener_servicio_preventivo(
+        servicio = obtener_servicio_preventivo(
             settings.ia_preventivo_modo, settings.ia_preventivo_version, settings.ia_preventivo_sha256
         )
-        motivo_preventivo = preventivo.motivo_rechazo()
+        preventivo = {
+            "modo": settings.ia_preventivo_modo,
+            "motivo_rechazo": servicio.motivo_rechazo(),
+            "motivo_codigo": servicio.motivo_codigo(),
+            "disponible": servicio.disponible,
+            "version": settings.ia_preventivo_version or None,
+            "es_version_activa_registrada": servicio.es_version_activa_registrada(),
+        }
     except Exception as exc:
-        motivo_preventivo = f"error_al_consultar:{type(exc).__name__}"
+        preventivo = {
+            "modo": settings.ia_preventivo_modo, "motivo_rechazo": f"error_al_consultar:{type(exc).__name__}",
+            "motivo_codigo": "error_al_consultar", "disponible": False, "version": None,
+            "es_version_activa_registrada": False,
+        }
+    # Qué decide el riesgo efectivo de una lectura en rango (HU-20/HU-34):
+    # el preventivo activo, el legado activo o, si no, solo la regla 2-8 °C
+    # (el legado experimental es evidencia marcada, no decide).
+    if settings.ia_preventivo_modo == "activo":
+        en_uso = {
+            "modelo": "preventivo", "version": preventivo["version"], "disponible": preventivo["disponible"],
+            "aprobado": preventivo["disponible"] and preventivo["es_version_activa_registrada"]
+            and preventivo["version"] == version_activa,
+        }
+    elif settings.ia_legado_modo == "activo":
+        en_uso = {
+            "modelo": "legado", "version": legado.get("version"), "disponible": bool(legado.get("disponible")),
+            "aprobado": bool(legado.get("disponible")) and bool(legado.get("hash_aprobado_fijado"))
+            and version_activa is not None,
+        }
+    else:
+        en_uso = {"modelo": "regla_2_8", "version": None, "disponible": False, "aprobado": False}
     return {
         **legado,
         "modo_legado": settings.ia_legado_modo,
-        "preventivo": {"modo": settings.ia_preventivo_modo, "motivo_rechazo": motivo_preventivo},
+        "preventivo": preventivo,
+        "version_activa_registrada": version_activa,
+        "en_uso": en_uso,
     }
 
 
 async def _aplicar_version_activa() -> None:
-    """HU-46 esc. 3: la versión activa de la base decide qué artefacto se acepta."""
+    """HU-46 esc. 3: la versión activa de la base decide qué artefacto se
+    acepta: el preventivo con IA_PREVENTIVO_MODO=activo, si no el legado."""
     async with _session_factory() as session:
         activa = await SQLAlchemyModeloIARepository(session).obtener_activa()
-    if activa is not None:
-        get_random_forest_service().fijar_hash_aprobado(activa.model_hash)
+    gobierno.aplicar_version_activa(get_settings(), activa)
 
 
 @contextlib.asynccontextmanager
@@ -1532,8 +1574,14 @@ def create_app() -> FastAPI:
         vigilante = getattr(request.app.state, "vigilante_sin_datos", None)
         api_broker = getattr(request.app.state, "broker_api", None)
         broker_api = "sin_configurar" if api_broker is None else ("ok" if api_broker else "error")
+        try:
+            activa = await SQLAlchemyModeloIARepository(session).obtener_activa()
+            version_activa = activa.version if activa is not None else None
+        except Exception:  # pragma: no cover - depende de una BD caída
+            await session.rollback()
+            version_activa = None
         # HU-16: la carga del modelo es CPU y disco; fuera del bucle de eventos.
-        modelo_ia = await asyncio.to_thread(_estado_modelos_ia, get_settings())
+        modelo_ia = await asyncio.to_thread(_estado_modelos_ia, get_settings(), version_activa)
         # Un artefacto rechazado (alterado o distinto del aprobado) degrada el
         # estado; uno simplemente ausente, no: la ingesta no depende de la IA.
         modelo_rechazado = bool(modelo_ia["motivo_rechazo"] or modelo_ia["preventivo"]["motivo_rechazo"])

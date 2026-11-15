@@ -8,30 +8,25 @@
 | Prueba de restauración (al menos una vez por sprint y antes de cada entrega) | `python -m scripts.verificar_restauracion --manifiesto <manifiesto>` | `coldcare_<UTC>.restauracion.json` con filas y SHA-256 por tabla |
 | Fallo del respaldo (Escenario 3) | — | log `CRITICAL RESPALDO FALLIDO`, `RESPALDO_FALLIDO` en `audit_logs`, código de salida 2 |
 
-El manifiesto guarda, para `thermal_readings`, `traceability_records` y
-`audit_logs`, el número de filas y el SHA-256 de sus columnas de evidencia en
-orden de clave primaria (`src/infrastructure/respaldo/huellas.py`). La prueba de
-restauración recalcula lo mismo en la base restaurada: si una sola fila
-difiere, la huella difiere.
+El manifiesto guarda el número de filas y el SHA-256 de las columnas de evidencia, en orden de
+clave primaria (`src/infrastructure/respaldo/huellas.py`), de estas tablas: `thermal_readings`,
+`traceability_records`, `audit_logs`, `users`, `devices`, `thermal_alerts`, `corrective_actions` y
+`device_config_history`. La huella se calcula dentro de la misma transacción REPEATABLE READ cuyo
+snapshot exportado usa `pg_dump --snapshot`, así que el volcado y la huella describen el mismo
+instante aunque el nodo siga publicando. La prueba de restauración recalcula lo mismo en la base
+restaurada: si una sola fila difiere, la huella difiere.
 
-En `audit_logs` la huella incluye `resultado` (exitoso, fallido, denegado o
-bloqueado). El manifiesto declara en `columnas` las columnas con las que se
-calculó; un manifiesto anterior, sin `columnas`, se verifica con las del
-formato previo (sin `resultado`), así que sigue siendo verificable.
+En `audit_logs` la huella incluye `resultado` (exitoso, fallido, denegado o bloqueado). El
+manifiesto declara en `columnas` las tablas y columnas con las que se calculó. Un manifiesto
+anterior, sin `columnas`, se verifica con las tres tablas originales y sin `resultado`, así que
+sigue siendo verificable.
 
 ## Railway
 
-1. Servicio adicional **cron** con la misma imagen del backend (el Dockerfile ya
-   trae `postgresql-client`), comando `python -m scripts.respaldo_postgres
-   --destino /respaldos`, programación `0 7 * * *` (02:00 hora de Perú) y un
-   volumen montado en `/respaldos`. Variables: `DATABASE_URL` (referencia al
-   PostgreSQL del proyecto) y `ENVIRONMENT=production`.
-2. Notificación de despliegue fallido activada en el proyecto: un respaldo que
-   sale con código 2 aparece como ejecución fallida y llega al correo del
-   equipo.
-3. Base aislada para la prueba: un segundo servicio PostgreSQL (o una base
-   local) cuyo URL se pasa en `RESTAURACION_DATABASE_URL`. El script se niega
-   a restaurar sobre `DATABASE_URL`.
+La configuración exacta está en [RESPALDO_RAILWAY.md](RESPALDO_RAILWAY.md): servicio cron con
+`Dockerfile.respaldo` y `railway.respaldo.json`, programación `0 7 * * *`, volumen `/respaldos`,
+variables, respaldos nativos con su retención y simulacro de restauración. La imagen de la API no
+sirve para el cron: su `CMD` levanta uvicorn y en producción exige todos los secretos de la API.
 
 ## Criterio de aceptación verificable
 
@@ -42,6 +37,8 @@ formato previo (sin `resultado`), así que sigue siendo verificable.
 
 ## Pendiente de ejecutar en el entorno desplegado
 
-Las pruebas automáticas (`tests/integration/test_hu29_respaldo_restauracion.py`)
-cubren la huella, la comparación y la alerta crítica. El `pg_dump` y el
-`pg_restore` reales solo se ejercen contra el PostgreSQL de Railway.
+Las pruebas automáticas cubren la huella, la comparación, la alerta crítica y un respaldo y una
+restauración reales con `pg_dump` y `pg_restore` sobre PostgreSQL (pgserver):
+`tests/integration/test_hu29_respaldo_restauracion.py` y
+`tests/integration/test_hu29_snapshot_postgres.py`. Falta crear el cron en Railway y hacer el
+simulacro contra el respaldo de producción (RESPALDO_RAILWAY.md).

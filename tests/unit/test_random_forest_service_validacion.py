@@ -1,7 +1,11 @@
 """Pruebas de los hallazgos AI-03/AI-04/AI-05 (auditoría de IA): el servicio
 debe validar compatibilidad de features/clases al cargar el modelo, y rechazar
 artefactos incompatibles con un error claro en vez de fallar de forma confusa
-en la primera inferencia real."""
+en la primera inferencia real.
+
+Un artefacto v2 (metadata embebida, sin metadata externa) solo se deserializa
+si una versión activa registrada fija su hash (P1-7): estas pruebas lo fijan
+para llegar a la validación de compatibilidad."""
 
 import joblib
 import numpy as np
@@ -32,6 +36,7 @@ def test_rechaza_modelo_con_numero_de_features_incorrecto(tmp_path):
         ruta,
     )
     servicio = RandomForestRiesgoService(model_path=ruta)
+    servicio.fijar_hash_aprobado(servicio.hash_artefacto())
     # HU-16: el rechazo deja el modelo no disponible con su motivo, sin lanzar.
     assert servicio.modelo_disponible is False
     assert "features" in servicio.motivo_rechazo()
@@ -44,6 +49,7 @@ def test_rechaza_modelo_con_clases_desconocidas(tmp_path):
         ruta,
     )
     servicio = RandomForestRiesgoService(model_path=ruta)
+    servicio.fijar_hash_aprobado(servicio.hash_artefacto())
     assert servicio.modelo_disponible is False
     assert "clases desconocidas" in servicio.motivo_rechazo()
 
@@ -56,6 +62,7 @@ def test_rechaza_modelo_con_orden_de_features_distinto(tmp_path):
         ruta,
     )
     servicio = RandomForestRiesgoService(model_path=ruta)
+    servicio.fijar_hash_aprobado(servicio.hash_artefacto())
     assert servicio.modelo_disponible is False
     assert "orden de features" in servicio.motivo_rechazo()
 
