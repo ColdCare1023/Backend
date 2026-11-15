@@ -5,14 +5,15 @@
 #
 # pg_dump debe ser de la MISMA versión mayor que el servidor PostgreSQL o más
 # nueva: un cliente más antiguo se niega a volcar. PG_MAJOR fija el cliente
-# (repositorio oficial apt.postgresql.org); por omisión 17. Si el servidor de
-# Railway es de otra versión (`SHOW server_version;`), construir con
+# (repositorio oficial apt.postgresql.org); por omisión 18, porque el servidor
+# de producción en Railway es PostgreSQL 18 (`SHOW server_version;` → 18.6 el
+# 15/11/2026). Si el servidor cambia de versión mayor, construir con
 # `--build-arg PG_MAJOR=<versión>` (en Railway: variable PG_MAJOR del servicio).
 # El script comprueba la compatibilidad antes de volcar y, si no la hay, falla
 # con RESPALDO_FALLIDO y un motivo claro.
 #
 # BE-022: misma imagen base fijada por digest que la API (python:3.12-slim).
-ARG PG_MAJOR=17
+ARG PG_MAJOR=18
 FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 ARG PG_MAJOR
 WORKDIR /app
@@ -31,4 +32,11 @@ COPY . .
 # Railway monta los volúmenes como root: el arranque (root) solo prepara la
 # carpeta del volumen y el respaldo corre como `app` (setpriv, de util-linux).
 # Así no hace falta RAILWAY_RUN_UID=0 ni ejecutar pg_dump como root.
-CMD ["sh", "-c", "mkdir -p \"$RESPALDO_DESTINO\" && chown app:app \"$RESPALDO_DESTINO\" && exec setpriv --reuid=app --regid=app --init-groups python -m scripts.respaldo_postgres --destino \"$RESPALDO_DESTINO\""]
+# setpriv cambia el usuario pero no HOME: sin `env HOME=/tmp` el respaldo
+# heredaba HOME=/root, donde `app` no puede entrar, y la conexión a
+# PostgreSQL fallaba al buscar ~/.postgresql/postgresql.key
+# (`[Errno 13] Permission denied`, primera ejecución en Railway, 15/11/2026).
+# `app` no tiene carpeta personal (--no-create-home); /tmp existe en la imagen
+# y `app` puede usarla. El resto del entorno (DATABASE_URL, RESPALDO_DESTINO,
+# RESPALDO_RETENER…) pasa sin cambios.
+CMD ["sh", "-c", "mkdir -p \"$RESPALDO_DESTINO\" && chown app:app \"$RESPALDO_DESTINO\" && exec env HOME=/tmp setpriv --reuid=app --regid=app --init-groups python -m scripts.respaldo_postgres --destino \"$RESPALDO_DESTINO\""]
