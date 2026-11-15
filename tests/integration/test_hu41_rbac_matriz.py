@@ -77,6 +77,8 @@ MATRIZ_ESPERADA: dict[tuple[str, str], frozenset[str] | str] = {
     ("POST", "/api/ia/modelo/versiones"): frozenset({A}),
     ("GET", "/api/ia/modelo/versiones"): frozenset({A, AU}),
     ("POST", "/api/ia/modelo/versiones/{version}/activar"): frozenset({A}),
+    # P-12: desactivar es la otra mitad del gobierno de versiones (mismo rol).
+    ("POST", "/api/ia/modelo/versiones/{version}/desactivar"): frozenset({A}),
     ("GET", "/api/ia/inferencia/{lectura_id}"): frozenset({AU, F}),
     ("PUT", "/api/ia/inferencia/{lectura_id}"): AUTENTICADO,
     ("PATCH", "/api/ia/inferencia/{lectura_id}"): AUTENTICADO,

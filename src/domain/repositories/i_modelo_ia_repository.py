@@ -22,6 +22,14 @@ class IModeloIARepository(ABC):
         ...
 
     @abstractmethod
+    async def desactivar(self, version: str, cuando: datetime) -> VersionModeloIA | None:
+        """P-12: desactiva `version` SOLO si es la activa (activa=False,
+        desactivada_en=cuando), de forma atómica: de dos llamadas simultáneas
+        solo una la encuentra activa. Devuelve la versión desactivada, o None
+        si no estaba activa (no cambia nada)."""
+        ...
+
+    @abstractmethod
     async def listar(self) -> list[VersionModeloIA]: ...
 
     @abstractmethod

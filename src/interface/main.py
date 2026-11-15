@@ -57,8 +57,15 @@ from src.domain.exceptions import (
 from src.domain.repositories.i_incidente_repository import TIPO_COLISION_CLAVE
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.ai import gobierno
+from src.infrastructure.ai.prediccion_preventiva.servicio import (
+    CODIGOS_RECHAZO as CODIGOS_RECHAZO_PREVENTIVO,
+)
 from src.infrastructure.ai.prediccion_preventiva.servicio import obtener_servicio_preventivo
-from src.infrastructure.ai.random_forest_service import CODIGO_DESACTIVADO, get_random_forest_service
+from src.infrastructure.ai.random_forest_service import (
+    CODIGO_DESACTIVADO,
+    CODIGOS_RECHAZO,
+    get_random_forest_service,
+)
 from src.infrastructure.config import get_settings
 from src.infrastructure.database.repositories.alerta_repository import SQLAlchemyAlertaRepository
 from src.infrastructure.database.repositories.audit_log_repository import (
@@ -1296,7 +1303,15 @@ async def _auditar_modelos_rechazados(settings) -> None:
             SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
         )
         for rechazo in rechazos:
-            logger.warning("Modelo rechazado (%s): %s", rechazo["modelo"], rechazo["motivo"])
+            # HU-46 esc. 3: un artefacto rechazado (alterado, no aprobado o
+            # incompatible) es un error crítico, además del MODELO_RECHAZADO
+            # encadenado. Una configuración pendiente (p. ej. ninguna versión
+            # activa tras desactivarla) queda como aviso.
+            codigos = CODIGOS_RECHAZO if rechazo["modelo"] == "legado" else CODIGOS_RECHAZO_PREVENTIVO
+            nivel = logging.CRITICAL if rechazo["motivo_codigo"] in codigos else logging.WARNING
+            logger.log(
+                nivel, "Modelo rechazado (%s, %s): %s", rechazo["modelo"], rechazo["motivo_codigo"], rechazo["motivo"]
+            )
             await auditoria.execute(
                 usuario_id=None, accion="MODELO_RECHAZADO", recurso=f"ia/{rechazo['modelo']}",
                 detalle=rechazo, ip_origen=None,

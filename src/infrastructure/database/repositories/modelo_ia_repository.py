@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.entities.version_modelo_ia import VersionModeloIA
@@ -10,6 +10,8 @@ from src.infrastructure.database.models import ModeloIAVersionModel, Traceabilit
 # HU-46 esc. 4: cada activación deja este evento encadenado (gestionar_modelo_ia)
 # en la cadena del sistema (no tiene dispositivo; registrar_hash_encadenado).
 EVENTO_VERSION_ACTIVADA = "MODELO_IA_VERSION_ACTIVADA"
+# P-12: cada desactivación deja este evento; desde él no hay versión activa.
+EVENTO_VERSION_DESACTIVADA = "MODELO_IA_VERSION_DESACTIVADA"
 CADENA_SISTEMA = "SISTEMA"
 
 
@@ -91,6 +93,27 @@ class SQLAlchemyModeloIARepository(IModeloIARepository):
         await self._session.refresh(model)
         return _to_entity(model)
 
+    async def desactivar(self, version: str, cuando: datetime) -> VersionModeloIA | None:
+        # Un único UPDATE condicional: en PostgreSQL la segunda transacción
+        # concurrente espera el bloqueo de la fila y, al reevaluar la
+        # condición, ya no la encuentra activa (0 filas → None → 409).
+        resultado = await self._session.execute(
+            update(ModeloIAVersionModel)
+            .where(ModeloIAVersionModel.version == version, ModeloIAVersionModel.activa.is_(True))
+            .values(activa=False, desactivada_en=cuando)
+            .execution_options(synchronize_session=False)
+        )
+        if resultado.rowcount != 1:
+            return None
+        model = (
+            await self._session.execute(
+                select(ModeloIAVersionModel)
+                .where(ModeloIAVersionModel.version == version)
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one()
+        return _to_entity(model)
+
     async def listar(self) -> list[VersionModeloIA]:
         stmt = select(ModeloIAVersionModel).order_by(ModeloIAVersionModel.aprobado_en.desc())
         result = await self._session.execute(stmt)
@@ -98,23 +121,28 @@ class SQLAlchemyModeloIARepository(IModeloIARepository):
 
     async def obtener_version_activa_en(self, momento: datetime) -> VersionModeloIA | None:
         """HU-47 esc. 2: versión activa en `momento`. La fuente es la historia
-        de solo anexado de activaciones (eventos MODELO_IA_VERSION_ACTIVADA de
-        la cadena), que conserva todos los periodos aunque una versión se
-        reactive; las columnas activada_en/desactivada_en solo guardan el
-        último y se usan si no hay eventos (registros anteriores a la cadena)."""
-        evento = (
+        de solo anexado de activaciones y desactivaciones (eventos
+        MODELO_IA_VERSION_ACTIVADA / _DESACTIVADA de la cadena), que conserva
+        todos los periodos aunque una versión se reactive; las columnas
+        activada_en/desactivada_en solo guardan el último y se usan si no hay
+        eventos (registros anteriores a la cadena)."""
+        fila = (
             await self._session.execute(
-                select(TraceabilityRecordModel.payload)
+                select(TraceabilityRecordModel.tipo_evento, TraceabilityRecordModel.payload)
                 .where(
                     # chain_id está indexado: no se recorren los eslabones de lecturas.
                     TraceabilityRecordModel.chain_id == CADENA_SISTEMA,
-                    TraceabilityRecordModel.tipo_evento == EVENTO_VERSION_ACTIVADA,
+                    TraceabilityRecordModel.tipo_evento.in_((EVENTO_VERSION_ACTIVADA, EVENTO_VERSION_DESACTIVADA)),
                     TraceabilityRecordModel.timestamp <= momento,
                 )
                 .order_by(TraceabilityRecordModel.timestamp.desc(), TraceabilityRecordModel.chain_seq.desc())
                 .limit(1)
             )
-        ).scalars().first()
+        ).first()
+        # P-12: tras una desactivación no hay versión activa hasta la próxima activación.
+        if fila is not None and fila.tipo_evento == EVENTO_VERSION_DESACTIVADA:
+            return None
+        evento = fila.payload if fila is not None else None
         if isinstance(evento, dict) and evento.get("version_nueva"):
             version = await self.obtener_por_version(str(evento["version_nueva"]))
             if version is not None:

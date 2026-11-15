@@ -17,7 +17,9 @@ es el suyo y aplicárselo lo rechazaría sin motivo.
 from collections.abc import Callable
 
 from src.domain.entities.version_modelo_ia import VersionModeloIA
+from src.domain.value_objects.motivo_bloqueo import MotivoBloqueo
 from src.infrastructure.ai.prediccion_preventiva.servicio import (
+    ACTIVACION_ARTEFACTO_DISTINTO,
     MODO_ACTIVO,
     MOTIVO_ARTEFACTO_DISTINTO,
     ServicioPrediccionPreventiva,
@@ -45,16 +47,35 @@ def verificador_de_activacion(settings) -> Callable[[VersionModeloIA], list[str]
     de la versión que se quiere activar (lista vacía = es el mismo)."""
     if modelo_gobernado(settings) == MODELO_PREVENTIVO:
         preventivo = servicio_preventivo(settings)
-        return lambda version: preventivo.motivos_activacion(version.version, version.model_hash)
+        # IA-B05 v6: H y la versión de scikit-learn que digitó el admin se
+        # contrastan con el manifiesto que de verdad se cargará.
+        return lambda version: preventivo.motivos_activacion(
+            version.version, version.model_hash,
+            horizonte_min=version.horizonte_min, scikit_learn_version=version.scikit_learn_version,
+        )
     legado = get_random_forest_service()
-    return lambda version: [] if legado.hash_artefacto() == version.model_hash else [MOTIVO_ARTEFACTO_DISTINTO]
+    return lambda version: (
+        [] if legado.hash_artefacto() == version.model_hash
+        else [MotivoBloqueo(ACTIVACION_ARTEFACTO_DISTINTO, MOTIVO_ARTEFACTO_DISTINTO)]
+    )
 
 
 def aplicar_version_activa(settings, activa: VersionModeloIA | None) -> None:
-    """Al arrancar y tras cada activación: desde aquí solo se carga el
-    artefacto de la versión activa (HU-46 esc. 3)."""
+    """Al arrancar, tras cada activación y tras desactivar: desde aquí solo se
+    carga el artefacto de la versión activa (HU-46 esc. 3).
+
+    Sin versión activa (`activa=None`, p. ej. después de
+    POST /desactivar) se vuelve a la línea base: el preventivo en modo activo
+    no carga (`sin_version_activa_registrada`) y el legado deja de exigir el
+    hash de una versión registrada y vuelve a verificarse con su metadata
+    externa, como antes de cualquier activación (P-12)."""
     servicio_preventivo(settings).fijar_version_activa(
         (activa.version, activa.model_hash) if activa is not None else None
     )
-    if modelo_gobernado(settings) == MODELO_LEGADO and activa is not None:
-        get_random_forest_service().fijar_hash_aprobado(activa.model_hash)
+    if modelo_gobernado(settings) != MODELO_LEGADO:
+        return
+    legado = get_random_forest_service()
+    if activa is not None:
+        legado.fijar_hash_aprobado(activa.model_hash)
+    elif legado.hash_aprobado is not None:
+        legado.fijar_hash_aprobado(None)
