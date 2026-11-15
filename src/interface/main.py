@@ -1299,16 +1299,14 @@ async def _auditar_modelos_rechazados(settings) -> None:
             SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
         )
         for rechazo in rechazos:
-            # HU-46 esc. 3: el rechazo del modelo que decide (modo activo) es
-            # un error crítico; el de uno experimental o en sombra, un aviso.
-            decide = (
-                settings.ia_preventivo_modo == "activo"
-                if rechazo["modelo"] == "preventivo"
-                else settings.ia_legado_modo == "activo"
-            )
+            # HU-46 esc. 3: el rechazo del artefacto del modelo que decide
+            # (modo activo) es un error crítico, además del MODELO_RECHAZADO
+            # encadenado. Una configuración pendiente (p. ej. ninguna versión
+            # activa tras /desactivar) o un modelo en sombra/experimental: aviso.
+            critico = gobierno.rechazo_es_critico(settings, rechazo["modelo"], rechazo["motivo_codigo"])
             logger.log(
-                logging.CRITICAL if decide else logging.WARNING,
-                "Modelo rechazado (%s): %s", rechazo["modelo"], rechazo["motivo"],
+                logging.CRITICAL if critico else logging.WARNING,
+                "Modelo rechazado (%s, %s): %s", rechazo["modelo"], rechazo["motivo_codigo"], rechazo["motivo"],
             )
             await auditoria.execute(
                 usuario_id=None, accion="MODELO_RECHAZADO", recurso=f"ia/{rechazo['modelo']}",

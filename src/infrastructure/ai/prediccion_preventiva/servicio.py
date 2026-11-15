@@ -30,6 +30,7 @@ import sklearn
 
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.entities.prediccion_preventiva import PrediccionPreventiva
+from src.domain.value_objects.motivo_bloqueo import MotivoBloqueo
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 from src.infrastructure.ai.prediccion_preventiva import registro
 from src.infrastructure.ai.prediccion_preventiva.configuracion import (
@@ -74,9 +75,41 @@ CODIGO_ESTADO_NO_ADMITIDO = "estado_no_admitido"
 CODIGO_INCOMPATIBLE = "incompatible"
 CODIGO_ERROR_CARGA = "error_de_carga"
 
+# HU-46 esc. 3: estos códigos son un RECHAZO del artefacto (no es el aprobado,
+# fue alterado o no es compatible) y se registran como error crítico. Los
+# demás describen la configuración (modo desactivado, variable ausente o
+# ninguna versión activa en la base, p. ej. tras desactivarla) y son avisos.
+CODIGOS_RECHAZO = frozenset({
+    CODIGO_VERSION_NO_ES_LA_ACTIVA, CODIGO_HASH_NO_ES_EL_REGISTRADO, CODIGO_ARTEFACTO_NO_VERIFICADO,
+    CODIGO_ESTADO_NO_ADMITIDO, CODIGO_INCOMPATIBLE, CODIGO_ERROR_CARGA,
+})
+
+def es_rechazo_critico(modo: str | None, codigo: str | None) -> bool:
+    """HU-46 esc. 3: único criterio del nivel CRITICAL para el preventivo, en el
+    servicio y en la auditoría de arranque. Es crítico el RECHAZO del artefacto
+    (CODIGOS_RECHAZO) cuando el modelo decide el riesgo (modo activo)."""
+    return modo == MODO_ACTIVO and codigo in CODIGOS_RECHAZO
+
+
 # Textos de motivo de activación (HU-46): el mismo del modelo legado cuando
 # el artefacto desplegado no es el registrado.
 MOTIVO_ARTEFACTO_DISTINTO = "el artefacto desplegado no coincide con el hash registrado"
+
+# Códigos estables de los motivos que bloquean POST /activar (409, campo
+# `codigos`). Los cuatro últimos son IA-B05 variantes 6 y 7: la versión que
+# digita el admin debe ser la del manifiesto desplegado, y el manifiesto debe
+# ser el que anotó la CLI en historial.json (no uno editado a mano).
+ACTIVACION_VERSION_NO_CONFIGURADA = "version_preventiva_no_configurada"
+ACTIVACION_VERSION_NO_DESPLEGADA = "version_distinta_de_la_desplegada"
+ACTIVACION_SHA256_NO_CONFIGURADO = "sha256_no_configurado"
+ACTIVACION_SHA256_DISTINTO = "sha256_distinto_del_registrado"
+ACTIVACION_ARTEFACTO_DISTINTO = "artefacto_distinto_del_registrado"
+ACTIVACION_MANIFIESTO_ILEGIBLE = "manifiesto_ilegible"
+ACTIVACION_MANIFIESTO_NO_APROBADO = "manifiesto_no_aprobado"
+ACTIVACION_MANIFIESTO_DISTINTO_DEL_HISTORIAL = "manifiesto_distinto_del_historial"
+ACTIVACION_HORIZONTE_DISTINTO = "horizonte_distinto_del_manifiesto"
+ACTIVACION_SKLEARN_DISTINTO_DEL_MANIFIESTO = "sklearn_distinto_del_manifiesto"
+ACTIVACION_SKLEARN_INCOMPATIBLE = "sklearn_incompatible_con_el_instalado"
 
 
 class VersionActivaRegistrada(NamedTuple):
@@ -168,31 +201,84 @@ class ServicioPrediccionPreventiva:
         ruta = self._ruta_artefacto(objetivo) if objetivo else None
         return registro.sha256_archivo(ruta) if ruta is not None else None
 
-    def motivos_activacion(self, version: str, model_hash: str) -> list[str]:
+    def motivos_activacion(
+        self,
+        version: str,
+        model_hash: str,
+        horizonte_min: int | None = None,
+        scikit_learn_version: str | None = None,
+    ) -> list[MotivoBloqueo]:
         """HU-16 esc. 4 / HU-46: qué impide activar `version` como la que
         clasifica con IA_PREVENTIVO_MODO=activo. Se valida el artefacto que
-        realmente se cargará (el de IA_PREVENTIVO_VERSION), no el legado."""
-        motivos = []
+        realmente se cargará (el de IA_PREVENTIVO_VERSION), no el legado.
+
+        `horizonte_min` y `scikit_learn_version` son los que el admin registró
+        en la base (IA-B05 v6): deben ser los del manifiesto desplegado, que
+        es lo que de verdad se carga, y la versión de scikit-learn debe poder
+        cargarse con la instalada (misma regla que la carga). None = no se
+        compara (llamadas que solo validan el artefacto)."""
+        motivos: list[MotivoBloqueo] = []
         if self._version is None:
-            motivos.append("IA_PREVENTIVO_VERSION no está configurada")
+            motivos.append(MotivoBloqueo(ACTIVACION_VERSION_NO_CONFIGURADA, "IA_PREVENTIVO_VERSION no está configurada"))
         elif version != self._version:
-            motivos.append(f"la versión no es la desplegada en IA_PREVENTIVO_VERSION ({self._version})")
+            motivos.append(MotivoBloqueo(
+                ACTIVACION_VERSION_NO_DESPLEGADA,
+                f"la versión no es la desplegada en IA_PREVENTIVO_VERSION ({self._version})",
+            ))
         if self._sha256 is None:
-            motivos.append("IA_PREVENTIVO_SHA256 no está configurada")
+            motivos.append(MotivoBloqueo(ACTIVACION_SHA256_NO_CONFIGURADO, "IA_PREVENTIVO_SHA256 no está configurada"))
         elif model_hash != self._sha256:
-            motivos.append("IA_PREVENTIVO_SHA256 no coincide con el hash registrado")
+            motivos.append(MotivoBloqueo(
+                ACTIVACION_SHA256_DISTINTO, "IA_PREVENTIVO_SHA256 no coincide con el hash registrado"
+            ))
         if self.hash_artefacto(version) != model_hash:
-            motivos.append(MOTIVO_ARTEFACTO_DISTINTO)
-        else:
-            try:
-                manifiesto = registro.leer_manifiesto(version, self._raiz)
-            except (registro.ErrorRegistro, ValueError):
-                motivos.append("el manifiesto del modelo preventivo no se pudo leer")
-            else:
-                if manifiesto.get("estado") not in ESTADOS_ADMITIDOS[MODO_ACTIVO]:
-                    motivos.append(
-                        f"el manifiesto está en estado {manifiesto.get('estado')}; activar exige {ESTADO_APROBADO}"
-                    )
+            motivos.append(MotivoBloqueo(ACTIVACION_ARTEFACTO_DISTINTO, MOTIVO_ARTEFACTO_DISTINTO))
+            return motivos
+        try:
+            manifiesto = registro.leer_manifiesto(version, self._raiz)
+            sha_manifiesto = registro.sha256_archivo(registro.ruta_manifiesto(version, self._raiz))
+        except (registro.ErrorRegistro, OSError, ValueError):
+            motivos.append(MotivoBloqueo(
+                ACTIVACION_MANIFIESTO_ILEGIBLE, "el manifiesto del modelo preventivo no se pudo leer"
+            ))
+            return motivos
+        # IA-B05 v7: el estado del manifiesto solo cuenta si lo escribió la CLI
+        # (registrar/estado), que anota su SHA-256 en historial.json. Uno
+        # editado a mano a APPROVED (sin pasar por la aprobación) no coincide.
+        if sha_manifiesto != registro.sha256_manifiesto_en_historial(version, self._raiz):
+            motivos.append(MotivoBloqueo(
+                ACTIVACION_MANIFIESTO_DISTINTO_DEL_HISTORIAL,
+                "el SHA-256 del manifiesto no coincide con el último anotado en historial.json "
+                "(el manifiesto se modificó fuera de la CLI de registro)",
+            ))
+        if manifiesto.get("estado") not in ESTADOS_ADMITIDOS[MODO_ACTIVO]:
+            motivos.append(MotivoBloqueo(
+                ACTIVACION_MANIFIESTO_NO_APROBADO,
+                f"el manifiesto está en estado {manifiesto.get('estado')}; activar exige {ESTADO_APROBADO}",
+            ))
+        # IA-B05 v6: la evidencia HU-47 toma H del registro; debe ser la del modelo cargado.
+        horizonte_manifiesto = (manifiesto.get("configuracion") or {}).get("horizonte_min")
+        if horizonte_min is not None and horizonte_min != horizonte_manifiesto:
+            motivos.append(MotivoBloqueo(
+                ACTIVACION_HORIZONTE_DISTINTO,
+                f"el horizonte registrado ({horizonte_min} min) no es el del manifiesto desplegado "
+                f"({horizonte_manifiesto} min)",
+            ))
+        sklearn_manifiesto = (manifiesto.get("versiones") or {}).get("scikit_learn")
+        if scikit_learn_version is not None and scikit_learn_version != sklearn_manifiesto:
+            motivos.append(MotivoBloqueo(
+                ACTIVACION_SKLEARN_DISTINTO_DEL_MANIFIESTO,
+                f"la versión de scikit-learn registrada ({scikit_learn_version}) no es la del manifiesto "
+                f"({sklearn_manifiesto})",
+            ))
+        if not isinstance(sklearn_manifiesto, str) or _version_menor(sklearn_manifiesto) != _version_menor(
+            sklearn.__version__
+        ):
+            motivos.append(MotivoBloqueo(
+                ACTIVACION_SKLEARN_INCOMPATIBLE,
+                f"el modelo se entrenó con scikit-learn {sklearn_manifiesto} y el instalado es "
+                f"{sklearn.__version__}; no cargaría",
+            ))
         return motivos
 
     @property
@@ -215,12 +301,17 @@ class ServicioPrediccionPreventiva:
                     else CODIGO_ARTEFACTO_NO_VERIFICADO if isinstance(exc, registro.ErrorRegistro)
                     else CODIGO_ERROR_CARGA
                 )
-                # HU-46 esc. 3: en modo activo, un artefacto que no se carga
-                # (hash distinto del registrado, versión no activa...) deja
-                # sin clasificación preventiva: es un error crítico. En sombra
-                # o desactivado no clasifica nada en producción: aviso.
-                nivel = logging.CRITICAL if self.modo == MODO_ACTIVO else logging.WARNING
-                logger.log(nivel, "Modelo preventivo no disponible (%s): %s", self.modo, self._motivo_no_disponible)
+                # HU-46 esc. 3: el rechazo del artefacto (alterado, otro hash u
+                # otra versión, no aprobado, incompatible) del modelo que decide
+                # (modo activo) es un error crítico; el arranque además lo deja
+                # en la bitácora (MODELO_RECHAZADO). La configuración pendiente
+                # (ninguna versión activa, p. ej. tras /desactivar; variable
+                # ausente; modo desactivado) y todo en sombra son avisos.
+                nivel = logging.CRITICAL if es_rechazo_critico(self.modo, self._codigo_no_disponible) else logging.WARNING
+                logger.log(
+                    nivel, "Modelo preventivo no disponible (%s, %s): %s",
+                    self.modo, self._codigo_no_disponible, self._motivo_no_disponible,
+                )
 
     def _exigir_version_activa_registrada(self) -> None:
         """HU-46 esc. 3 / HU-16 esc. 1: en modo activo solo se carga la versión

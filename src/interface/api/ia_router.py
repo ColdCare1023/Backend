@@ -9,7 +9,9 @@ from src.application.use_cases.gestionar_modelo_ia import (
     ActivacionBloqueadaError,
     ActivarVersionModeloUseCase,
     ConsultarInferenciaLecturaUseCase,
+    DesactivarVersionModeloUseCase,
     RegistrarVersionModeloUseCase,
+    VersionNoActivaError,
     evaluar_criterios_modelo,
     motivos_bloqueo_activacion,
 )
@@ -37,6 +39,7 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
 )
 from src.interface.api.deps import CurrentUserDep, DbSessionDep, SettingsDep, require_roles
 from src.interface.api.schemas import (
+    DesactivarVersionModeloRequest,
     InferenciaLecturaResponse,
     RegistrarVersionModeloRequest,
     VersionModeloResponse,
@@ -215,7 +218,16 @@ async def clasificar_prueba(
 
 
 @router.post(
-    "/modelo/versiones", response_model=VersionModeloResponse, status_code=status.HTTP_201_CREATED
+    "/modelo/versiones",
+    response_model=VersionModeloResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        409: {
+            "description": "La versión ya está registrada o, con `activar=true`, no puede activarse "
+            "(nada queda registrado). En el segundo caso, `codigos` trae un código estable por "
+            "motivo, igual que POST /modelo/versiones/{version}/activar.",
+        },
+    },
 )
 async def registrar_version_modelo(
     body: RegistrarVersionModeloRequest,
@@ -271,13 +283,18 @@ async def registrar_version_modelo(
         await session.rollback()
         await _auditar_rechazo_activacion(
             session, admin.id, body.version, ip_origen,
-            {"motivo": "criterios_no_cumplidos", "motivos": exc.motivos, "al_registrar": True},
+            {
+                "motivo": "criterios_no_cumplidos", "motivos": exc.motivos, "codigos": exc.codigos,
+                "al_registrar": True,
+            },
         )
         await session.commit()
-        raise HTTPException(
+        # Mismas validaciones que /activar (IA-B05 v6 y v7 incluidas) y mismo
+        # cuerpo del 409: `detail` en texto y `codigos` estables (aditivo).
+        return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"La versión no se registró ni se activó: {exc}",
-        ) from exc
+            content={"detail": f"La versión no se registró ni se activó: {exc}", "codigos": exc.codigos},
+        )
     await AuditarAccionCriticaUseCase(
         SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
     ).execute(
@@ -327,7 +344,17 @@ async def listar_versiones_modelo(
     return [_version_a_response(v) for v in await repositorio.listar()]
 
 
-@router.post("/modelo/versiones/{version}/activar", response_model=VersionModeloResponse)
+@router.post(
+    "/modelo/versiones/{version}/activar",
+    response_model=VersionModeloResponse,
+    responses={
+        404: {"description": "Versión no registrada."},
+        409: {
+            "description": "La versión no puede activarse. `detail` trae los motivos en texto y "
+            "`codigos`, un código estable por motivo y en el mismo orden.",
+        },
+    },
+)
 async def activar_version_modelo(
     version: str,
     session: DbSessionDep,
@@ -344,10 +371,14 @@ async def activar_version_modelo(
         activada = await _ejecutar_activacion(session, settings, version, admin.id)
     except ActivacionBloqueadaError as exc:
         await _auditar_rechazo_activacion(
-            session, admin.id, version, ip_origen, {"motivo": "criterios_no_cumplidos", "motivos": exc.motivos}
+            session, admin.id, version, ip_origen,
+            {"motivo": "criterios_no_cumplidos", "motivos": exc.motivos, "codigos": exc.codigos},
         )
         await session.commit()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        # `detail` conserva el texto de siempre; `codigos` es aditivo (IA-B05).
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT, content={"detail": str(exc), "codigos": exc.codigos}
+        )
     except RecursoNoEncontradoError as exc:
         await _auditar_rechazo_activacion(session, admin.id, version, ip_origen, {"motivo": "version_no_registrada"})
         await session.commit()
@@ -366,6 +397,71 @@ async def activar_version_modelo(
     # HU-46 esc. 3: desde aquí solo se carga el artefacto de la versión activa.
     gobierno.aplicar_version_activa(settings, activada)
     return _version_a_response(activada)
+
+
+@router.post(
+    "/modelo/versiones/{version}/desactivar",
+    response_model=VersionModeloResponse,
+    responses={
+        404: {"description": "Versión no registrada."},
+        409: {"description": "`detail` = `version_no_activa`: la versión no es la activa (o ya se desactivó)."},
+    },
+)
+async def desactivar_version_modelo(
+    version: str,
+    body: DesactivarVersionModeloRequest,
+    session: DbSessionDep,
+    request: Request,
+    settings: SettingsDep,
+    admin=Depends(require_roles(Rol.ADMINISTRADOR)),
+) -> VersionModeloResponse:
+    """P-12: desactiva la versión activa sin activar otra. No queda ninguna
+    versión activa: el modelo preventivo en modo activo deja de cargarse
+    (`modelo_ia.preventivo.motivo_codigo=sin_version_activa_registrada` en
+    /health/detalle) y el riesgo efectivo vuelve a la línea base, la misma de
+    antes de cualquier activación. Queda el evento encadenado
+    MODELO_IA_VERSION_DESACTIVADA y la fila DESACTIVAR_VERSION_MODELO_IA."""
+    repositorio = SQLAlchemyModeloIARepository(session)
+    use_case = DesactivarVersionModeloUseCase(
+        repositorio, RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session)),
+        modelo=gobierno.modelo_gobernado(settings),
+    )
+    auditoria = AuditarAccionCriticaUseCase(
+        SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+    )
+    recurso = f"ia/modelo/versiones/{version}/desactivar"[:100]
+    ip_origen = request.client.host if request.client else None
+    try:
+        desactivada = await use_case.execute(version, admin.id, body.motivo)
+    except (RecursoNoEncontradoError, VersionNoActivaError) as exc:
+        no_activa = isinstance(exc, VersionNoActivaError)
+        await auditoria.execute(
+            usuario_id=admin.id,
+            accion="DESACTIVAR_VERSION_MODELO_IA_RECHAZADO",
+            recurso=recurso,
+            detalle={
+                "motivo": VersionNoActivaError.codigo if no_activa else "version_no_registrada",
+                "justificacion": body.motivo,
+            },
+            ip_origen=ip_origen,
+        )
+        await session.commit()
+        if no_activa:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=VersionNoActivaError.codigo) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    await auditoria.execute(
+        usuario_id=admin.id,
+        accion="DESACTIVAR_VERSION_MODELO_IA",
+        recurso=recurso,
+        detalle={"version": version, "motivo": body.motivo, "model_hash": desactivada.model_hash},
+        ip_origen=ip_origen,
+    )
+    await session.commit()
+    # Sin versión activa: el preventivo no carga y el legado vuelve a su
+    # verificación de siempre (línea base, P-12).
+    gobierno.aplicar_version_activa(settings, None)
+    return _version_a_response(desactivada)
 
 
 @router.get("/inferencia/{lectura_id}", response_model=InferenciaLecturaResponse)

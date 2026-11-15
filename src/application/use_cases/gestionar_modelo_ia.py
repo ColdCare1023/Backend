@@ -7,6 +7,7 @@ from src.domain.entities.version_modelo_ia import VersionModeloIA
 from src.domain.exceptions import DomainError, RecursoNoEncontradoError
 from src.domain.repositories.i_lectura_repository import ILecturaRepository
 from src.domain.repositories.i_modelo_ia_repository import IModeloIARepository
+from src.domain.value_objects.motivo_bloqueo import MotivoBloqueo, codigo_de
 from src.infrastructure.ai.random_forest_service import ESTADO_COMPLETADA
 
 # HU-46 / HU-18 Escenario 4: los dos juegos de criterios que figuran en la
@@ -24,6 +25,16 @@ UMBRALES_POR_INCIDENTE = {
     "mediana_anticipacion_min": ("min", 5.0),
 }
 CAMPOS_PARTICIONES = ("entrenamiento", "prueba", "separacion_min")
+
+# Códigos estables de los motivos de bloqueo por criterios (409 de /activar,
+# campo `codigos`; el texto sigue en `detail` y en `motivos_bloqueo`).
+BLOQUEO_FALTA_HORIZONTE = "falta_horizonte"
+BLOQUEO_FALTA_ESQUEMA = "falta_esquema_features"
+BLOQUEO_FALTAN_PARTICIONES = "faltan_particiones"
+BLOQUEO_SEPARACION_MENOR_QUE_H = "separacion_menor_que_horizonte"
+BLOQUEO_CRITERIO_DESCONOCIDO = "criterio_principal_desconocido"
+BLOQUEO_FALTAN_METRICAS = "faltan_metricas_criterio_principal"
+BLOQUEO_NO_CUMPLE_CRITERIO = "no_cumple_criterio_principal"
 
 
 def _numero(valor) -> float | None:
@@ -55,29 +66,32 @@ def evaluar_criterios_modelo(metricas: dict | None) -> dict:
     }
 
 
-def motivos_bloqueo_activacion(version: VersionModeloIA, criterio_principal: str) -> list[str]:
-    """HU-46: qué impide activar la versión. Lista vacía = puede activarse."""
+def motivos_bloqueo_activacion(version: VersionModeloIA, criterio_principal: str) -> list[MotivoBloqueo]:
+    """HU-46: qué impide activar la versión. Lista vacía = puede activarse.
+    Cada motivo es su texto (str) y lleva además un código estable."""
     motivos = []
     if not version.horizonte_min or version.horizonte_min <= 0:
-        motivos.append("falta el horizonte H de la etiqueta")
+        motivos.append(MotivoBloqueo(BLOQUEO_FALTA_HORIZONTE, "falta el horizonte H de la etiqueta"))
     if not version.feature_schema_version:
-        motivos.append("falta la versión del esquema de features")
+        motivos.append(MotivoBloqueo(BLOQUEO_FALTA_ESQUEMA, "falta la versión del esquema de features"))
     particiones = version.particiones or {}
     faltan = [c for c in CAMPOS_PARTICIONES if particiones.get(c) in (None, "", [])]
     if faltan:
-        motivos.append(f"faltan las particiones ({', '.join(faltan)})")
+        motivos.append(MotivoBloqueo(BLOQUEO_FALTAN_PARTICIONES, f"faltan las particiones ({', '.join(faltan)})"))
     elif _numero(particiones.get("separacion_min")) is not None and version.horizonte_min and (
         particiones["separacion_min"] < version.horizonte_min
     ):
-        motivos.append("la separación entre particiones es menor que H")
+        motivos.append(MotivoBloqueo(BLOQUEO_SEPARACION_MENOR_QUE_H, "la separación entre particiones es menor que H"))
     evaluacion = evaluar_criterios_modelo(version.metricas)
     principal = evaluacion.get(criterio_principal)
     if principal is None:
-        motivos.append(f"criterio principal desconocido: {criterio_principal}")
+        motivos.append(MotivoBloqueo(BLOQUEO_CRITERIO_DESCONOCIDO, f"criterio principal desconocido: {criterio_principal}"))
     elif principal["cumple"] is None:
-        motivos.append(f"faltan métricas del criterio principal ({criterio_principal})")
+        motivos.append(MotivoBloqueo(
+            BLOQUEO_FALTAN_METRICAS, f"faltan métricas del criterio principal ({criterio_principal})"
+        ))
     elif not principal["cumple"]:
-        motivos.append(f"no cumple el criterio principal ({criterio_principal})")
+        motivos.append(MotivoBloqueo(BLOQUEO_NO_CUMPLE_CRITERIO, f"no cumple el criterio principal ({criterio_principal})"))
     return motivos
 
 
@@ -85,6 +99,8 @@ class ActivacionBloqueadaError(DomainError):
     def __init__(self, version: str, motivos: list[str]) -> None:
         super().__init__(f"La versión {version} no puede activarse: " + "; ".join(motivos))
         self.motivos = motivos
+        # Un código estable por motivo, en el mismo orden (409 de /activar).
+        self.codigos = [codigo_de(m) for m in motivos]
 
 
 class RegistrarVersionModeloUseCase:
@@ -154,6 +170,7 @@ class RegistrarVersionModeloUseCase:
 # de qué versión estaba activa en cada instante (HU-47 esc. 2).
 EVENTO_VERSION_ACTIVADA = "MODELO_IA_VERSION_ACTIVADA"
 MOTIVO_ARTEFACTO_DISTINTO = "el artefacto desplegado no coincide con el hash registrado"
+CODIGO_ARTEFACTO_DISTINTO = "artefacto_distinto_del_registrado"
 
 
 class ActivarVersionModeloUseCase:
@@ -185,6 +202,9 @@ class ActivarVersionModeloUseCase:
         self._modelo = modelo
 
     async def execute(self, version: str, admin_id: UUID) -> VersionModeloIA:
+        # P-12: lo primero es el candado común con /desactivar; la versión
+        # activa y la hora del cambio se leen después, ya serializadas.
+        await self._modelo_repository.bloquear_cambio_de_version()
         objetivo = await self._modelo_repository.obtener_por_version(version)
         if objetivo is None:
             raise RecursoNoEncontradoError(
@@ -197,7 +217,7 @@ class ActivarVersionModeloUseCase:
         if self._verificar_artefacto is not None:
             motivos.extend(self._verificar_artefacto(objetivo))
         elif self._hash_artefacto is not None and self._hash_artefacto() != objetivo.model_hash:
-            motivos.append(MOTIVO_ARTEFACTO_DISTINTO)
+            motivos.append(MotivoBloqueo(CODIGO_ARTEFACTO_DISTINTO, MOTIVO_ARTEFACTO_DISTINTO))
         if motivos:
             raise ActivacionBloqueadaError(version, motivos)
 
@@ -221,6 +241,76 @@ class ActivarVersionModeloUseCase:
             timestamp=cuando,
         )
         return activada
+
+
+# P-12 (vuelta atrás que restaura la línea base): evento encadenado de cada
+# desactivación. Cierra el periodo de la versión en la historia de HU-47 esc. 2.
+EVENTO_VERSION_DESACTIVADA = "MODELO_IA_VERSION_DESACTIVADA"
+CODIGO_VERSION_NO_ACTIVA = "version_no_activa"
+
+
+class VersionNoActivaError(DomainError):
+    """La versión existe pero no es la activa (o otra petición ya la desactivó)."""
+
+    codigo = CODIGO_VERSION_NO_ACTIVA
+
+    def __init__(self, version: str) -> None:
+        super().__init__(f"La versión {version} no es la versión activa; no hay nada que desactivar")
+
+
+class DesactivarVersionModeloUseCase:
+    """P-12: desactiva la versión ACTIVA del registro sin activar otra. Desde
+    ese momento no queda ninguna versión activa, así que el modelo preventivo
+    en modo activo no carga (`sin_version_activa_registrada`) y el riesgo
+    efectivo vuelve al comportamiento de línea base, el mismo de antes de
+    cualquier activación (la regla 2-8 °C con el legado experimental).
+
+    El cambio es condicional y atómico en el repositorio: de dos peticiones
+    simultáneas solo una desactiva; la otra recibe VersionNoActivaError (409).
+    Además comparte con ActivarVersionModeloUseCase el candado
+    bloquear_cambio_de_version(), tomado antes de leer la versión activa y la
+    hora: un /activar y un /desactivar simultáneos se aplican uno detrás del
+    otro, y las filas, los eventos encadenados y la consulta de HU-47 esc. 2
+    terminan diciendo lo mismo."""
+
+    def __init__(
+        self,
+        modelo_repository: IModeloIARepository,
+        registrar_hash: RegistrarHashEncadenadoUseCase,
+        modelo: str = "legado",
+    ) -> None:
+        self._modelo_repository = modelo_repository
+        self._registrar_hash = registrar_hash
+        self._modelo = modelo
+
+    async def execute(self, version: str, admin_id: UUID, motivo: str) -> VersionModeloIA:
+        # Mismo candado que /activar, antes de leer nada y de tomar la hora.
+        await self._modelo_repository.bloquear_cambio_de_version()
+        objetivo = await self._modelo_repository.obtener_por_version(version)
+        if objetivo is None:
+            raise RecursoNoEncontradoError(f"La versión {version} no está registrada")
+        cuando = datetime.now(tz=timezone.utc)
+        desactivada = await self._modelo_repository.desactivar(version, cuando)
+        if desactivada is None:
+            raise VersionNoActivaError(version)
+
+        # El eslabón guarda quién, cuándo (timestamp del eslabón, igual a
+        # desactivada_en), qué versión y por qué; el hash anterior lo encadena.
+        await self._registrar_hash.execute(
+            tipo_evento=EVENTO_VERSION_DESACTIVADA,
+            payload={
+                "version": version,
+                "admin_id": str(admin_id),
+                "motivo": motivo,
+                "modelo": self._modelo,
+                "model_hash": desactivada.model_hash,
+                "activada_en": desactivada.activada_en.isoformat() if desactivada.activada_en else None,
+                "version_activa_resultante": None,
+            },
+            usuario_id=admin_id,
+            timestamp=cuando,
+        )
+        return desactivada
 
 
 def _probabilidades_calibradas(lectura) -> bool | None:

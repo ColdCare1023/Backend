@@ -811,6 +811,14 @@ class RegistrarVersionModeloRequest(_PeticionEstricta):
     activar: bool = False
 
 
+class DesactivarVersionModeloRequest(_PeticionEstricta):
+    """P-12: por qué se desactiva la versión activa (queda en el evento
+    encadenado y en la bitácora). De 10 a 500 caracteres sin contar los
+    espacios de los extremos."""
+
+    motivo: Annotated[str, StringConstraints(strip_whitespace=True, min_length=10, max_length=500)]
+
+
 class VersionModeloResponse(BaseModel):
     id: UUID | None = None
     version: str
