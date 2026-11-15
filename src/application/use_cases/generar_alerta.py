@@ -54,6 +54,26 @@ def _a_utc(valor: datetime) -> datetime:
     return valor if valor.tzinfo is not None else valor.replace(tzinfo=timezone.utc)
 
 
+# Para comparar niveles: una lectura atrasada nunca baja el nivel del episodio.
+_GRAVEDAD = {
+    NivelRiesgo.NORMAL: 0,
+    NivelRiesgo.RIESGO_PREVENTIVO: 1,
+    NivelRiesgo.EXCURSION_CRITICA: 2,
+}
+
+
+def _es_anterior_al_episodio(episodio: AlertaTermica | None, timestamp: datetime) -> bool:
+    """La lectura se capturó antes que la última que ya cuenta el episodio
+    abierto: una carga manual retroactiva (hasta 24 h atrás) o una lectura
+    del buffer que llega después de otra en vivo. No dice nada de lo que pasa
+    ahora con el equipo."""
+    return (
+        episodio is not None
+        and episodio.ultima_actualizacion is not None
+        and _a_utc(timestamp) < _a_utc(episodio.ultima_actualizacion)
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class AvisoExcursion:
     """HU-53: aviso pendiente de una apertura (o reapertura) de episodio
@@ -99,6 +119,12 @@ class GenerarAlertaUseCase:
       excursión abre una alerta PENDIENTE nueva, con su aviso.
     - Una lectura crítica de OTRO tipo (escalamiento/desescalamiento) cierra
       el episodio anterior y abre uno nuevo.
+    - Una lectura capturada ANTES de la última lectura del episodio abierto
+      (manual retroactiva, buffer fuera de orden) queda solo como evidencia:
+      no lo cierra por recuperación, no cuenta para la normalización, no lo
+      baja de nivel ni le aplica el cierre sin continuidad. Del mismo nivel,
+      solo puede cambiar la temperatura pico. Una más grave sí escala, como
+      siempre: la excursión ocurrió y se avisa.
     - Sin episodio abierto: si el último episodio CERRADO del mismo
       dispositivo+tipo terminó hace menos de COOLDOWN_MINUTOS y todavía no
       fue ATENDIDO, se reabre en vez de crear una fila nueva. Si no (fuera de
@@ -231,11 +257,30 @@ class GenerarAlertaUseCase:
         valores por defecto conservan el comportamiento anterior."""
         self.transicion = None
         episodio_abierto = await self._alerta_repository.obtener_episodio_abierto(device_id)
+        # Capturada antes que la última lectura del episodio: no puede decir
+        # que el equipo volvió a rango ni que la excursión se cortó (el
+        # episodio cerraría con una hora anterior a su inicio y la lectura
+        # siguiente, todavía fuera de rango, abriría otra alerta y otro aviso).
+        anterior_al_episodio = _es_anterior_al_episodio(episodio_abierto, timestamp)
 
         if nivel_riesgo is None or nivel_riesgo == NivelRiesgo.NORMAL:
-            if episodio_abierto is not None:
+            if episodio_abierto is not None and not anterior_al_episodio:
                 await self._normalizar_o_cerrar(episodio_abierto, timestamp, normal_confirmado)
             return None
+
+        if anterior_al_episodio:
+            if episodio_abierto.nivel_riesgo == nivel_riesgo:
+                # Evidencia del mismo episodio: la lectura más reciente y su
+                # hora no retroceden, ni se reinicia la normalización.
+                episodio_abierto.actualizar_pico(temperatura_interna)
+                if self._es_diferida(timestamp, received_at):
+                    episodio_abierto.historica = True
+                self.transicion = TRANSICION_ACTUALIZACION
+                return await self._alerta_repository.actualizar(episodio_abierto)
+            if _GRAVEDAD[nivel_riesgo] < _GRAVEDAD[episodio_abierto.nivel_riesgo]:
+                return None
+            # Más grave que el episodio abierto (crítica con un preventivo
+            # abierto): la excursión ocurrió; escala y se avisa como siempre.
 
         if (
             episodio_abierto is not None

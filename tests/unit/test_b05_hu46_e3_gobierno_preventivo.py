@@ -16,14 +16,19 @@ texto de siempre.
 import json
 import logging
 import re
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
 
 import numpy as np
 import pytest
 import sklearn
 from sklearn.ensemble import RandomForestClassifier
 
+from src.domain.entities.version_modelo_ia import VersionModeloIA
 from src.domain.value_objects.motivo_bloqueo import MotivoBloqueo, codigo_de
+from src.infrastructure.ai import gobierno
 from src.infrastructure.ai.prediccion_preventiva import registro
 from src.infrastructure.ai.prediccion_preventiva import servicio as modulo_servicio
 from src.infrastructure.ai.prediccion_preventiva.configuracion import (
@@ -33,6 +38,7 @@ from src.infrastructure.ai.prediccion_preventiva.configuracion import (
 )
 from src.infrastructure.ai.prediccion_preventiva.features import nombres_features
 from src.infrastructure.ai.prediccion_preventiva.servicio import (
+    ACTIVACION_ESQUEMA_DISTINTO,
     ACTIVACION_HORIZONTE_DISTINTO,
     ACTIVACION_MANIFIESTO_DISTINTO_DEL_HISTORIAL,
     ACTIVACION_MANIFIESTO_NO_APROBADO,
@@ -51,6 +57,7 @@ from src.infrastructure.ai.prediccion_preventiva.servicio import (
     MODO_DESACTIVADO,
     ServicioPrediccionPreventiva,
 )
+from src.infrastructure.ai.random_forest_service import CODIGO_NO_ENTRENADO, CODIGOS_RECHAZO
 
 VERSION = "rf-b05-1.0.0"
 CONFIG = ConfiguracionPreventiva()
@@ -104,6 +111,42 @@ def test_v6_horizonte_registrado_distinto_del_manifiesto(tmp_path):
 
     assert _codigos(motivos) == [ACTIVACION_HORIZONTE_DISTINTO]
     assert "15 min" in motivos[0] and "30 min" in motivos[0]
+
+
+def test_v6_esquema_de_features_registrado_distinto_del_manifiesto(tmp_path):
+    sha = _registrar(tmp_path)
+    servicio = ServicioPrediccionPreventiva(MODO_ACTIVO, VERSION, sha, raiz=tmp_path)
+
+    motivos = servicio.motivos_activacion(
+        VERSION, sha, horizonte_min=30, scikit_learn_version=sklearn.__version__,
+        feature_schema_version="esquema_inventado",
+    )
+
+    assert _codigos(motivos) == [ACTIVACION_ESQUEMA_DISTINTO]
+    assert motivos[0] == "el esquema de features registrado (esquema_inventado) no es el del manifiesto (termico_minimo)"
+    assert servicio.motivos_activacion(VERSION, sha, feature_schema_version="termico_minimo") == []
+
+
+def test_v6_el_verificador_de_activar_compara_el_esquema_registrado(tmp_path, monkeypatch):
+    """gobierno.verificador_de_activacion (lo que usa /activar) pasa el esquema registrado."""
+    sha = _registrar(tmp_path)
+    monkeypatch.setattr(
+        modulo_servicio, "_instancia", ServicioPrediccionPreventiva(MODO_ACTIVO, VERSION, sha, raiz=tmp_path)
+    )
+    ajustes = SimpleNamespace(
+        ia_preventivo_modo=MODO_ACTIVO, ia_preventivo_version=VERSION, ia_preventivo_sha256=sha,
+    )
+
+    def _version(esquema: str) -> VersionModeloIA:
+        return VersionModeloIA(
+            version=VERSION, model_hash=sha, feature_schema_version=esquema, dataset_version="d",
+            scikit_learn_version=sklearn.__version__, python_version="3.12",
+            trained_at=datetime(2026, 11, 1, tzinfo=timezone.utc), aprobado_por=uuid4(), horizonte_min=30,
+        )
+
+    verificar = gobierno.verificador_de_activacion(ajustes)
+    assert verificar(_version("termico_minimo")) == []
+    assert _codigos(verificar(_version("esquema_inventado"))) == [ACTIVACION_ESQUEMA_DISTINTO]
 
 
 def test_v6_sklearn_registrado_distinto_del_manifiesto(tmp_path):
@@ -338,3 +381,19 @@ def test_la_columna_log_del_documento_es_lo_que_registra_el_servicio(tmp_path, r
     servicio.fijar_version_activa(None)
     assert servicio.disponible is False
     assert len([r for r in registros_del_servicio.records if r.name == modulo_servicio.logger.name]) == 2
+
+
+# ── Un mismo rechazo del legado, un solo nivel ───────────────────────────────
+
+
+@pytest.mark.parametrize("modo_legado", ["activo", "experimental"])
+def test_el_rechazo_del_legado_es_critico_en_cualquier_modo_en_que_se_carga(modo_legado):
+    """random_forest_service registra CRITICAL todo rechazo del artefacto
+    legado al cargarlo; la auditoría del arranque usa el mismo criterio (en
+    `experimental` la clase del legado sigue quedando como evidencia)."""
+    ajustes = SimpleNamespace(ia_legado_modo=modo_legado, ia_preventivo_modo=MODO_DESACTIVADO)
+    for codigo in CODIGOS_RECHAZO:
+        assert gobierno.rechazo_es_critico(ajustes, gobierno.MODELO_LEGADO, codigo) is True, codigo
+    # Sin artefacto no hay rechazo que registrar.
+    assert gobierno.rechazo_es_critico(ajustes, gobierno.MODELO_LEGADO, CODIGO_NO_ENTRENADO) is False
+    assert gobierno.rechazo_es_critico(ajustes, gobierno.MODELO_LEGADO, None) is False

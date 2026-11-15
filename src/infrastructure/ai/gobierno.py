@@ -59,14 +59,21 @@ def modo_legado_efectivo(settings) -> str:
 
 def rechazo_es_critico(settings, modelo: str, codigo: str | None) -> bool:
     """HU-46 esc. 3: ¿el rechazo de este modelo al arrancar es un error crítico?
-    Lo es el RECHAZO del artefacto (alterado, otro hash u otra versión, no
-    aprobado, incompatible) del modelo configurado para decidir el riesgo
-    (modo activo). Sin versión activa (p. ej. tras /desactivar), sin variables
-    o en sombra/experimental es un aviso. Mismo criterio que el servicio
-    preventivo (`es_rechazo_critico`)."""
+    Mismo criterio que el log de cada servicio, para que el mismo rechazo no
+    salga con dos niveles:
+
+    - preventivo (`es_rechazo_critico`): el RECHAZO del artefacto (alterado,
+      otro hash u otra versión, no aprobado, incompatible) en modo activo. Sin
+      versión activa (p. ej. tras /desactivar), sin variables o en sombra es
+      un aviso;
+    - legado: todo rechazo del artefacto (CODIGOS_RECHAZO), en cualquier modo
+      en que se cargue. En `experimental` su clase sigue quedando como
+      evidencia de cada lectura: un artefacto alterado o que no es el aprobado
+      es un error crítico (HU-16 / HU-46 esc. 3), como ya lo registra
+      random_forest_service al cargarlo."""
     if modelo == MODELO_PREVENTIVO:
         return es_rechazo_critico(settings.ia_preventivo_modo, codigo)
-    return settings.ia_legado_modo == "activo" and codigo in CODIGOS_RECHAZO_LEGADO
+    return codigo in CODIGOS_RECHAZO_LEGADO
 
 
 def servicio_preventivo(settings) -> ServicioPrediccionPreventiva:
@@ -80,11 +87,13 @@ def verificador_de_activacion(settings) -> Callable[[VersionModeloIA], list[str]
     de la versión que se quiere activar (lista vacía = es el mismo)."""
     if modelo_gobernado(settings) == MODELO_PREVENTIVO:
         preventivo = servicio_preventivo(settings)
-        # IA-B05 v6: H y la versión de scikit-learn que digitó el admin se
-        # contrastan con el manifiesto que de verdad se cargará.
+        # IA-B05 v6: H, la versión de scikit-learn y el esquema de features
+        # que digitó el admin se contrastan con el manifiesto que de verdad se
+        # cargará (la evidencia de HU-47 los toma del registro).
         return lambda version: preventivo.motivos_activacion(
             version.version, version.model_hash,
             horizonte_min=version.horizonte_min, scikit_learn_version=version.scikit_learn_version,
+            feature_schema_version=version.feature_schema_version,
         )
     legado = get_random_forest_service()
     return lambda version: (

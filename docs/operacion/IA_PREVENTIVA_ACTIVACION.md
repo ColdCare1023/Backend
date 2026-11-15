@@ -28,6 +28,7 @@ reversión»); los casos IA-xxx citados son los de ese plan.
   | `manifiesto_distinto_del_historial` | El SHA-256 de `manifiesto.json` no es el último anotado en `historial.json`: se editó fuera de la CLI (IA-B05 v7) |
   | `manifiesto_no_aprobado` | El manifiesto no está en `APPROVED_FOR_DEPLOYMENT` |
   | `horizonte_distinto_del_manifiesto` | `horizonte_min` registrado ≠ `configuracion.horizonte_min` del manifiesto (IA-B05 v6) |
+  | `esquema_features_distinto_del_manifiesto` | `feature_schema_version` registrado ≠ `conjunto_features` del manifiesto (IA-B05 v6; es el esquema que muestra la evidencia de HU-47) |
   | `sklearn_distinto_del_manifiesto` | `scikit_learn_version` registrado ≠ `versiones.scikit_learn` del manifiesto (IA-B05 v6) |
   | `sklearn_incompatible_con_el_instalado` | El manifiesto se entrenó con otra versión menor de scikit-learn que la instalada; no cargaría (IA-B05 v6) |
   | `falta_horizonte`, `falta_esquema_features`, `faltan_particiones`, `separacion_menor_que_horizonte` | Falta evidencia de evaluación (HU-46) |
@@ -46,7 +47,9 @@ reversión»); los casos IA-xxx citados son los de ese plan.
   versión activa y la hora del cambio: si llegan a la vez se aplican uno detrás del otro. Así la
   base, la cadena de eventos y la consulta de HU-47 esc. 2 dicen lo mismo. Ejemplo: activar Y y
   desactivar X a la vez termina en 200/200 si se desactivó primero, o en 200/409 si Y ya había
-  reemplazado a X.
+  reemplazado a X. Registrar con `"activar": true` toma ese candado antes de registrar (antes de
+  escribir en la cadena `SISTEMA`), en el mismo orden que `/activar` y `/desactivar`; así no hay
+  interbloqueo con un `/desactivar` simultáneo.
 - En modo activo, el modelo preventivo **solo carga** si `IA_PREVENTIVO_VERSION` e
   `IA_PREVENTIVO_SHA256` son los de la versión activa del registro. La comprobación se hace al
   arrancar, después de cada activación y después de cada desactivación, siempre antes de
@@ -71,8 +74,12 @@ reversión»); los casos IA-xxx citados son los de ese plan.
   HU-46 esc. 3: un artefacto rechazado del modelo que decide (modo activo) se registra como error
   CRITICAL en el log y, al arrancar, como `MODELO_RECHAZADO` encadenado en la bitácora. En
   `IA_PREVENTIVO_MODO=sombra` el modelo no decide nada y el mismo rechazo es un WARNING (también
-  queda `MODELO_RECHAZADO`). Con el legado vale lo mismo: CRITICAL al arrancar solo con
-  `IA_LEGADO_MODO=activo`.
+  queda `MODELO_RECHAZADO`). El legado es distinto: todo rechazo de su artefacto
+  (`checksum_invalido`, `hash_distinto_de_la_version_activa`, `sin_verificacion_de_integridad`,
+  `incompatible`, `error_de_lectura`) es CRITICAL en cualquier modo en que se carga, también con
+  `IA_LEGADO_MODO=experimental`, porque su clase sigue quedando como evidencia de cada lectura. El
+  servicio lo registra al cargarlo y el arranque, al auditarlo, con el mismo nivel. Con
+  `IA_LEGADO_MODO=desactivado` no se carga ni se audita.
 - Cada activación encadena `MODELO_IA_VERSION_ACTIVADA` (versión anterior, nueva, usuario, hora,
   `modelo` y `model_hash`) y cada desactivación `MODELO_IA_VERSION_DESACTIVADA`. HU-47 esc. 2 cruza
   cada inferencia con esa historia: una lectura clasificada después de una desactivación no se
@@ -180,8 +187,8 @@ curl -sS -X POST "$API/api/ia/modelo/versiones" -H "Authorization: Bearer $TOKEN
 }'
 ```
 
-Los valores salen del manifiesto, no del entorno de ejecución: `/activar` rechaza un `horizonte_min`
-o un `scikit_learn_version` distintos de los del manifiesto. Las métricas son las de
+Los valores salen del manifiesto, no del entorno de ejecución: `/activar` rechaza un `horizonte_min`,
+un `scikit_learn_version` o un `feature_schema_version` distintos de los del manifiesto. Las métricas son las de
 `informe_corridas.json` y del Experimento D, revisadas por una segunda persona. Si la versión no
 cumple el criterio principal o `separacion_min < horizonte_min`, la respuesta trae
 `activable=false` y `motivos_bloqueo`.

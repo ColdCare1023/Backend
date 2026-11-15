@@ -9,8 +9,16 @@ identidad del nodo (`devices.conectividad_boot_id`, `estado_nodo_dispositivo`,
 `episodios_buffer_saturado`) ya eran BIGINT.
 
 PostgreSQL: `ALTER COLUMN ... TYPE BIGINT` reescribe la tabla y sus índices
-(incluido el único parcial de la identidad) bajo un bloqueo exclusivo breve; no
-dispara los triggers de solo anexado (0018) ni cambia ningún valor.
+(incluido el único parcial de la identidad) bajo un bloqueo exclusivo; no
+dispara los triggers de solo anexado (0018) ni cambia ningún valor. Las dos
+columnas cambian en UNA sentencia (una sola reescritura: con dos, la tabla se
+reescribía dos veces con el bloqueo tomado de la primera al COMMIT). El
+bloqueo dura en proporción al tamaño de `thermal_readings` (medido: ~9 s con
+1 M de filas) y, mientras dura, la API anterior no inserta ni lee lecturas.
+`lock_timeout` (LOCK_TIMEOUT) acota cuánto se espera para OBTENER el bloqueo:
+si una consulta larga lo retiene, la migración falla sin cambiar nada (el
+*pre-deploy* aborta y la versión anterior sigue en servicio) en vez de dejar
+en cola detrás de ella todas las consultas nuevas de la tabla.
 
 SQLite (desarrollo): una columna INTEGER ya guarda 64 bits; se recrea la tabla
 en modo batch para que el esquema declare BIGINT y se vuelven a crear los
@@ -37,6 +45,8 @@ depends_on: str | Sequence[str] | None = None
 
 COLUMNAS = ("boot_id", "seq_no")
 INT4_MAX = 2_147_483_647
+# PostgreSQL: espera máxima para obtener el bloqueo exclusivo de la tabla.
+LOCK_TIMEOUT = "5s"
 
 # Copia literal de 0018_evidencia_solo_anexado (SQLite): la recreación batch de
 # la tabla elimina sus triggers.
@@ -72,8 +82,12 @@ def _cambiar_tipo(nuevo: sa.types.TypeEngine, anterior: sa.types.TypeEngine) -> 
             op.execute(f"DROP TRIGGER IF EXISTS {nombre}")
             op.execute(f"CREATE TRIGGER {nombre} {evento} BEGIN {_RECHAZO_SQLITE}; END")
         return
-    for columna in COLUMNAS:
-        op.alter_column("thermal_readings", columna, type_=nuevo, existing_type=anterior, existing_nullable=True)
+    tipo = nuevo.compile(dialect=op.get_bind().dialect)
+    cambios = ", ".join(f"ALTER COLUMN {columna} TYPE {tipo}" for columna in COLUMNAS)
+    # SET LOCAL: vale hasta el COMMIT de la transacción de Alembic (env.py).
+    op.execute(f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'")
+    op.execute(f"ALTER TABLE thermal_readings {cambios}")
+    op.execute("SET LOCAL lock_timeout TO DEFAULT")
 
 
 def upgrade() -> None:

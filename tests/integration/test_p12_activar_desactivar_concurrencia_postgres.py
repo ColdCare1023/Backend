@@ -18,12 +18,20 @@ también los corren libres varias veces. Después de cada par se exige que las
 filas, `obtener_version_activa_en(ahora)` y el último evento de la cadena
 (por `chain_seq`) digan lo mismo, que las horas no retrocedan y que el par
 termine 200/200 o 200/409. SQLite en memoria serializa todo y no reproduce
-la carrera."""
+la carrera.
+
+Además, «registrar y activar» (`POST /api/ia/modelo/versiones` con
+`"activar": true`) toma los candados en el mismo orden que /activar y
+/desactivar: primero el del cambio de versión y después el de la cadena
+SISTEMA. Antes tomaba la cadena al registrar y el de versión al activar; con
+un /desactivar simultáneo, PostgreSQL detectaba un interbloqueo y una de las
+dos peticiones terminaba en 500."""
 
 import asyncio
 from datetime import datetime, timezone
 from functools import partial
 
+import httpx
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -37,13 +45,16 @@ from src.application.use_cases.gestionar_modelo_ia import (
 )
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.application.use_cases.verificar_integridad_registro import VerificarIntegridadRegistroUseCase
-from src.domain.entities.usuario import Usuario
+from src.domain.entities.usuario import PRIVACY_POLICY_VERSION, Usuario
 from src.domain.entities.version_modelo_ia import VersionModeloIA
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.database.models import ModeloIAVersionModel, TraceabilityRecordModel
 from src.infrastructure.database.repositories.modelo_ia_repository import SQLAlchemyModeloIARepository
 from src.infrastructure.database.repositories.trazabilidad_repository import SQLAlchemyTrazabilidadRepository
 from src.infrastructure.database.repositories.usuario_repository import SQLAlchemyUsuarioRepository
+from src.infrastructure.security.password_hasher import hash_password
+from src.interface.api import deps, ia_router
+from src.interface.main import create_app
 from tests.postgres import a_asyncpg, base_migrada
 
 X = "rf-p12-carrera-x-1.0.0"
@@ -279,3 +290,109 @@ def test_pares_simultaneos_libres_quedan_coherentes(entorno, version_activar):
             await motor.dispose()
 
     asyncio.run(flujo())
+
+
+# ── Registrar y activar frente a /desactivar, por la API ───────────────────
+
+EMAIL_ADMIN_API = "admin.registrar-activar@farmacia.example.org"
+
+
+def test_registrar_y_activar_con_desactivar_simultaneo_no_se_interbloquea(entorno, monkeypatch):
+    """Intercalado forzado por la API real: registrar Z con `activar=true` se
+    detiene justo antes de activar (ya escribió en la cadena SISTEMA) hasta
+    que /desactivar(X) toma el candado de versión o pasa ESPERA_S. Con el
+    orden de candados invertido eso era un interbloqueo; ahora /desactivar
+    espera a que Z quede activa y responde 409 `version_no_activa`."""
+    dsn, admin_id = entorno
+    version_z = "rf-p12-carrera-z-1.0.0"
+    registro_en_cadena, desactivar_con_candado = asyncio.Event(), asyncio.Event()
+    activacion_original = ia_router._ejecutar_activacion
+
+    async def activacion_que_se_detiene(*args, **kwargs):
+        registro_en_cadena.set()
+        try:
+            await asyncio.wait_for(desactivar_con_candado.wait(), ESPERA_S)
+        except TimeoutError:
+            pass
+        return await activacion_original(*args, **kwargs)
+
+    class _DesactivarQueAvisa(DesactivarVersionModeloUseCase):
+        async def execute(self, version, admin_id, motivo):
+            await self._modelo_repository.bloquear_cambio_de_version()
+            desactivar_con_candado.set()
+            return await super().execute(version, admin_id, motivo)
+
+    monkeypatch.setattr(ia_router, "_ejecutar_activacion", activacion_que_se_detiene)
+    monkeypatch.setattr(ia_router, "DesactivarVersionModeloUseCase", _DesactivarQueAvisa)
+    # El artefacto desplegado no importa aquí, y la versión activa no se
+    # aplica a los servicios del proceso (son globales para toda la suite).
+    monkeypatch.setattr(ia_router.gobierno, "verificador_de_activacion", lambda _settings: lambda _version: [])
+    monkeypatch.setattr(ia_router.gobierno, "aplicar_version_activa", lambda *_args: None)
+
+    async def flujo():
+        motor = create_async_engine(a_asyncpg(dsn), pool_size=6)
+        fabrica = async_sessionmaker(motor, expire_on_commit=False)
+        app = create_app()
+
+        async def get_db_postgres():
+            async with fabrica() as session:
+                yield session
+
+        app.dependency_overrides[deps.get_db] = get_db_postgres
+        app.state.session_factory = fabrica
+        try:
+            await _dejar_x_activa(fabrica, admin_id)
+            async with fabrica() as session:
+                await SQLAlchemyUsuarioRepository(session).agregar(Usuario(
+                    nombre="Admin API", email=EMAIL_ADMIN_API, password_hash=hash_password("password123"),
+                    rol=Rol.ADMINISTRADOR, privacy_accepted=True, privacy_version_accepted=PRIVACY_POLICY_VERSION,
+                ))
+                await session.commit()
+            transporte = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transporte, base_url="http://testserver") as cliente:
+                login = await cliente.post(
+                    "/api/auth/login", data={"username": EMAIL_ADMIN_API, "password": "password123"}
+                )
+                assert login.status_code == 200, login.text
+                cabecera = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+                async def registrar_y_activar() -> str:
+                    try:
+                        respuesta = await cliente.post("/api/ia/modelo/versiones", headers=cabecera, json={
+                            "version": version_z, "model_hash": "c" * 64,
+                            "feature_schema_version": "termico_minimo", "dataset_version": "corridas-2026-11",
+                            "scikit_learn_version": "1.9.0", "python_version": "3.12.13",
+                            "trained_at": "2026-11-01T00:00:00Z", "horizonte_min": 30,
+                            "metricas": METRICAS, "particiones": PARTICIONES, "activar": True,
+                        })
+                    except Exception as exc:  # el interbloqueo llega como excepción de la app
+                        registro_en_cadena.set()
+                        return f"{type(exc).__name__}: {exc}"
+                    return str(respuesta.status_code)
+
+                async def desactivar_x() -> str:
+                    await registro_en_cadena.wait()
+                    try:
+                        respuesta = await cliente.post(
+                            f"/api/ia/modelo/versiones/{X}/desactivar", headers=cabecera, json={"motivo": MOTIVO}
+                        )
+                    except Exception as exc:
+                        return f"{type(exc).__name__}: {exc}"
+                    return f"{respuesta.status_code} {respuesta.json().get('detail')}"
+
+                resultados = await asyncio.wait_for(asyncio.gather(registrar_y_activar(), desactivar_x()), 60)
+            return resultados, await _estado(fabrica)
+        finally:
+            await motor.dispose()
+
+    (registrar, desactivar), estado = asyncio.run(flujo())
+
+    assert registrar == "201"
+    # /desactivar esperó el candado: cuando lo obtuvo, X ya no era la activa.
+    assert desactivar == "409 version_no_activa"
+    activas = [v for v, fila in estado["filas"].items() if fila["activa"]]
+    assert activas == [version_z]
+    assert estado["vigente"] == version_z
+    tipo, payload, _ = estado["eventos"][-1]
+    assert (tipo, payload["version_nueva"], payload["version_anterior"]) == (EVENTO_VERSION_ACTIVADA, version_z, X)
+    assert estado["integra"] is True

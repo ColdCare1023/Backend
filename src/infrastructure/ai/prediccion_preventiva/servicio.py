@@ -108,6 +108,7 @@ ACTIVACION_MANIFIESTO_ILEGIBLE = "manifiesto_ilegible"
 ACTIVACION_MANIFIESTO_NO_APROBADO = "manifiesto_no_aprobado"
 ACTIVACION_MANIFIESTO_DISTINTO_DEL_HISTORIAL = "manifiesto_distinto_del_historial"
 ACTIVACION_HORIZONTE_DISTINTO = "horizonte_distinto_del_manifiesto"
+ACTIVACION_ESQUEMA_DISTINTO = "esquema_features_distinto_del_manifiesto"
 ACTIVACION_SKLEARN_DISTINTO_DEL_MANIFIESTO = "sklearn_distinto_del_manifiesto"
 ACTIVACION_SKLEARN_INCOMPATIBLE = "sklearn_incompatible_con_el_instalado"
 
@@ -207,16 +208,20 @@ class ServicioPrediccionPreventiva:
         model_hash: str,
         horizonte_min: int | None = None,
         scikit_learn_version: str | None = None,
+        feature_schema_version: str | None = None,
     ) -> list[MotivoBloqueo]:
         """HU-16 esc. 4 / HU-46: qué impide activar `version` como la que
         clasifica con IA_PREVENTIVO_MODO=activo. Se valida el artefacto que
         realmente se cargará (el de IA_PREVENTIVO_VERSION), no el legado.
 
-        `horizonte_min` y `scikit_learn_version` son los que el admin registró
-        en la base (IA-B05 v6): deben ser los del manifiesto desplegado, que
-        es lo que de verdad se carga, y la versión de scikit-learn debe poder
-        cargarse con la instalada (misma regla que la carga). None = no se
-        compara (llamadas que solo validan el artefacto)."""
+        `horizonte_min`, `scikit_learn_version` y `feature_schema_version` son
+        los que el admin registró en la base (IA-B05 v6): deben ser los del
+        manifiesto desplegado (`configuracion.horizonte_min`,
+        `versiones.scikit_learn` y `conjunto_features`), que es lo que de
+        verdad se carga y lo que muestra la evidencia de HU-47 / HU-18 esc. 4,
+        y la versión de scikit-learn debe poder cargarse con la instalada
+        (misma regla que la carga). None = no se compara (llamadas que solo
+        validan el artefacto)."""
         motivos: list[MotivoBloqueo] = []
         if self._version is None:
             motivos.append(MotivoBloqueo(ACTIVACION_VERSION_NO_CONFIGURADA, "IA_PREVENTIVO_VERSION no está configurada"))
@@ -263,6 +268,15 @@ class ServicioPrediccionPreventiva:
                 ACTIVACION_HORIZONTE_DISTINTO,
                 f"el horizonte registrado ({horizonte_min} min) no es el del manifiesto desplegado "
                 f"({horizonte_manifiesto} min)",
+            ))
+        # El esquema de features de la evidencia es el que digitó el admin: debe
+        # ser el conjunto con el que se construyen las features del modelo.
+        esquema_manifiesto = manifiesto.get("conjunto_features")
+        if feature_schema_version is not None and feature_schema_version != esquema_manifiesto:
+            motivos.append(MotivoBloqueo(
+                ACTIVACION_ESQUEMA_DISTINTO,
+                f"el esquema de features registrado ({feature_schema_version}) no es el del manifiesto "
+                f"({esquema_manifiesto})",
             ))
         sklearn_manifiesto = (manifiesto.get("versiones") or {}).get("scikit_learn")
         if scikit_learn_version is not None and scikit_learn_version != sklearn_manifiesto:

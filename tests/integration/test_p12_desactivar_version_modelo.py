@@ -485,6 +485,32 @@ async def test_b05_v6_horizonte_distinto_es_409_con_su_codigo(client, token_admi
     assert await _eventos(db_session_factory, "MODELO_IA_VERSION_ACTIVADA") == []
 
 
+async def test_b05_v6_esquema_de_features_distinto_es_409_con_su_codigo(
+    client, token_admin, entorno, db_session_factory
+):
+    """La evidencia de HU-47 / HU-18 esc. 4 muestra el `feature_schema_version`
+    que digitó el admin: debe ser el `conjunto_features` del manifiesto que se
+    carga, como H y scikit-learn. Antes /activar respondía 200 con cualquiera."""
+    _, sha, _ = entorno
+    client.post(
+        "/api/ia/modelo/versiones", json=_cuerpo_version(VERSION, sha, feature_schema_version="esquema_inventado"),
+        headers=auth_header(token_admin),
+    )
+
+    respuesta = client.post(f"/api/ia/modelo/versiones/{VERSION}/activar", headers=auth_header(token_admin))
+
+    assert respuesta.status_code == 409
+    assert respuesta.json()["codigos"] == ["esquema_features_distinto_del_manifiesto"]
+    assert (
+        "el esquema de features registrado (esquema_inventado) no es el del manifiesto (termico_minimo)"
+        in respuesta.json()["detail"]
+    )
+    assert _activa(client, token_admin) is None
+    (fila,) = await _auditoria(db_session_factory, "ACTIVAR_VERSION_MODELO_IA_RECHAZADO")
+    assert fila.detalle["codigos"] == ["esquema_features_distinto_del_manifiesto"]
+    assert await _eventos(db_session_factory, "MODELO_IA_VERSION_ACTIVADA") == []
+
+
 def test_b05_v6_sklearn_registrado_distinto_es_409_con_su_codigo(client, token_admin, entorno):
     _, sha, _ = entorno
     client.post(

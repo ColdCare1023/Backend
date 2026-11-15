@@ -7,15 +7,26 @@ truncar valores fuera de INTEGER).
 
 ## Orden
 
-1. **Frontend antes o junto con el backend.** El backend r2 responde 403 al
-   técnico en `POST /api/alertas/{id}/acciones-correctivas` (H16: la acción la
-   registra el QF). El frontend de `main` anterior todavía le muestra el botón
-   «Registrar acción»; el frontend r2 ya no. Si se despliega solo el backend, el
-   técnico ve el botón y recibe el error 403.
-2. **Backend.** El *pre-deploy* `alembic upgrade head` aplica 0042 (el `ALTER
-   TYPE` bloquea `thermal_readings` unos segundos). Después, en
-   `/health/detalle`: `alembic_revision == alembic_head` (si no, el *pre-deploy*
-   no corrió), `db: ok`, `mqtt.conectado: true`.
+1. **Frontend y backend juntos** (el mismo día, uno detrás del otro y sin
+   usar la aplicación entre medio). Ningún orden por separado está libre de
+   cortes:
+   - solo el backend nuevo: el técnico todavía ve «Registrar acción» y recibe
+     403 en `POST /api/alertas/{id}/acciones-correctivas` (H16: la registra el
+     QF); y el formulario de instalación del frontend anterior omite los campos
+     vaciados (`|| undefined`), así que con la semántica PATCH de HU-51 vaciar
+     «ubicación», «fecha» u «observaciones» responde 200 y conserva el valor
+     anterior. El frontend r2 envía `null`;
+   - solo el frontend nuevo: `/desactivar` responde 404 (se lee como «versión
+     no registrada») y registrar con `"activar": true` responde 422.
+2. **Backend.** El *pre-deploy* `alembic upgrade head` aplica 0042: una sola
+   reescritura de `thermal_readings` (las dos columnas en un `ALTER TABLE`)
+   bajo un bloqueo exclusivo que dura en proporción al tamaño de la tabla
+   (~9 s con 1 M de filas en las pruebas); mientras tanto la API anterior no
+   inserta ni lee lecturas (el nodo reintenta: no se pierden). Si una consulta
+   larga retiene la tabla, la migración falla a los 5 s (`lock_timeout`) sin
+   cambiar nada y el despliegue se aborta: repetirlo cuando termine. Después,
+   en `/health/detalle`: `alembic_revision == alembic_head` (si no, el
+   *pre-deploy* no corrió), `db: ok`, `mqtt.conectado: true`.
 3. **Firmware v1.2.1 después del backend.** El nodo publica
    `desconexion_ordenada` antes de un DISCONNECT voluntario (HU-13 esc. 2). El
    backend r2 lo acepta y lo audita como `DESCONEXION_ORDENADA`; un backend
@@ -46,18 +57,29 @@ Sin migraciones; la API solo agrega rutas y campos.
   la línea base (P-12); el botón está en el frontend r2b (Versiones del modelo).
 - El 409 de `/activar` y el de registrar con `"activar": true` traen
   `{"detail": "...", "codigos": [...]}`. Códigos nuevos de IA-B05 v6 y v7:
-  `horizonte_distinto_del_manifiesto`, `sklearn_distinto_del_manifiesto`,
-  `sklearn_incompatible_con_el_instalado`, `manifiesto_distinto_del_historial`.
+  `horizonte_distinto_del_manifiesto`, `esquema_features_distinto_del_manifiesto`,
+  `sklearn_distinto_del_manifiesto`, `sklearn_incompatible_con_el_instalado`,
+  `manifiesto_distinto_del_historial`. Para el preventivo, `feature_schema_version`
+  se registra con el `conjunto_features` del manifiesto (paso 6 de
+  `IA_PREVENTIVA_ACTIVACION.md`); otro valor ya no se activa.
 - IA-D18: cuando el modelo no da clase, una lectura válida en 2-8 °C es normal
   para las alertas, y una alerta ATENDIDA solo absorbe la excursión que continúa
   la anterior; si no, se cierra (`sin_continuidad_tras_atencion`) y se abre una
   PENDIENTE nueva con su aviso.
+- Alertas: una lectura capturada antes que la última del episodio abierto
+  (carga manual retroactiva, buffer fuera de orden) queda como evidencia: no lo
+  cierra por recuperación, no cuenta para la normalización ni lo baja de nivel.
+  Antes, una carga manual en rango con hora pasada cerraba la alerta de un
+  equipo todavía fuera de rango y la lectura siguiente abría otra con otro
+  correo.
 - SSE: cuando la lectura deja abierto un episodio distinto del que estaba
   abierto (PENDIENTE nueva tras cerrar una ATENDIDA, escalamiento o cambio de
   nivel), el evento es `alerta` (antes `episodio_actualizado`). La ingesta HTTP
   usa el mismo criterio y también avisa cuando el modelo no clasificó.
-- Log: el rechazo del artefacto del modelo en modo activo es CRITICAL; sin
-  versión activa (tras `/desactivar`), en sombra o experimental es WARNING.
+- Log: el rechazo del artefacto del modelo preventivo en modo activo es
+  CRITICAL; sin versión activa (tras `/desactivar`) o en sombra es WARNING. El
+  rechazo del artefacto legado es CRITICAL en cualquier modo en que se carga
+  (también `experimental`), en el servicio y en la auditoría del arranque.
 
 ## Comprobaciones que quedan pendientes (físicas u operativas)
 

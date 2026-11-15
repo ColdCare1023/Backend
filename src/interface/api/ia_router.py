@@ -245,6 +245,13 @@ async def registrar_version_modelo(
     use_case = RegistrarVersionModeloUseCase(
         repositorio, RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session))
     )
+    if body.activar:
+        # Mismo orden de candados que /activar y /desactivar: primero el del
+        # cambio de versión y después el de la cadena SISTEMA, que el registro
+        # toma ya. Al revés, un /desactivar simultáneo era un interbloqueo en
+        # PostgreSQL (500 para uno de los dos). El candado es reentrante: la
+        # activación de más abajo lo vuelve a pedir sin esperar.
+        await repositorio.bloquear_cambio_de_version()
     try:
         registrada = await use_case.execute(
             version=body.version,
