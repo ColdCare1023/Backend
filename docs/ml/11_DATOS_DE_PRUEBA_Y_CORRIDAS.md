@@ -259,9 +259,11 @@ C03,ESP32_BANCO_01,2026-11-21T09:00:00Z,2026-11-21T09:10:00Z,S-B,excluida,4.9,19
   la hora de Lima con UTC. La ventana es [inicio, fin) y se compara con la hora de captura
   (`COALESCE`).
 - Dos corridas del mismo dispositivo no pueden solaparse. Una lectura nunca cae en dos corridas.
-- `uso` es opcional: `entrenamiento`, `prueba` o `excluida`. Una corrida `excluida` no se exporta;
-  S-B, por ejemplo, prueba solo la regla y queda fuera del dataset. El resumen trae `prueba`, la lista
-  lista para `corridas --prueba`.
+- `uso` es opcional: `entrenamiento`, `validacion`, `prueba` o `excluida`. Una corrida `excluida` no se
+  exporta; S-B, por ejemplo, prueba solo la regla y queda fuera del dataset. El resumen trae `prueba` y
+  `validacion`, las listas para `corridas --prueba` y `corridas --validacion`. Las corridas de
+  validación solo eligen el umbral y no ajustan el modelo (P-3, `09_REPRODUCIBILITY.md`); sin ellas, el
+  umbral se elige dejando una corrida fuera.
 - `tipo`, `temperatura_inicial`, `mqtt_host`, `responsable` y `observaciones` pasan al resumen tal
   cual, para cruzarlos en A03 (todas las corridas en el broker local).
 
@@ -271,9 +273,12 @@ C03,ESP32_BANCO_01,2026-11-21T09:00:00Z,2026-11-21T09:10:00Z,S-B,excluida,4.9,19
 export DATABASE_URL=postgresql+asyncpg://...     # base del stack local; no se imprime
 python -m scripts.exportar_corridas --manifiesto evidencias/hojas_corrida.csv \
     --salida corridas.csv --resumen corridas_resumen.json
-# --prueba: el valor `prueba` de corridas_resumen.json (p. ej. C02,C05)
+# --prueba y --validacion: los valores `prueba` y `validacion` de corridas_resumen.json (p. ej. C02,C05 y C04)
 python -m src.infrastructure.ai.prediccion_preventiva corridas --csv corridas.csv \
-    --prueba C02,C05 --salida corridas.json
+    --prueba C02,C05 --validacion C04 --salida corridas.json
+# P-2: el mismo entrenamiento, registrado en models/preventivo/<V>/ (ver IA_PREVENTIVA_ACTIVACION.md, paso 3)
+python -m src.infrastructure.ai.prediccion_preventiva corridas --csv corridas.csv \
+    --prueba C02,C05 --validacion C04 --registrar --version rf-corridas-h30-termico-1.0.0 --salida corridas.json
 ```
 
 El resumen da, por corrida, `filas`, `ds18b20_sensor_fault`, `unsynced`, `simuladas_omitidas`, la
