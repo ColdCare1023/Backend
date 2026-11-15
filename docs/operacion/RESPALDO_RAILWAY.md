@@ -253,7 +253,14 @@ genera un respaldo local con el mismo código. Después se siguen los pasos 2 a 
   retención de Railway, el fallo provocado con la base accesible y la rama de despliegue con el
   corte del 2026-12-01.
 
+## Estado en producción (15/11/2026)
+
+Hecho: servicio cron `respaldo-postgres` con su volumen, simulacro de restauración y fallo
+provocado. Los backups nativos no están disponibles en el plan Trial. La evidencia está en
+`docs/evidencias/HU-29/2026-11-15_cron_simulacro_y_fallo.md`.
+
 ## Pendiente (no se puede hacer desde el código)
 
-- Crear el servicio cron y el volumen, y activar los backups nativos en Railway (pasos 1 y 2).
-- Hacer el simulacro y provocar el fallo, y archivar sus evidencias (pasos 2.3 y 3).
+- Confirmar la primera ejecución programada (16/11/2026, 02:00 en Lima).
+- Copiar a `docs/evidencias/HU-29/` el `.restauracion.json` y el manifiesto originales del volumen.
+- Activar los backups nativos si se pasa a un plan que los incluya (paso 1).
