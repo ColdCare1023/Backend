@@ -358,6 +358,33 @@ async def test_episodio_del_buffer_que_acaba_de_llegar_se_recupera_al_arrancar(e
 
 
 @pytest.mark.asyncio
+async def test_episodio_largo_con_lecturas_vivas_se_recupera_al_arrancar(entorno):
+    """Escenario del incidente: el correo estuvo apagado 8 h 35 min, el
+    episodio sigue abierto desde entonces (created_at fuera de la ventana) y
+    siguen llegando lecturas en vivo. Solo `ultima_actualizacion` reciente lo
+    mete en el barrido; si el filtro se reduce a created_at, el aviso se pierde."""
+    sin_correo = _despachador(entorno, None, email_enabled=False)
+    await main._procesar_lectura_mqtt(_lectura(12.0, minutos_atras=515), _BroadcasterMudo(), None, sin_correo)
+    assert await _procesar_cola(sin_correo) == ["deshabilitado"]
+    ahora = datetime.now(tz=timezone.utc)
+    await _fijar_created_at(entorno, ahora - timedelta(hours=8, minutes=35))
+    # El episodio sigue recibiendo lecturas en vivo (sin despachador: no reavisa).
+    await main._procesar_lectura_mqtt(_lectura(12.5, minutos_atras=0), _BroadcasterMudo(), None, None)
+
+    alerta = await _alerta(entorno)
+    assert alerta.episodio_abierto == 1 and alerta.notificada_en is None
+    assert alerta.created_at.replace(tzinfo=timezone.utc) < ahora - timedelta(hours=8)
+    assert alerta.ultima_actualizacion.replace(tzinfo=timezone.utc) > ahora - timedelta(minutes=5)
+
+    transporte = _TransporteEspia()
+    habilitado = _despachador(entorno, transporte)
+    assert await habilitado.recuperar_pendientes() == 1
+    assert await _procesar_cola(habilitado) == ["enviado"]
+    assert len(transporte.enviados) == 1
+    assert (await _alerta(entorno)).notificada_en is not None
+
+
+@pytest.mark.asyncio
 async def test_episodio_que_llego_y_se_capturo_hace_horas_no_se_recupera(entorno):
     """La ventana se respeta: un episodio que llegó hace 3 h y cuya última
     lectura también es de hace 3 h ya no es un aviso útil al arrancar."""
