@@ -71,5 +71,6 @@ demo) **no se predicen**. El historial se lee con `listar_recientes_por_device(l
   solo artefactos propios con hash verificado.
 - Rollback: cambiar `IA_PREVENTIVO_VERSION` y `IA_PREVENTIVO_SHA256` a una versión anterior (el
   registro nunca sobrescribe). Poner `IA_PREVENTIVO_MODO=desactivado` vuelve al flujo legado.
-- Rendimiento: una inferencia = remuestrear ≤ 120 lecturas + `predict_proba` de una fila con
-  `n_jobs=1`. El modelo se carga una sola vez por proceso.
+- Rendimiento: una inferencia = limpiar y remuestrear las lecturas de los 1170 s anteriores a t
+  (`features.alcance_historial_s`; ~117 a 10 s, ~234 a 5 s, con un tope defensivo de 468 filas) +
+  `predict_proba` de una fila con `n_jobs=1`. El modelo se carga una sola vez por proceso.

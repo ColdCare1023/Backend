@@ -82,8 +82,17 @@ envoltorio `features_en_instante()`) hace lo mismo con el historial crudo:
 
 - la misma rejilla y la misma media causal (`calidad.remuestrear`), anclada en el instante de la
   lectura, con la puerta y el SHT31 como canales extra;
+- el mismo historial, a cualquier intervalo de captura admitido (5–3600 s, HU-54): el caso de uso pide
+  al repositorio las lecturas capturadas en [t − alcance, t), con alcance =
+  `features.alcance_historial_s` de la configuración del manifiesto cargado: 15 min de ventana +
+  180 s de segmentación + 90 s de agregación = 1170 s. Una lectura más antigua no cambia el vector.
+  El tope de filas (468, el doble de las que caben en 1170 s a 5 s) es solo una defensa ante un nodo
+  que reporte más rápido de lo admitido;
 - las mismas filas: telemetría del nodo con hora sincronizada. Una lectura con el DS18B20 en falla no
   aporta temperatura, pero su puerta y su SHT31 cuentan, como en la exportación de corridas;
+- la misma limpieza (`calidad.limpiar`), con las filas en el orden de la exportación (hora,
+  `boot_id`, `seq_no`): un duplicado exacto (misma hora y misma temperatura interna) cuenta una vez y
+  una hora con temperaturas distintas se descarta entera;
 - la misma segmentación (`calidad.segmentar`), aplicada a una rejilla que empieza `hueco_max_s` antes
   de la ventana. Si la ventana toca un corte (más de 180 s sin temperatura interna), sus puntos
   anteriores no cuentan, igual que el relleno NaN del entrenamiento. Sin esto, la puerta o el SHT31
@@ -102,6 +111,24 @@ Pruebas:
 - `tests/unit/test_hu17_contexto_sht31_servicio.py::test_paridad_del_servicio_con_el_entrenamiento`
   hace lo mismo de punta a punta: `predecir` con el historial de `LecturaTermica` que le pasa la
   ingesta contra `calidad.preparar_rejillas` + `features_de_rejillas`.
+- `tests/unit/test_hu17_historial_por_alcance.py` lo hace desde el caso de uso, con el historial que
+  devuelve el repositorio, a 5 y 9 s y en los tres conjuntos (fallas del DS18B20, huecos y caídas del
+  SHT31 y de la puerta), más el caso dirigido de 9 s con una falla corta del DS18B20 y los duplicados
+  exactos y en conflicto. `tests/integration/test_hu17_historial_por_alcance_bd.py` repite el caso de
+  5 s contra la base (filtro `desde` de `listar_recientes_por_device`).
+
+**Excepciones conocidas.** La paridad no cubre (a) una lectura cuya propia hora repite la de otra:
+el historial es estrictamente anterior a t, así que el servicio no ve a su gemela, y el
+entrenamiento descarta ambas si sus temperaturas difieren; ni (b) más de 468 lecturas en el alcance
+(un nodo por debajo del intervalo mínimo de 5 s). Las lecturas v1 son únicas por
+(`device_id`, `boot_id`, `seq_no`), así que (a) requiere dos lecturas sincronizadas con la misma hora.
+
+[Corrección, ronda 3, verificación] La primera versión de esta sección afirmaba la paridad sin
+condición sobre el intervalo de captura. El caso de uso pedía las 120 lecturas anteriores a t, que solo
+cubren los 1170 s necesarios con un intervalo de ~9,75 s o más: a 9 s, una falla corta del DS18B20 que
+el entrenamiento no corta hacía cortar la ventana al servicio (`frac_puerta_15m` 0,027 frente a 0,0875)
+y a 5 s la ventana de 15 min no se completaba nunca. Además, el servicio promediaba dos lecturas de la
+misma hora con temperaturas distintas, que el entrenamiento descarta.
 
 [Corrección, ronda 3] Hasta la ronda 2 esta sección presentaba la paridad como general (también
 para `termico_puerta`), pero la prueba solo cubría `termico_minimo`. Además, el servicio no recibía

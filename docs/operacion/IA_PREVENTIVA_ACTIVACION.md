@@ -114,7 +114,8 @@ Se exportan las lecturas del nodo de banco a CSV con el exportador de corridas (
 columnas: `device_id`, `timestamp` (o `timestamp_estimado` si falta), `temperatura_interna`,
 `apertura_refrigerador`, `time_quality`, `ds18b20_status` o `sensor_fault` y `corrida_id`. Solo
 lecturas del dispositivo (no manuales ni simuladas). `importar_coldcare_csv` descarta y cuenta las
-lecturas `unsynced` y las de `SENSOR_FAULT`.
+`unsynced`; en las de `SENSOR_FAULT` anula la temperatura interna (hueco) y conserva su puerta y su
+SHT31, y las cuenta.
 
 ### 2. Etiquetar, entrenar y evaluar con las corridas (offline, `requirements-ml.txt`)
 
