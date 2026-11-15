@@ -16,9 +16,10 @@ Flujo (D2 de la especificación):
                                                    ▼
                                       worker (una tarea, lifespan)
         1. alerta ya notificada (notificada_en)          → se descarta
-        2. destinatario: responsable del dispositivo, o el de respaldo
-        3. transporte.enviar()
-        4. éxito → notificada_en + NOTIFICACION_ENVIADA
+        2. sin transporte de correo → NOTIFICACION_NO_ENVIADA (sigue pendiente)
+        3. destinatario: responsable del dispositivo, o el de respaldo
+        4. transporte.enviar()
+        5. éxito → notificada_en + NOTIFICACION_ENVIADA
            fallo → intentos + NOTIFICACION_FALLIDA, y reintento con espera
 
 Garantías:
@@ -74,7 +75,16 @@ ESPERAS_REINTENTO_SEGUNDOS: tuple[float, ...] = (30, 120, 300)
 CAPACIDAD_COLA = 200
 # Al arrancar se recuperan avisos de episodios críticos abiertos que la cola en
 # memoria perdió con el reinicio; más antiguos que esto ya no son un aviso útil.
+# La antigüedad se mide por la LLEGADA del episodio (created_at), no solo por la
+# hora de captura de su lectura: una lectura del buffer del nodo llega con una
+# hora de captura de hace horas (incidente del 14/11/2026, alerta 90582b72).
 VENTANA_RECUPERACION = timedelta(hours=1)
+# HU-53: el aviso no salió porque el proceso no tiene transporte de correo
+# (EMAIL_ENABLED/SMTP_ENABLED apagados). Antes devolvía "deshabilitado" sin
+# dejar rastro: un episodio crítico pasó 8 h 35 min sin aviso y sin ninguna
+# fila NOTIFICACION_* que lo delatara.
+ACCION_NO_ENVIADA = "NOTIFICACION_NO_ENVIADA"
+MOTIVO_TRANSPORTE_DESHABILITADO = "transporte_deshabilitado"
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,6 +234,7 @@ class DespachadorNotificaciones:
                 await self._avisar_por_canales_opcionales(aviso, dispositivo, auditoria)
 
             if self._transporte is None:
+                await self._registrar_no_enviado(auditoria, aviso)
                 await session.commit()
                 return ResultadoEnvio("deshabilitado")
 
@@ -308,6 +319,7 @@ class DespachadorNotificaciones:
                 await self._avisar_sin_datos_por_canales_opcionales(aviso, dispositivo, auditoria)
 
             if self._transporte is None:
+                await self._registrar_no_enviado(auditoria, aviso)
                 await session.commit()
                 return ResultadoEnvio("deshabilitado")
 
@@ -356,6 +368,29 @@ class DespachadorNotificaciones:
             await session.commit()
             logger.info("Aviso SIN_DATOS enviado para %s (incidente %s)", aviso.device_id, aviso.incidente_id)
             return ResultadoEnvio("enviado", incidente.notificacion_intentos + 1)
+
+    async def _registrar_no_enviado(
+        self, auditoria: AuditarAccionCriticaUseCase, aviso: AvisoExcursion | AvisoSinDatos
+    ) -> None:
+        """HU-53 / HU-54: sin transporte el aviso no sale, pero queda en la
+        bitácora y en el log. No se marca como notificado ni consume intentos:
+        el barrido del próximo arranque con el correo habilitado lo recupera
+        (si sigue dentro de VENTANA_RECUPERACION).
+
+        Se audita en todos los entornos: en `test` el despachador no arranca
+        (lifespan) y en desarrollo una fila por aviso es el rastro honesto de
+        que el correo está apagado, no ruido."""
+        await self._auditar(auditoria, ACCION_NO_ENVIADA, aviso, {"motivo": MOTIVO_TRANSPORTE_DESHABILITADO})
+        if isinstance(aviso, AvisoSinDatos):
+            referencia = f"incidente {aviso.incidente_id}"
+        else:
+            referencia = f"alerta {aviso.alerta_id}"
+        logger.warning(
+            "Aviso de %s (%s) NO enviado: no hay transporte de correo (EMAIL_ENABLED/SMTP_ENABLED). "
+            "Queda pendiente y se recupera al arrancar con el correo habilitado.",
+            aviso.device_id,
+            referencia,
+        )
 
     async def _auditar(
         self,

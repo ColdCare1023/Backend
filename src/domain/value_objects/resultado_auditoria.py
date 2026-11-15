@@ -47,6 +47,9 @@ ACCIONES_POR_RESULTADO: dict[ResultadoAuditoria, frozenset[str]] = {
             "BROKER_OPERACION_FALLIDA",
             # HU-52 esc. 2: el proveedor de correo no aceptó el aviso.
             "NOTIFICACION_FALLIDA",
+            # HU-53: el aviso no salió porque no había transporte de correo.
+            # Acción nueva: no hay filas anteriores con otro resultado.
+            "NOTIFICACION_NO_ENVIADA",
             # HU-29 esc. 3: la tarea programada de respaldo falló.
             "RESPALDO_FALLIDO",
         }

@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.entities.alerta_termica import AlertaTermica
@@ -183,7 +183,13 @@ class SQLAlchemyAlertaRepository(IAlertaRepository):
         self, desde: datetime, max_intentos: int
     ) -> list[AlertaTermica]:
         """Episodios críticos abiertos, recientes y aún sin aviso: lo que pudo
-        quedar en la cola en memoria al reiniciarse el backend."""
+        quedar en la cola en memoria al reiniciarse el backend.
+
+        HU-53: "reciente" es que el episodio LLEGÓ hace poco (created_at, hora
+        del servidor) o que su última lectura es reciente. `ultima_actualizacion`
+        es la hora de CAPTURA: un episodio abierto por una lectura del buffer
+        del nodo (capturada hace horas, recibida ahora) quedaba fuera del
+        barrido aunque acabara de llegar (incidente del 14/11/2026)."""
         stmt = (
             select(ThermalAlertModel)
             .where(
@@ -191,7 +197,10 @@ class SQLAlchemyAlertaRepository(IAlertaRepository):
                 ThermalAlertModel.episodio_abierto == 1,
                 ThermalAlertModel.notificada_en.is_(None),
                 ThermalAlertModel.notificacion_intentos < max_intentos,
-                ThermalAlertModel.ultima_actualizacion >= desde,
+                or_(
+                    ThermalAlertModel.created_at >= desde,
+                    ThermalAlertModel.ultima_actualizacion >= desde,
+                ),
             )
             .order_by(ThermalAlertModel.created_at.asc())
         )
