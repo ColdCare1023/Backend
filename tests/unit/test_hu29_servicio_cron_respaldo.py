@@ -215,6 +215,37 @@ def test_el_fallo_provocado_de_la_guia_llega_al_log_del_backend():
     assert not re.search(r"^1\. .*contraseña errónea", escenario, flags=re.MULTILINE)
 
 
+def test_la_guia_del_cron_sigue_la_rama_de_despliegue_hasta_el_corte_de_config_as_code():
+    """Railway ya no deja elegir /railway.respaldo.json en un servicio nuevo y
+    sí lee el railway.json de la raíz, que es el de la API: el 15/11/2026 el
+    cron construyó la API. El cron sigue la rama deploy/respaldo-postgres
+    hasta el 2026-12-01, cuando Railway deja de leer config as code; antes de
+    esa fecha el Backend tiene que tener en su panel lo que hoy le da
+    railway.json."""
+    guia = (RAIZ / "docs/operacion/RESPALDO_RAILWAY.md").read_text(encoding="utf-8")
+    pasos = _seccion(guia, "## 2. Servicio cron `respaldo-postgres`")
+    assert "`deploy/respaldo-postgres`" in pasos
+    assert "Railway config file** ya no sirve" in pasos
+    assert "`18` en producción" in pasos
+    assert "`env HOME=/tmp`" in pasos
+    rama = _seccion(guia, "### Rama de despliegue y fin de config as code")
+    assert "2026-12-01" in rama
+    assert "git merge --no-edit origin/main" in rama
+    for ruta in ("scripts/respaldo_postgres.py", "src/infrastructure/respaldo/", "Dockerfile.respaldo"):
+        assert f"`{ruta}`" in rama, ruta
+    # La tabla de migración del Backend lleva los valores reales de railway.json.
+    api = json.loads((RAIZ / "railway.json").read_text(encoding="utf-8"))
+    for valor in (
+        api["build"]["dockerfilePath"],
+        api["deploy"]["startCommand"],
+        *api["deploy"]["preDeployCommand"],
+        api["deploy"]["healthcheckPath"],
+    ):
+        assert f"`{valor}`" in rama, valor
+    assert f"{api['deploy']['healthcheckTimeout']} s" in rama
+    assert f"{api['deploy']['restartPolicyMaxRetries']} reintentos" in rama
+
+
 def test_el_criterio_de_aceptacion_de_hu29_pide_el_fallo_que_llega_al_backend():
     """El criterio verificable de HU-29 pedía provocar el Escenario 3 con una
     contraseña errónea y capturar solo el log del cron. Con la base

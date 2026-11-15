@@ -43,9 +43,10 @@ también `RESPALDO_MAX_ANTIGUEDAD_HORAS=26` en el servicio de la API: si en 26 h
 alertar mientras el cron aún no existe.
 
 La imagen del cron es `Dockerfile.respaldo` y no la de la API. Lleva Python 3.12, el lockfile y
-`postgresql-client-${PG_MAJOR}` del repositorio oficial apt.postgresql.org (17 por defecto). El
-respaldo corre como el usuario `app` (uid 10001). El arranque solo usa root para preparar la
-carpeta del volumen, que Railway monta como root.
+`postgresql-client-${PG_MAJOR}` del repositorio oficial apt.postgresql.org (18 por defecto, la
+versión del servidor de producción). El respaldo corre como el usuario `app` (uid 10001) con
+`HOME=/tmp`. El arranque solo usa root para preparar la carpeta del volumen, que Railway monta como
+root.
 
 ## 1. Respaldo nativo de Railway (escenario 1)
 
@@ -65,31 +66,44 @@ diario de los puntos siguientes.
 ## 2. Servicio cron `respaldo-postgres`
 
 1. Comprueba la versión del servidor con `SHOW server_version;` desde la consola del servicio
-   Postgres o con `psql "$DATABASE_PUBLIC_URL"`. Anota la versión mayor (por ejemplo, 17).
-2. En el proyecto, crea un servicio con **New → GitHub Repo → ColdCare1023/Backend**, rama `main`, y
+   Postgres o con `psql "$DATABASE_PUBLIC_URL"`. Anota la versión mayor. En producción es 18
+   (`18.6` el 15/11/2026).
+2. En el proyecto, crea un servicio con **New → GitHub Repo → ColdCare1023/Backend**, rama
+   `deploy/respaldo-postgres` (no `main`; ver
+   [Rama de despliegue y fin de config as code](#rama-de-despliegue-y-fin-de-config-as-code)), y
    llámalo `respaldo-postgres`.
-3. En **Settings → Config-as-code**, en **Railway config file**, pon `/railway.respaldo.json`. Ese
-   archivo fija lo siguiente:
-   - Builder `DOCKERFILE` y `dockerfilePath: Dockerfile.respaldo`.
-   - **Cron Schedule `0 7 * * *`**. Railway evalúa la expresión en UTC, así que equivale a las
+3. En **Settings**, configura en el panel:
+   - **Builder** = Dockerfile y **Dockerfile path** = `Dockerfile.respaldo`.
+   - **Cron Schedule** = `0 7 * * *`. Railway evalúa la expresión en UTC, así que equivale a las
      02:00 en Perú (UTC−5). La ejecución puede variar unos minutos.
-   - `restartPolicyType: NEVER`, para que un fallo quede como fallo y no se reintente en bucle.
+   - **Restart policy** = Never, para que un fallo quede como fallo y no se reintente en bucle.
 
-   Si prefieres configurarlo a mano: Builder = Dockerfile, la variable
-   `RAILWAY_DOCKERFILE_PATH=Dockerfile.respaldo`, **Cron Schedule** = `0 7 * * *` y Restart policy =
-   Never.
+   Son los valores de `railway.respaldo.json`. En la rama `deploy/respaldo-postgres` el
+   `railway.json` de la raíz los repite, porque mientras Railway lea config as code ese archivo manda
+   sobre el panel. **Settings → Config-as-code → Railway config file** ya no sirve: en un servicio
+   nuevo Railway descarta `/railway.respaldo.json` sin avisar.
 4. En **Variables**, define estas:
 
    | Variable | Valor |
    |---|---|
    | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` (variable de referencia; usa la red privada) |
-   | `PG_MAJOR` | La versión mayor del paso 1 (por ejemplo, `17`). Se pasa como build-arg |
+   | `PG_MAJOR` | La versión mayor del paso 1: `18` en producción. Se pasa como build-arg; si falta, la imagen usa 18 |
    | `RESPALDO_DESTINO` | `/respaldos`. Es el valor por defecto de la imagen |
    | `RESPALDO_RETENER` | `14`: conserva dos semanas de volcados en el volumen |
 
    **No** definas `ENVIRONMENT=production` en este servicio. Ese modo exige todos los secretos de la
    API (JWT, HMAC, CORS, correo…) y el respaldo solo usa `DATABASE_URL`. Tampoco hacen falta
    `RAILWAY_RUN_UID` ni un dominio público o un healthcheck.
+
+   `HOME` no hace falta. El arranque corre como root y `setpriv` pasa el respaldo al usuario
+   `app` sin cambiar `HOME`, así que antes el proceso heredaba `HOME=/root`. El driver de PostgreSQL
+   busca ahí `~/.postgresql/postgresql.key` y `app` no puede entrar en `/root`: la primera ejecución
+   en producción (15/11/2026) falló con
+   `CRITICAL respaldo RESPALDO FALLIDO: [Errno 13] Permission denied: '/root/.postgresql/postgresql.key'`
+   y `RESPALDO FALLIDO y no se pudo registrar en audit_logs.`, porque la conexión para registrar el
+   fallo choca con lo mismo. Se resolvió a mano con la variable `HOME=/tmp` en el servicio. Ahora
+   la imagen lanza el respaldo con `env HOME=/tmp`: cuando esa imagen esté desplegada en la rama
+   `deploy/respaldo-postgres`, la variable sobra y se puede quitar (si se deja, no cambia nada).
 5. En **Volumes → New Volume**, monta el volumen en `/respaldos`. Dale un tamaño de al menos
    15 veces el tamaño del `.dump`. Puedes estimarlo con el primer respaldo o con
    `SELECT pg_size_pretty(pg_database_size(current_database()));`.
@@ -97,6 +111,58 @@ diario de los puntos siguientes.
    fallida. Un respaldo que termina con código 2 llega por correo al equipo (escenario 3).
 7. Despliega. El servicio no queda vivo: arranca según la programación, respalda y termina. Si la
    ejecución anterior no ha terminado cuando toca la siguiente, Railway se salta la nueva.
+
+### Rama de despliegue y fin de config as code
+
+Railway está retirando config as code. En un servicio nuevo ya no deja elegir un archivo propio
+(`/railway.respaldo.json` se descarta sin avisar), pero sigue leyendo el `/railway.json` de la raíz,
+que es el de la API (`dockerfilePath: infra-local/backend/Dockerfile`, `startCommand`,
+`preDeployCommand`, healthcheck). Ese archivo manda sobre el panel: el 15/11/2026, con el cron
+siguiendo `main`, Railway construyó y arrancó la API en lugar del respaldo.
+
+Por eso, mientras Railway lea `railway.json`, el cron sigue la rama `deploy/respaldo-postgres`. Esa
+rama es `main` con un solo cambio: el `railway.json` de la raíz tiene el contenido de
+`railway.respaldo.json`. El servicio Backend sigue en `main`.
+
+**Mantener la rama al día.** La imagen del cron se construye desde esa rama, no desde `main`. Cada
+vez que en `main` cambie algo que entra en el respaldo, hay que llevarlo a la rama:
+`scripts/respaldo_postgres.py`, `src/infrastructure/respaldo/`, `Dockerfile.respaldo`, lo que el
+script importa (`src/infrastructure/config.py`, `src/infrastructure/database/`) o `requirements.txt`.
+
+```bash
+git fetch origin
+git switch deploy/respaldo-postgres
+git pull --ff-only
+git merge --no-edit origin/main
+git diff --stat origin/main   # solo debe aparecer railway.json
+git push origin deploy/respaldo-postgres
+```
+
+Si `main` cambió el `railway.json` de la API, el merge choca en ese archivo. Conserva la versión de
+la rama: `git checkout --ours railway.json && git add railway.json && git commit --no-edit`. Cada
+push a la rama redespliega el servicio cron.
+
+**Corte del 2026-12-01.** Desde esa fecha Railway deja de leer los archivos de config as code y solo
+cuenta lo que esté en el panel de cada servicio.
+
+- **Cron `respaldo-postgres`**: el panel ya tiene Builder = Dockerfile, Dockerfile path =
+  `Dockerfile.respaldo` y Cron Schedule = `0 7 * * *` (paso 3). Comprueba también Restart policy =
+  Never. Después del corte el cron puede volver a seguir `main` y la rama se puede borrar, una vez
+  que una ejecución desde `main` construya `Dockerfile.respaldo` y deje `Respaldo completado`.
+- **Servicio Backend**: hoy también toma su configuración del `railway.json` de la raíz. **Antes del
+  2026-12-01** hay que pasar esos valores a su panel (**Settings**), o dejarán de aplicarse:
+
+  | Ajuste del panel | Valor actual en `railway.json` |
+  |---|---|
+  | Builder y Dockerfile path | Dockerfile, `infra-local/backend/Dockerfile` |
+  | Custom Start Command | `python -m scripts.arrancar_api` (vacío también sirve: es el `CMD` de ese Dockerfile) |
+  | Pre-deploy Command | `alembic upgrade head` |
+  | Healthcheck path y timeout | `/health`, 120 s |
+  | Replicas | 1 |
+  | Restart policy | On failure, con 5 reintentos como máximo |
+  | Serverless (apagado por inactividad) | Desactivado (`sleepApplication: false`) |
+
+  `docs/operacion/HU-55_despliegue_railway.md` explica para qué sirve cada uno.
 
 ### Comprobación del escenario 1
 
@@ -115,13 +181,15 @@ Antes de empezar, define en el servicio de la API `RESPALDO_MAX_ANTIGUEDAD_HORAS
 `RESPALDO_VIGILANCIA_PERIODO_SEGUNDOS` en 3600 (por defecto) o en un valor menor para esperar menos.
 
 1. En el cron, cambia de forma temporal `PG_MAJOR` a una versión **anterior** a la del servidor
-   (paso 2.1; por ejemplo `15` si el servidor es 17) y redespliega. La imagen se construye con
-   `postgresql-client-15`. Una versión posterior no sirve: `pg_dump` sí vuelca servidores más
+   (paso 2.1; en producción, `17`, porque el servidor es 18) y redespliega. La imagen se construye
+   con `postgresql-client-17`. Una versión posterior no sirve: `pg_dump` sí vuelca servidores más
    antiguos y el respaldo saldría bien.
-2. Adelanta la programación unos minutos. La granularidad mínima es de 5 minutos.
+2. Adelanta la programación unos minutos. La granularidad mínima es de 5 minutos. Hasta el
+   2026-12-01 la programación se cambia en el `railway.json` de la rama `deploy/respaldo-postgres`,
+   que manda sobre el panel; después, en el panel.
 3. En la ejecución, `verificar_cliente_compatible` rechaza el cliente antes de volcar. Captura:
    - el log del cron:
-     `<hora> CRITICAL respaldo RESPALDO FALLIDO: pg_dump 15 es anterior al servidor PostgreSQL 17: construya Dockerfile.respaldo con PG_MAJOR=17`;
+     `<hora> CRITICAL respaldo RESPALDO FALLIDO: pg_dump 17 es anterior al servidor PostgreSQL 18: construya Dockerfile.respaldo con PG_MAJOR=18`;
    - el aviso de Railway de ejecución fallida (código de salida 2);
    - en Auditoría, la fila `RESPALDO_FALLIDO` con resultado «fallido».
 4. En el log del servicio **Backend**, como mucho un `RESPALDO_VIGILANCIA_PERIODO_SEGUNDOS` después
@@ -129,7 +197,7 @@ Antes de empezar, define en el servicio de la API `RESPALDO_MAX_ANTIGUEDAD_HORAS
    `ALERTA OPERATIVA: el último respaldo programado de PostgreSQL falló (<hora>) y no hay uno correcto posterior. Revise el servicio cron de respaldo (HU-29).`
    Captura esa línea y, con un token de administrador, `/health/detalle` →
    `respaldos.estado = "fallido"`.
-5. Restaura `PG_MAJOR` y `0 7 * * *` y redespliega. Tras la siguiente ejecución correcta
+5. Restaura `PG_MAJOR=18` y `0 7 * * *` y redespliega. Tras la siguiente ejecución correcta
    (`RESPALDO_COMPLETADO`), la siguiente pasada del vigilante deja `respaldos.estado = null`.
 
 Por qué no se usa una contraseña errónea en `DATABASE_URL`: con la base inaccesible el cron no puede
@@ -152,7 +220,7 @@ Hay que hacerlo una vez por sprint y antes de cada entrega, siempre contra una b
    railway volume files download /coldcare_<UTC>.manifiesto.json ./simulacro/coldcare_<UTC>.manifiesto.json
    ```
 2. Levanta una base vacía con la misma versión mayor. Puede ser local
-   (`docker run --rm -e POSTGRES_PASSWORD=simulacro -p 55432:5432 postgres:17`) o un segundo
+   (`docker run --rm -e POSTGRES_PASSWORD=simulacro -p 55432:5432 postgres:18`) o un segundo
    servicio Postgres temporal en Railway, que se borra al terminar.
 3. Verifica la restauración. En la máquina hacen falta `pg_restore` de la misma versión mayor y el
    entorno del backend (`requirements.txt`):
@@ -180,9 +248,10 @@ genera un respaldo local con el mismo código. Después se siguen los pasos 2 a 
   y un `.dump` cortado se borra y no cuenta para la retención.
 - `tests/integration/test_hu29_respaldo_restauracion.py`: comprueba la huella, las 9 tablas, el contenido de los eslabones, la
   paginación por clave, los manifiestos antiguos y el fallo crítico.
-- `tests/unit/test_hu29_servicio_cron_respaldo.py`: comprueba `Dockerfile.respaldo`,
-  `railway.respaldo.json`, la retención y que esta guía mantenga la retención de Railway y el fallo
-  provocado con la base accesible.
+- `tests/unit/test_hu29_servicio_cron_respaldo.py`: comprueba `Dockerfile.respaldo` (cliente 18,
+  usuario `app` con `HOME=/tmp`), `railway.respaldo.json`, la retención y que esta guía mantenga la
+  retención de Railway, el fallo provocado con la base accesible y la rama de despliegue con el
+  corte del 2026-12-01.
 
 ## Pendiente (no se puede hacer desde el código)
 
