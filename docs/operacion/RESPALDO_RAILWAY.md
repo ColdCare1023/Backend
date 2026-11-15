@@ -18,14 +18,20 @@ nada de esto se crea desde el código. Las evidencias que hay que archivar está
    entra también su contenido: payload, hora y `chain_seq`). Las tablas se recorren por clave, no con OFFSET.
    El volcado y la huella describen el mismo instante aunque el nodo siga publicando.
 5. Escribe `coldcare_<UTC>.dump` y `coldcare_<UTC>.manifiesto.json` y deja `RESPALDO_COMPLETADO`
-   en `audit_logs`.
+   en `audit_logs`. Mientras trabaja, el volcado y el manifiesto se llaman `….parcial` y solo toman
+   su nombre final cuando ambos están completos. Si ya existe un respaldo con la misma marca (dos
+   ejecuciones en el mismo segundo), no lo sobrescribe: esa ejecución falla con
+   `… ya existe: otro respaldo usó la misma marca`.
 6. Si `RESPALDO_RETENER=N` (N > 0), borra los respaldos más antiguos que los N más recientes. Solo
    lo hace después de un respaldo correcto.
 
-Cuando falla (escenario 3), registra el log `CRITICAL RESPALDO FALLIDO`, borra el `.dump` (y el
-manifiesto) que esa ejecución dejara a medias, intenta dejar `RESPALDO_FALLIDO` en `audit_logs` y
-termina con código de salida 2. Railway marca esa ejecución como fallida. Un `.dump` cortado, por
-ejemplo por falta de espacio, ya no queda en el volumen ni cuenta para `RESPALDO_RETENER`.
+Cuando falla (escenario 3), registra el log `CRITICAL RESPALDO FALLIDO`, borra los `.parcial` que
+esa ejecución dejara a medias (nunca un respaldo terminado, aunque tenga la misma marca), intenta
+dejar `RESPALDO_FALLIDO` en `audit_logs` y termina con código de salida 2. Railway marca esa
+ejecución como fallida. Un volcado cortado, por ejemplo por falta de espacio, ya no queda en el
+volumen ni cuenta para `RESPALDO_RETENER`. Si el proceso muere sin pasar por ese manejo (SIGKILL),
+queda un `coldcare_<UTC>.dump.parcial`: no cuenta para `RESPALDO_RETENER` ni se confunde con un
+respaldo, y se puede borrar a mano desde el volumen.
 
 El backend (servicio de la API) también lo detecta: cada `RESPALDO_VIGILANCIA_PERIODO_SEGUNDOS`
 (3600 por defecto) lee el último resultado en `audit_logs` y, si el último respaldo falló, deja en

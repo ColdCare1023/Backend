@@ -6,7 +6,7 @@ Uso (servicio cron de Railway, docs/operacion/RESPALDO_RAILWAY.md):
 
 1. Abre una transacción REPEATABLE READ de solo lectura y exporta su snapshot
    (`pg_export_snapshot()`).
-2. `pg_dump --format=custom --snapshot=<id>` a `<destino>/coldcare_<UTC>.dump`:
+2. `pg_dump --format=custom --snapshot=<id>` a `<destino>/coldcare_<UTC>.dump.parcial`:
    el volcado ve exactamente ese snapshot.
 3. Dentro de la MISMA transacción calcula la huella (filas + SHA-256 por
    tabla) de las tablas de evidencia (`TABLAS_EVIDENCIA`): thermal_readings,
@@ -15,14 +15,19 @@ Uso (servicio cron de Railway, docs/operacion/RESPALDO_RAILWAY.md):
    ai_model_versions. Volcado y huella describen el
    mismo instante aunque el nodo siga publicando: una lectura que entre
    durante o después del pg_dump no está en ninguno de los dos.
-4. Escribe `<destino>/coldcare_<UTC>.manifiesto.json` (SHA-256 del archivo,
-   huellas y columnas), que es lo que compara la prueba de restauración
-   (`scripts.verificar_restauracion`), y deja RESPALDO_COMPLETADO en `audit_logs`.
+4. Escribe el manifiesto (SHA-256 del archivo, huellas y columnas), que es lo
+   que compara la prueba de restauración (`scripts.verificar_restauracion`).
+   Solo entonces el volcado y el manifiesto toman su nombre final,
+   `coldcare_<UTC>.dump` y `coldcare_<UTC>.manifiesto.json`, y queda
+   RESPALDO_COMPLETADO en `audit_logs`. Un proceso que muere a mitad (incluso
+   por SIGKILL) solo deja `.parcial`, que la retención no cuenta. Si ya hay un
+   respaldo con la misma marca (mismo segundo), no se vuelve a volcar encima.
 
 Escenario 3: si cualquier paso falla, escribe un log de nivel CRITICAL
-(«RESPALDO FALLIDO»), borra el `.dump` (y el manifiesto) que esa ejecución
-dejara a medias, intenta dejar RESPALDO_FALLIDO en `audit_logs` y sale con
-código 2, para que la plataforma marque la ejecución como fallida y avise.
+(«RESPALDO FALLIDO»), borra los `.parcial` que esa ejecución dejara a medias
+(nunca un respaldo terminado), intenta dejar RESPALDO_FALLIDO en `audit_logs`
+y sale con código 2, para que la plataforma marque la ejecución como fallida
+y avise.
 
 El respaldo de volumen de Railway (si el plan lo incluye) no reemplaza a este:
 no deja huella verificable ni se puede restaurar en un entorno aislado sin
@@ -52,6 +57,9 @@ from src.infrastructure.respaldo.huellas import TABLAS_EVIDENCIA, huellas_eviden
 
 logger = logging.getLogger("respaldo")
 CODIGO_FALLO = 2
+# Sufijo de lo que una ejecución escribe mientras no terminó: no lleva el
+# nombre de un respaldo hasta que el volcado y su huella están completos.
+SUFIJO_PARCIAL = ".parcial"
 
 
 def url_libpq(url: str) -> str:
@@ -140,8 +148,28 @@ def ejecutar_pg_dump(database_url: str, archivo: Path, snapshot: str | None = No
 
 def marca_utc() -> str:
     """Marca de los archivos de un respaldo (`coldcare_<marca>.*`): la hora UTC,
-    que también ordena la retención."""
+    que también ordena la retención. Llega al segundo: dos ejecuciones en el
+    mismo segundo comparten marca."""
     return datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def archivos_respaldo(destino: Path, marca: str) -> tuple[Path, Path]:
+    """Nombres finales del volcado y del manifiesto de una marca."""
+    return destino / f"coldcare_{marca}.dump", destino / f"coldcare_{marca}.manifiesto.json"
+
+
+def ruta_parcial(ruta: Path) -> Path:
+    return ruta.with_name(ruta.name + SUFIJO_PARCIAL)
+
+
+def _no_pisar(*rutas: Path) -> None:
+    """Un respaldo terminado con la misma marca no se vuelve a volcar encima:
+    su RESPALDO_COMPLETADO quedaría apuntando a un SHA-256 que ya no existe."""
+    for ruta in rutas:
+        if ruta.exists():
+            raise FileExistsError(
+                f"{ruta.name} ya existe: otro respaldo usó la misma marca (mismo segundo) y no se sobrescribe"
+            )
 
 
 async def respaldar(database_url: str, destino: Path, marca: str | None = None) -> dict:
@@ -149,7 +177,8 @@ async def respaldar(database_url: str, destino: Path, marca: str | None = None) 
         raise RuntimeError("pg_dump no está instalado en esta imagen")
     destino.mkdir(parents=True, exist_ok=True)
     marca = marca or marca_utc()
-    archivo = destino / f"coldcare_{marca}.dump"
+    archivo, ruta_manifiesto = archivos_respaldo(destino, marca)
+    volcado_parcial, manifiesto_parcial = ruta_parcial(archivo), ruta_parcial(ruta_manifiesto)
     engine = build_engine(database_url)
     try:
         async with engine.connect() as conexion:
@@ -159,16 +188,17 @@ async def respaldar(database_url: str, destino: Path, marca: str | None = None) 
                 snapshot = (await conexion.execute(text("SELECT pg_export_snapshot()"))).scalar_one()
                 version_servidor = int((await conexion.execute(text("SHOW server_version_num"))).scalar_one())
                 verificar_cliente_compatible(version_servidor)
+                _no_pisar(archivo, ruta_manifiesto)
                 # pg_dump importa el snapshot mientras esta transacción sigue
                 # abierta; luego la huella se calcula sobre el MISMO snapshot.
-                await asyncio.to_thread(ejecutar_pg_dump, database_url, archivo, snapshot)
+                await asyncio.to_thread(ejecutar_pg_dump, database_url, volcado_parcial, snapshot)
                 huellas = await huellas_evidencia(conexion)
     finally:
         await engine.dispose()
     manifiesto = {
         "archivo": archivo.name,
-        "sha256": sha256_archivo(archivo),
-        "bytes": archivo.stat().st_size,
+        "sha256": sha256_archivo(volcado_parcial),
+        "bytes": volcado_parcial.stat().st_size,
         "generado_en": datetime.now(tz=timezone.utc).isoformat(),
         # Volcado y huella salen del mismo snapshot exportado.
         "consistencia": "snapshot_exportado_repeatable_read",
@@ -177,14 +207,20 @@ async def respaldar(database_url: str, destino: Path, marca: str | None = None) 
         # La verificación recalcula la huella con estas mismas columnas.
         "columnas": {tabla: list(cols) for tabla, cols in TABLAS_EVIDENCIA.items()},
     }
-    (destino / f"coldcare_{marca}.manifiesto.json").write_text(json.dumps(manifiesto, indent=2), encoding="utf-8")
+    manifiesto_parcial.write_text(json.dumps(manifiesto, indent=2), encoding="utf-8")
+    # Primero el volcado: si algo cortara entre ambos, queda un .dump completo
+    # (restaurable), nunca un manifiesto que apunte a un archivo inexistente.
+    _no_pisar(archivo, ruta_manifiesto)
+    os.replace(volcado_parcial, archivo)
+    os.replace(manifiesto_parcial, ruta_manifiesto)
     return manifiesto
 
 
 def podar_respaldos(destino: Path, retener: int) -> list[str]:
     """Retención del volumen: conserva los `retener` respaldos más recientes
     (archivo .dump, su manifiesto y su informe de restauración) y borra los
-    anteriores. `retener <= 0` no borra nada (comportamiento por omisión)."""
+    anteriores. `retener <= 0` no borra nada (comportamiento por omisión).
+    Un `.dump.parcial` no es un respaldo: ni cuenta ni se borra aquí."""
     if retener <= 0:
         return []
     volcados = sorted(destino.glob("coldcare_*.dump"), reverse=True)  # el nombre lleva la hora UTC
@@ -200,15 +236,18 @@ def podar_respaldos(destino: Path, retener: int) -> list[str]:
 
 def descartar_incompletos(destino: Path, marca: str) -> list[str]:
     """Borra lo que una ejecución fallida dejó a medias en el volumen: el
-    `.dump` (p. ej. cortado por falta de espacio) y, si llegó a escribirse, el
-    manifiesto de esa misma marca. Sin esto, `podar_respaldos` contaba el
-    `.dump` parcial como uno de los `retener` más recientes y, tras el
-    siguiente respaldo correcto, borraba a cambio un respaldo bueno; además
-    seguía ocupando el volumen lleno. Los respaldos anteriores no se tocan.
+    `.dump.parcial` (p. ej. cortado por falta de espacio) y, si llegó a
+    escribirse, el `.manifiesto.json.parcial` de esa misma marca, para que no
+    siga ocupando el volumen lleno.
+
+    Solo borra `.parcial`: un respaldo terminado con la misma marca (otra
+    ejecución en el mismo segundo) no es de esta ejecución y queda intacto.
+    Antes se borraban `coldcare_<marca>.dump` y su manifiesto, y un fallo en
+    el mismo segundo que un respaldo correcto se llevaba el respaldo bueno.
 
     Nunca lanza: corre dentro del manejo del fallo, antes de auditarlo."""
     descartados = []
-    for ruta in (destino / f"coldcare_{marca}.dump", destino / f"coldcare_{marca}.manifiesto.json"):
+    for ruta in map(ruta_parcial, archivos_respaldo(destino, marca)):
         try:
             if not ruta.is_file():
                 continue

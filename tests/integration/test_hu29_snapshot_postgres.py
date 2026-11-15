@@ -227,14 +227,19 @@ def test_un_fallo_del_cron_llega_al_log_del_backend(cron_pg, tmp_path, caplog, m
     - `almacenamiento`: el destino cuelga de un archivo regular, no de una
       carpeta (el ejemplo del criterio: «límites de almacenamiento»).
     - `pg_major_anterior`: el fallo provocado de RESPALDO_RAILWAY.md, un cron
-      construido con un PG_MAJOR anterior al servidor."""
+      construido con un PG_MAJOR anterior al servidor. Las dos ejecuciones
+      llevan la misma marca (corren en el mismo segundo), y el fallo no borra
+      el respaldo correcto que la primera dejó en la misma carpeta."""
     from src.interface import tareas
 
     url = cron_pg
     caplog.set_level(logging.INFO)
+    monkeypatch.setattr(respaldo_postgres, "marca_utc", lambda: _MARCA_FIJA)
 
     # Antes del fallo hay un respaldo correcto: el vigilante está al día.
     assert respaldo_postgres.main(["--destino", str(tmp_path / "respaldos")]) == 0
+    correcto = _archivos(tmp_path / "respaldos")
+    assert set(correcto) == {f"coldcare_{_MARCA_FIJA}.dump", f"coldcare_{_MARCA_FIJA}.manifiesto.json"}
     assert asyncio.run(_vigilar(url)) is None
     previas = asyncio.run(_filas_respaldo_fallido(url))
 
@@ -258,11 +263,89 @@ def test_un_fallo_del_cron_llega_al_log_del_backend(cron_pg, tmp_path, caplog, m
     if causa == "pg_major_anterior":
         assert "pg_dump 9 es anterior al servidor PostgreSQL" in fila.detalle["error"]
         assert "PG_MAJOR=" in fila.detalle["error"]
+    # El respaldo correcto anterior sigue intacto.
+    assert _archivos(tmp_path / "respaldos") == correcto
 
     # Log del backend: la pasada del vigilante deja la alerta operativa crítica.
     assert asyncio.run(_vigilar(url)) == "fallido"
     [alerta] = _criticos(caplog, tareas.logger.name)
     assert alerta.startswith("ALERTA OPERATIVA: el último respaldo programado de PostgreSQL falló")
+
+
+_MARCA_FIJA = "20261115T071801Z"
+
+
+def _archivos(carpeta) -> dict[str, bytes]:
+    return {ruta.name: ruta.read_bytes() for ruta in sorted(carpeta.iterdir())}
+
+
+def test_un_fallo_en_el_mismo_segundo_no_borra_el_respaldo_correcto(cron_pg, tmp_path, monkeypatch):
+    """La marca de los archivos llega al segundo. Una ejecución que fallaba en
+    el mismo segundo que un respaldo correcto borraba, como «incompletos»,
+    el `.dump` y el manifiesto buenos de esa marca, que no eran suyos."""
+    destino = tmp_path / "respaldos"
+    monkeypatch.setattr(respaldo_postgres, "marca_utc", lambda: _MARCA_FIJA)
+
+    assert respaldo_postgres.main(["--destino", str(destino)]) == 0
+    correcto = _archivos(destino)
+    assert set(correcto) == {f"coldcare_{_MARCA_FIJA}.dump", f"coldcare_{_MARCA_FIJA}.manifiesto.json"}
+
+    monkeypatch.setattr(respaldo_postgres, "version_pg_dump", lambda: "pg_dump (PostgreSQL) 9.6.24")
+    assert respaldo_postgres.main(["--destino", str(destino)]) == respaldo_postgres.CODIGO_FALLO
+
+    assert _archivos(destino) == correcto
+    manifiesto = json.loads(correcto[f"coldcare_{_MARCA_FIJA}.manifiesto.json"])
+    assert respaldo_postgres.sha256_archivo(destino / manifiesto["archivo"]) == manifiesto["sha256"]
+
+
+def test_un_segundo_respaldo_con_la_misma_marca_no_pisa_el_primero(cron_pg, tmp_path, monkeypatch):
+    """Dos respaldos en el mismo segundo: el segundo no vuelve a volcar sobre
+    el primero (su RESPALDO_COMPLETADO quedaría apuntando a un SHA-256 que ya
+    no existe). Falla con motivo claro y el primero queda como estaba."""
+    url = cron_pg
+    destino = tmp_path / "respaldos"
+    monkeypatch.setattr(respaldo_postgres, "marca_utc", lambda: _MARCA_FIJA)
+    assert respaldo_postgres.main(["--destino", str(destino)]) == 0
+    correcto = _archivos(destino)
+    previas = asyncio.run(_filas_respaldo_fallido(url))
+
+    volcados = []
+    monkeypatch.setattr(respaldo_postgres, "ejecutar_pg_dump", lambda *args, **kwargs: volcados.append(args))
+    assert respaldo_postgres.main(["--destino", str(destino)]) == respaldo_postgres.CODIGO_FALLO
+
+    assert volcados == []
+    assert _archivos(destino) == correcto
+    nuevas = asyncio.run(_filas_respaldo_fallido(url))
+    [fila] = [fila for identificador, fila in nuevas.items() if identificador not in previas]
+    assert f"coldcare_{_MARCA_FIJA}.dump ya existe" in fila.detalle["error"]
+
+
+def test_el_volcado_se_escribe_aparte_y_solo_toma_su_nombre_al_terminar(cron_pg, tmp_path, monkeypatch):
+    """P1-7 (resto): si el proceso muere a mitad del pg_dump (SIGKILL, sin
+    pasar por el manejo del fallo), lo que queda es un `.dump.parcial`, que
+    la retención no cuenta. `coldcare_<UTC>.dump` y su manifiesto solo
+    aparecen cuando el respaldo y su huella terminaron."""
+    destino = tmp_path / "respaldos"
+    volcar = respaldo_postgres.ejecutar_pg_dump
+    vistos = []
+
+    def _volcar_y_mirar(database_url, archivo, snapshot=None):
+        volcar(database_url, archivo, snapshot)
+        vistos.append((archivo.name, sorted(p.name for p in destino.iterdir())))
+
+    monkeypatch.setattr(respaldo_postgres, "ejecutar_pg_dump", _volcar_y_mirar)
+    monkeypatch.setattr(respaldo_postgres, "marca_utc", lambda: _MARCA_FIJA)
+
+    assert respaldo_postgres.main(["--destino", str(destino)]) == 0
+
+    parcial = f"coldcare_{_MARCA_FIJA}.dump.parcial"
+    assert vistos == [(parcial, [parcial])]
+    assert sorted(p.name for p in destino.iterdir()) == [
+        f"coldcare_{_MARCA_FIJA}.dump", f"coldcare_{_MARCA_FIJA}.manifiesto.json",
+    ]
+    manifiesto = json.loads((destino / f"coldcare_{_MARCA_FIJA}.manifiesto.json").read_text(encoding="utf-8"))
+    assert manifiesto["archivo"] == f"coldcare_{_MARCA_FIJA}.dump"
+    assert respaldo_postgres.sha256_archivo(destino / manifiesto["archivo"]) == manifiesto["sha256"]
 
 
 def test_un_volcado_parcial_se_descarta_y_la_retencion_no_lo_cuenta(cron_pg, tmp_path, monkeypatch):
