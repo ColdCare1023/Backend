@@ -28,7 +28,12 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
 )
 from src.interface.api.api_protection import limitar_ingesta_lecturas
 from src.interface.api.deps import DbSessionDep, SettingsDep, require_roles
-from src.interface.api.mappers import lectura_to_response, serie_to_response, tipo_sse_lectura
+from src.interface.api.mappers import (
+    lectura_to_response,
+    serie_to_response,
+    tipo_sse_episodio,
+    tipo_sse_lectura,
+)
 from src.interface.api.schemas import LecturaIngestRequest, LecturaResponse, SerieTermicaResponse
 
 router = APIRouter(prefix="/api/lecturas", tags=["lecturas"])
@@ -151,11 +156,15 @@ async def _emitir_eventos_sse(
     evento = respuesta.model_dump(mode="json")
     await broadcaster.publicar(evento, tipo_sse_lectura(lectura_guardada))
 
-    if lectura_guardada.nivel_riesgo is None:
+    # Como en MQTT: se sigue riesgo_efectivo (la regla 2-8 °C decide aunque el
+    # modelo no clasifique, IA-D18), y un episodio abierto distinto del previo
+    # es una alerta nueva (`tipo_sse_episodio`).
+    tipo_episodio = tipo_sse_episodio(episodio_previo, episodio_actual)
+    if lectura_guardada.riesgo_efectivo is None or tipo_episodio is None:
         return
-    if episodio_previo is not None and episodio_actual is None:
+    if tipo_episodio == "recuperacion":
         await broadcaster.publicar(evento, "recuperacion")
-    elif episodio_actual is not None:
+    else:
         await broadcaster.publicar(
             {
                 **evento,
@@ -168,7 +177,7 @@ async def _emitir_eventos_sse(
                     if episodio_actual.normalizacion_desde else None
                 ),
             },
-            "alerta" if episodio_previo is None else "episodio_actualizado",
+            tipo_episodio,
         )
 
 

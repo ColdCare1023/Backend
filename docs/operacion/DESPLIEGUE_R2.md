@@ -34,6 +34,31 @@ truncar valores fuera de INTEGER).
 tiene que ser la versión activa registrada (HU-46). Sin ella opera como
 `experimental`; `/health/detalle` → `modelo_ia.modo_legado_efectivo` lo dice.
 
+## Ronda 2b (se publica junto con la ronda 2)
+
+Sin migraciones; la API solo agrega rutas y campos.
+
+- `POST /api/ia/modelo/versiones/{version}/desactivar` (administrador, cuerpo
+  `{"motivo": 10-500 caracteres}`): 200, 404, 409 `version_no_activa`, 422.
+  Encadena `MODELO_IA_VERSION_DESACTIVADA`. Después, en `/health/detalle`:
+  `modelo_ia.preventivo.motivo_codigo = sin_version_activa_registrada` y
+  `modelo_ia.version_activa_registrada = null`. Es la vuelta atrás que restaura
+  la línea base (P-12); el botón está en el frontend r2b (Versiones del modelo).
+- El 409 de `/activar` y el de registrar con `"activar": true` traen
+  `{"detail": "...", "codigos": [...]}`. Códigos nuevos de IA-B05 v6 y v7:
+  `horizonte_distinto_del_manifiesto`, `sklearn_distinto_del_manifiesto`,
+  `sklearn_incompatible_con_el_instalado`, `manifiesto_distinto_del_historial`.
+- IA-D18: cuando el modelo no da clase, una lectura válida en 2-8 °C es normal
+  para las alertas, y una alerta ATENDIDA solo absorbe la excursión que continúa
+  la anterior; si no, se cierra (`sin_continuidad_tras_atencion`) y se abre una
+  PENDIENTE nueva con su aviso.
+- SSE: cuando la lectura deja abierto un episodio distinto del que estaba
+  abierto (PENDIENTE nueva tras cerrar una ATENDIDA, escalamiento o cambio de
+  nivel), el evento es `alerta` (antes `episodio_actualizado`). La ingesta HTTP
+  usa el mismo criterio y también avisa cuando el modelo no clasificó.
+- Log: el rechazo del artefacto del modelo en modo activo es CRITICAL; sin
+  versión activa (tras `/desactivar`), en sombra o experimental es WARNING.
+
 ## Comprobaciones que quedan pendientes (físicas u operativas)
 
 - Excursión inducida en producción: alerta, correo, enlace a la alerta,

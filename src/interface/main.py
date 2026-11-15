@@ -99,7 +99,7 @@ from src.interface.api.dispositivos_router import router as dispositivos_router
 from src.interface.api.firmware_router import router as firmware_router
 from src.interface.api.ia_router import router as ia_router
 from src.interface.api.lecturas_router import router as lecturas_router
-from src.interface.api.mappers import evidencia_edge, lectura_to_response, tipo_sse_lectura
+from src.interface.api.mappers import evidencia_edge, lectura_to_response, tipo_sse_episodio, tipo_sse_lectura
 from src.interface.api.reportes_router import router as reportes_router
 from src.interface.api.security_headers import instalar_security_headers
 from src.interface.api.sse_broadcaster import SSEBroadcaster
@@ -1248,10 +1248,12 @@ async def _procesar_lectura_mqtt(
     # HU-18/21/34: se sigue riesgo_efectivo, no nivel_riesgo/model_class —
     # una excursión confirmada por rango abre/mantiene episodio de alerta
     # aunque la IA no haya podido clasificar la lectura.
-    if lectura_guardada.riesgo_efectivo is not None and episodio_previo is not None and episodio_actual is None:
+    # Ronda 2b: el tipo lo decide `tipo_sse_episodio` (igual que la ingesta
+    # HTTP): un episodio abierto distinto del previo es una alerta nueva.
+    tipo_episodio = tipo_sse_episodio(episodio_previo, episodio_actual)
+    if lectura_guardada.riesgo_efectivo is not None and tipo_episodio == "recuperacion":
         await broadcaster.publicar(evento_lectura, "recuperacion")
-    elif lectura_guardada.riesgo_efectivo is not None and episodio_actual is not None:
-        tipo_episodio = "alerta" if episodio_previo is None else "episodio_actualizado"
+    elif lectura_guardada.riesgo_efectivo is not None and tipo_episodio is not None:
         await broadcaster.publicar(
             {
                 **evento_lectura,
