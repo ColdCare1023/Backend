@@ -181,9 +181,15 @@ el manifiesto:
 Con el mismo CSV, las mismas corridas y el mismo entorno, el artefacto (mismo SHA-256) y el umbral
 salen iguales: semilla fija y `n_jobs=1` en el ajuste y en la inferencia. Cambian `entrenado_en` y, por eso, el SHA-256 del
 manifiesto; el registro nunca sobrescribe, así que la segunda ejecución va con otra versión o con
-`--directorio-registro <directorio temporal>`. Las negativas (scikit-learn distinto del fijado, versión
-existente, pocas corridas o etiquetas) y los pasos siguientes (sombra, Experimento D, aprobación,
-registro en la base y `/activar`) están en `docs/operacion/IA_PREVENTIVA_ACTIVACION.md`, pasos 3 a 9.
+`--directorio-registro <directorio temporal>`. Solo el conjunto que se registra tiene que poder
+evaluarse: sin el SHT31 en las corridas (o sin sus columnas) la ablación queda "no estimable" y
+`termico_minimo` se registra igual. Antes de escribir, la CLI comprueba la paridad con el servicio de
+inferencia (`paridad_servicio`): cargado en sombra, el servicio clasifica una lectura de prueba del CSV
+con el vector y la puntuación del entrenamiento; si no (hoy, `termico_ambiente` mientras el servicio
+no reciba el SHT31, HU-17), no registra. Las negativas (scikit-learn distinto del fijado, versión
+existente o anotada en `historial.json`, pocas corridas o etiquetas, conjunto que no se puede servir) y
+los pasos siguientes (sombra, Experimento D, aprobación, registro en la base y `/activar`) están en
+`docs/operacion/IA_PREVENTIVA_ACTIVACION.md`, pasos 3 a 9.
 
 ## Salidas
 

@@ -111,7 +111,10 @@ backend no las predice.
 
 Se exportan las lecturas del nodo de banco a CSV con el exportador de corridas (P-1), con estas
 columnas: `device_id`, `timestamp` (o `timestamp_estimado` si falta), `temperatura_interna`,
-`apertura_refrigerador`, `time_quality`, `ds18b20_status` o `sensor_fault` y `corrida_id`. Solo
+`apertura_refrigerador`, `time_quality`, `ds18b20_status` o `sensor_fault` y `corrida_id`. El
+exportador agrega `temperatura_ambiental` y `humedad_ambiental` (SHT31), que solo usan la ablación y
+`termico_ambiente`: sin ellas, o con corridas sin SHT31, `termico_ambiente` queda "no estimable" y
+`termico_minimo` se evalúa y se registra igual. Solo
 lecturas del dispositivo (no manuales ni simuladas). `importar_coldcare_csv` descarta y cuenta las
 lecturas `unsynced` y las de `SENSOR_FAULT`. En las hojas de corrida, `uso=prueba` marca las corridas
 de prueba y `uso=validacion` las que eligen el umbral (P-3); el resumen del exportador trae las dos
@@ -126,7 +129,9 @@ python -m src.infrastructure.ai.prediccion_preventiva corridas --csv corridas.cs
 `corridas` etiqueta (y = 1 si empieza una excursión en (t, t + H]), excluye ventanas incompletas,
 divide por corrida con separación ≥ H, elige el umbral fuera de la muestra de entrenamiento (P-3),
 compara el Random Forest con los baselines y reporta los dos juegos de criterios, con y sin el SHT31.
-Sin `--registrar` **no registra ningún modelo**: es un informe.
+Sin `--registrar` **no registra ningún modelo**: es un informe. Si una corrida de prueba o de
+validación no tiene temperatura y humedad ambiental válidas, `termico_ambiente` queda "no estimable"
+con ese motivo y `ablacion_sht31` en `null`; una corrida que no está en el CSV termina con código 2.
 
 **Umbral de decisión (P-3).** El umbral es el de F1 máximo sobre puntuaciones de filas que el modelo
 que las puntúa no vio al ajustarse, y las filas se separan por corrida, nunca por fila:
@@ -163,8 +168,9 @@ python -m src.infrastructure.ai.prediccion_preventiva corridas --csv corridas.cs
     --registrar --version "$V" --conjunto termico_minimo --salida informe_corridas.json
 ```
 
-Entrena igual que el paso 2 y registra el modelo del conjunto elegido con `registro.registrar`, la
-misma ruta que anota los hashes en el historial:
+Entrena igual que el paso 2 (solo el conjunto elegido tiene que poder evaluarse; la ablación con el
+SHT31 puede quedar "no estimable") y registra su modelo con `registro.registrar`, la misma ruta que
+anota los hashes en el historial:
 
 - `src/infrastructure/ai/models/preventivo/$V/modelo.joblib`;
 - `src/infrastructure/ai/models/preventivo/$V/manifiesto.json`, en estado `EXPERIMENTAL`, con lo que
@@ -177,16 +183,36 @@ misma ruta que anota los hashes en el historial:
 - una entrada `registrado` en `models/preventivo/historial.json` con el SHA-256 del artefacto y el del
   manifiesto.
 
+Antes de escribir comprueba que el servicio de inferencia sabe servir el conjunto
+(`paridad_servicio`): carga el modelo en sombra desde un registro temporal y le pasa, por
+`ServicioPrediccionPreventiva.predecir`, las lecturas del CSV de una corrida de prueba hasta su lectura
+más reciente en rango con ventana completa. El servicio debe clasificarla (estado `ok`) con el mismo
+vector y la misma puntuación que el extractor del entrenamiento (diferencia ≤ 5·10⁻⁷, el redondeo a 6
+decimales con que el servicio guarda la evidencia). Si no, no registra nada.
+
 Después relee lo escrito: el SHA-256 del artefacto coincide con el manifiesto, el del manifiesto está
 anotado en `historial.json` y la versión carga en modo sombra. Imprime un JSON con `sha256`,
-`verificacion` y `cuerpo_registro_api`, el cuerpo del paso 6 ya armado con los valores del manifiesto.
-`--salida` guarda el informe completo y el registro. Para ensayar sin tocar el repositorio se agrega
-`--directorio-registro <directorio temporal>`, que también aceptan `listar`, `verificar` y `estado`.
+`verificacion`, `paridad_servicio`, `cuerpo_registro_api` (el cuerpo del paso 6 ya armado con los
+valores del manifiesto) y `advertencias`. `--salida` guarda el informe completo y el registro. Para
+ensayar sin tocar el repositorio se agrega `--directorio-registro <directorio temporal>`, que también
+aceptan `listar`, `verificar` y `estado`.
 
 `dataset_version` es por defecto `corridas-<12 primeros hex del SHA-256 del CSV>`, una propuesta para
-P-4 que se cambia con `--dataset-version`. Con `--conjunto termico_ambiente` (SHT31), una lectura cuya
+P-4 que se cambia con `--dataset-version`.
+
+`--conjunto termico_ambiente` (SHT31) depende de que el servicio reciba el SHT31 (HU-17, P0-4).
+Mientras `predecir` no le pase la temperatura y la humedad ambiental al extractor, la comprobación de
+paridad lo rechaza (`el conjunto termico_ambiente no se puede servir: … HISTORIAL_INSUFICIENTE …`),
+porque el modelo nunca clasificaría. Con HU-17 integrado se registra, y en producción una lectura cuya
 ventana de 15 min no tenga temperatura y humedad ambiental válidas queda sin clasificación con el
-motivo `ventana_15min_sin_contexto_ambiental`.
+motivo `ventana_15min_sin_contexto_ambiental`. `termico_minimo` no depende del SHT31.
+
+**Advertencia, sin negativa.** Si ninguna corrida de ajuste o de validación es del mismo equipo que
+las de prueba, no hay separación que medir: `cuerpo_registro_api` va sin `particiones.separacion_min`
+y POST `/activar` responderá 409 `faltan_particiones`. La CLI registra igual (la versión sirve en
+sombra) y lo avisa en `advertencias` y con `Advertencia: …` en la salida de error. Para poder activar,
+se registra una versión nueva que ajuste con al menos una corrida del equipo de prueba separada al
+menos H; la separación no se escribe a mano.
 
 Se niega con código de salida 2 y `No se registra el modelo: …`, sin escribir nada, en estos casos:
 
@@ -195,12 +221,16 @@ Se niega con código de salida 2 y `No se registra el modelo: …`, sin escribir
 | El scikit-learn instalado no es el de `requirements.txt` (P-6) | `el scikit-learn instalado (…) no es el fijado en requirements.txt (…)` |
 | `requirements.txt` no fija scikit-learn con `==` | `requirements.txt no fija scikit-learn con '=='` |
 | La versión ya existe | `la versión … ya existe en el registro; el registro nunca sobrescribe una versión` |
+| La versión figura en `historial.json` aunque se borró su directorio | `la versión … ya existe en el registro: figura en historial.json …` |
+| `historial.json` no se puede leer | `No se pudo leer historial.json: no se puede comprobar que la versión … sea nueva` |
 | Versión con mayúsculas u otros caracteres, o de más de 50 | `Nombre de versión inválido` / `… 50 como máximo` |
 | Menos de 2 corridas de ajuste | `hacen falta al menos 2 corridas de ajuste` |
 | Las corridas de ajuste no tienen ambas clases | `entrenamiento sin ambas clases` |
 | No hay umbral fuera de muestra | `sin umbral fuera de muestra` |
 | La prueba no tiene ambas clases | `las corridas de prueba … no tienen ambas clases` |
 | Una corrida de prueba o de validación inexistente o inválida | `las corridas no se pueden usar: …` |
+| Una corrida de prueba o de validación sin observaciones válidas para el conjunto que se registra (p. ej. sin SHT31 con `termico_ambiente`) | `las corridas no se pueden usar: las corridas […] no tienen observaciones válidas para el conjunto …` |
+| El servicio de inferencia no clasifica con el vector del entrenamiento | `el conjunto … no se puede servir: …` |
 
 Un manifiesto escrito o editado a mano sigue sin poder activarse: `/activar` responde 409
 `manifiesto_distinto_del_historial`.
