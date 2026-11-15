@@ -56,11 +56,11 @@ def get_notificador_bienvenida(settings: SettingsDep) -> NotificadorBienvenida:
 
 async def _avisar_alta(
     fabrica_sesiones: async_sessionmaker, notificador: NotificadorBienvenida, usuario_id: UUID, admin_id: UUID, nombre: str, email: str,
-    telefono: str | None, activacion: MensajeCorreo | None = None,
+    activacion: MensajeCorreo | None = None,
 ) -> None:
-    """Después de responder: correo (con el código de activación) y SMS reales al usuario nuevo,
-    y su resultado en la bitácora (enmascarado: audit_logs es inmutable)."""
-    resultado = await notificador.notificar(nombre, email, telefono, activacion)
+    """Después de responder: correo real (con el código de activación) al usuario nuevo, y su
+    resultado en la bitácora (enmascarado: audit_logs es inmutable). HU-53: ya no hay SMS."""
+    resultado = await notificador.notificar(nombre, email, activacion)
     async with fabrica_sesiones() as session:
         await AuditarAccionCriticaUseCase(
             SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
@@ -69,8 +69,8 @@ async def _avisar_alta(
             accion="BIENVENIDA_NOTIFICADA",
             recurso=f"usuarios/{usuario_id}",
             detalle={
-                "correo": resultado.correo, "sms": resultado.sms,
-                "email": enmascarar_email(email), "telefono": enmascarar_telefono(telefono),
+                "correo": resultado.correo,
+                "email": enmascarar_email(email),
                 "codigo_activacion": activacion is not None,
             },
             ip_origen=None,
@@ -136,7 +136,7 @@ async def crear_usuario(
     # Aviso real al usuario nuevo, tras confirmar el alta y sin retrasar la respuesta.
     tareas.add_task(
         _avisar_alta, async_sessionmaker(session.bind, expire_on_commit=False), notificador,
-        usuario.id, admin.id, usuario.nombre, usuario.email, usuario.telefono, activacion,
+        usuario.id, admin.id, usuario.nombre, usuario.email, activacion,
     )
     return _to_response(usuario)
 

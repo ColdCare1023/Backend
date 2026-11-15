@@ -8,8 +8,12 @@ Uso:
 1. Comprueba el SHA-256 del archivo de respaldo contra el manifiesto.
 2. `pg_restore --clean --if-exists` sobre RESTAURACION_DATABASE_URL, que debe
    ser una base distinta de DATABASE_URL (el script se niega si coinciden).
-3. Calcula la huella de `thermal_readings`, `traceability_records` y
-   `audit_logs` en la base restaurada y la compara con la del manifiesto.
+3. Calcula la huella de las tablas que declara el manifiesto (desde HU-29 v2:
+   thermal_readings, traceability_records, audit_logs, users, devices,
+   thermal_alerts, corrective_actions y device_config_history; un manifiesto
+   antiguo, sin `columnas`, solo las tres primeras) en la base restaurada y la
+   compara con la del manifiesto, que se calculó en el mismo snapshot que el
+   volcado.
 4. Escribe el informe JSON junto al manifiesto (`.restauracion.json`) como
    evidencia de HU-29, y sale con 0 solo si todo coincide.
 """

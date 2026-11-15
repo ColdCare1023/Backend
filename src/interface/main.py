@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import functools
 import hashlib
 import json
 import logging
@@ -56,8 +57,9 @@ from src.domain.exceptions import (
 )
 from src.domain.repositories.i_incidente_repository import TIPO_COLISION_CLAVE
 from src.domain.value_objects.rol import Rol
+from src.infrastructure.ai import gobierno
 from src.infrastructure.ai.prediccion_preventiva.servicio import obtener_servicio_preventivo
-from src.infrastructure.ai.random_forest_service import get_random_forest_service
+from src.infrastructure.ai.random_forest_service import CODIGO_DESACTIVADO, get_random_forest_service
 from src.infrastructure.config import get_settings
 from src.infrastructure.database.repositories.alerta_repository import SQLAlchemyAlertaRepository
 from src.infrastructure.database.repositories.audit_log_repository import (
@@ -97,7 +99,7 @@ from src.interface.api.dispositivos_router import router as dispositivos_router
 from src.interface.api.firmware_router import router as firmware_router
 from src.interface.api.ia_router import router as ia_router
 from src.interface.api.lecturas_router import router as lecturas_router
-from src.interface.api.mappers import evidencia_edge, lectura_to_response, tipo_sse_lectura
+from src.interface.api.mappers import evidencia_edge, lectura_to_response, tipo_sse_episodio, tipo_sse_lectura
 from src.interface.api.reportes_router import router as reportes_router
 from src.interface.api.security_headers import instalar_security_headers
 from src.interface.api.sse_broadcaster import SSEBroadcaster
@@ -105,7 +107,7 @@ from src.interface.api.sse_router import router as sse_router
 from src.interface.api.trazabilidad_router import router as trazabilidad_router
 from src.interface.api.usuarios_router import router as usuarios_router
 from src.interface.limitador_auditoria import LIMITE_AUDITORIA, auditar_suprimidos
-from src.interface.tareas import VigilanteSinDatos, tipo_sse
+from src.interface.tareas import VigilanteRespaldos, VigilanteSinDatos, tipo_sse
 
 logger = logging.getLogger("interface.main")
 
@@ -971,7 +973,9 @@ async def _procesar_lectura_mqtt(
         lectura_repository = SQLAlchemyLecturaRepository(session)
         alerta_repository = SQLAlchemyAlertaRepository(session)
         trazabilidad_repository = SQLAlchemyTrazabilidadRepository(session)
-        clasificar_use_case = ClasificarRiesgoTermicoUseCase(get_random_forest_service(), settings.ia_legado_modo)
+        # HU-46: el legado solo decide si es la versión activa y aprobada del registro.
+        modo_legado = gobierno.modo_legado_efectivo(settings)
+        clasificar_use_case = ClasificarRiesgoTermicoUseCase(get_random_forest_service(), modo_legado)
         servicio_preventivo = obtener_servicio_preventivo(
             settings.ia_preventivo_modo, settings.ia_preventivo_version, settings.ia_preventivo_sha256
         )
@@ -986,7 +990,7 @@ async def _procesar_lectura_mqtt(
             ventana_normalizacion_alerta_minutos=settings.alerta_ventana_normalizacion_minutos,
             minutos_normales_preventiva=settings.alerta_preventiva_minutos_normales,
             antiguedad_maxima_horas=settings.lectura_antiguedad_max_horas,
-            ia_legado_modo=settings.ia_legado_modo,
+            ia_legado_modo=modo_legado,
             ia_timeout_s=settings.ia_inferencia_timeout_s,
             ia_prueba_retardo_s=settings.ia_prueba_retardo_s,
             ia_prueba_excepcion=settings.ia_prueba_excepcion,
@@ -1244,10 +1248,12 @@ async def _procesar_lectura_mqtt(
     # HU-18/21/34: se sigue riesgo_efectivo, no nivel_riesgo/model_class —
     # una excursión confirmada por rango abre/mantiene episodio de alerta
     # aunque la IA no haya podido clasificar la lectura.
-    if lectura_guardada.riesgo_efectivo is not None and episodio_previo is not None and episodio_actual is None:
+    # Ronda 2b: el tipo lo decide `tipo_sse_episodio` (igual que la ingesta
+    # HTTP): un episodio abierto distinto del previo es una alerta nueva.
+    tipo_episodio = tipo_sse_episodio(episodio_previo, episodio_actual)
+    if lectura_guardada.riesgo_efectivo is not None and tipo_episodio == "recuperacion":
         await broadcaster.publicar(evento_lectura, "recuperacion")
-    elif lectura_guardada.riesgo_efectivo is not None and episodio_actual is not None:
-        tipo_episodio = "alerta" if episodio_previo is None else "episodio_actualizado"
+    elif lectura_guardada.riesgo_efectivo is not None and tipo_episodio is not None:
         await broadcaster.publicar(
             {
                 **evento_lectura,
@@ -1275,15 +1281,19 @@ async def _auditar_modelos_rechazados(settings) -> None:
     evidencia de que el artefacto fue alterado o no es el aprobado."""
     rechazos: list[dict] = []
     if settings.ia_legado_modo != "desactivado":
-        motivo = get_random_forest_service().motivo_rechazo()
+        legado = get_random_forest_service()
+        motivo = legado.motivo_rechazo()
         if motivo:
-            rechazos.append({"modelo": "legado", "motivo": motivo})
+            rechazos.append({"modelo": "legado", "motivo": motivo, "motivo_codigo": legado.motivo_codigo()})
     servicio = obtener_servicio_preventivo(
         settings.ia_preventivo_modo, settings.ia_preventivo_version, settings.ia_preventivo_sha256
     )
     motivo = servicio.motivo_rechazo()
     if motivo:
-        rechazos.append({"modelo": "preventivo", "motivo": motivo, "version": settings.ia_preventivo_version})
+        rechazos.append({
+            "modelo": "preventivo", "motivo": motivo, "version": settings.ia_preventivo_version,
+            "motivo_codigo": servicio.motivo_codigo(),
+        })
     if not rechazos:
         return
     async with _session_factory() as session:
@@ -1291,7 +1301,15 @@ async def _auditar_modelos_rechazados(settings) -> None:
             SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
         )
         for rechazo in rechazos:
-            logger.warning("Modelo rechazado (%s): %s", rechazo["modelo"], rechazo["motivo"])
+            # HU-46 esc. 3: el rechazo del artefacto del modelo que decide
+            # (modo activo) es un error crítico, además del MODELO_RECHAZADO
+            # encadenado. Una configuración pendiente (p. ej. ninguna versión
+            # activa tras /desactivar) o un modelo en sombra/experimental: aviso.
+            critico = gobierno.rechazo_es_critico(settings, rechazo["modelo"], rechazo["motivo_codigo"])
+            logger.log(
+                logging.CRITICAL if critico else logging.WARNING,
+                "Modelo rechazado (%s, %s): %s", rechazo["modelo"], rechazo["motivo_codigo"], rechazo["motivo"],
+            )
             await auditoria.execute(
                 usuario_id=None, accion="MODELO_RECHAZADO", recurso=f"ia/{rechazo['modelo']}",
                 detalle=rechazo, ip_origen=None,
@@ -1299,36 +1317,118 @@ async def _auditar_modelos_rechazados(settings) -> None:
         await session.commit()
 
 
-def _estado_modelos_ia(settings) -> dict:
+def _estado_respaldos(vigilante: VigilanteRespaldos | None) -> dict:
+    if vigilante is None:
+        return {"vigilancia_activa": False, "estado": None, "ultimo_completado": None, "ultima_pasada": None}
+    return {
+        "vigilancia_activa": vigilante.activo,
+        # None = al día o sin nada que vigilar; `fallido` | `vencido` = alerta crítica en el log.
+        "estado": vigilante.estado,
+        "ultimo_completado": vigilante.ultimo_completado.isoformat() if vigilante.ultimo_completado else None,
+        "ultima_pasada": vigilante.ultima_pasada.isoformat() if vigilante.ultima_pasada else None,
+    }
+
+
+@functools.lru_cache(maxsize=1)
+def _alembic_head() -> str | None:
+    """HU-55 esc. 1: última migración que trae ESTE código (el directorio
+    `alembic/` va en la imagen). Comparada con `alembic_revision` dice si el
+    pre-deploy `alembic upgrade head` llegó a correr. Se calcula una vez; None
+    si no se puede leer (nunca tumba /health/detalle)."""
+    try:
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+
+        raiz = Path(__file__).resolve().parents[2]
+        config = Config(str(raiz / "alembic.ini"))
+        config.set_main_option("script_location", str(raiz / "alembic"))
+        return ScriptDirectory.from_config(config).get_current_head()
+    except Exception:  # pragma: no cover - imagen sin alembic/ o con varias cabezas
+        logger.warning("No se pudo leer la cabeza de las migraciones de Alembic.", exc_info=True)
+        return None
+
+
+def _entero_o_none(valor: str | None) -> int | None:
+    try:
+        return int(valor) if valor else None
+    except ValueError:
+        return None
+
+
+def _estado_modelos_ia(settings, version_activa: str | None = None) -> dict:
     """HU-16: estado de los modelos de IA para /health/detalle. Nunca lanza:
-    un modelo alterado se informa como no disponible con su motivo."""
+    un modelo alterado se informa como no disponible con su motivo.
+
+    Las claves de primer nivel siguen describiendo el modelo legado; las
+    aditivas `preventivo.*` y `en_uso` dicen qué modelo decide el riesgo y si
+    es la versión activa del registro (`version_activa` viene de la base)."""
+    try:
+        modo_legado_efectivo = gobierno.modo_legado_efectivo(settings)
+    except Exception:  # defensa en profundidad: el estado no tumba el endpoint
+        modo_legado_efectivo = "experimental" if settings.ia_legado_modo == "activo" else settings.ia_legado_modo
     if settings.ia_legado_modo == "desactivado":
-        legado = {"disponible": False, "version": None, "motivo_rechazo": None}
+        legado = {"disponible": False, "version": None, "motivo_rechazo": None, "motivo_codigo": CODIGO_DESACTIVADO}
     else:
         try:
             legado = get_random_forest_service().estado()
         except Exception as exc:  # defensa en profundidad: el estado no tumba el endpoint
-            legado = {"disponible": False, "version": None, "motivo_rechazo": f"error_al_consultar:{type(exc).__name__}"}
+            legado = {
+                "disponible": False, "version": None, "motivo_rechazo": f"error_al_consultar:{type(exc).__name__}",
+                "motivo_codigo": "error_al_consultar",
+            }
     try:
-        preventivo = obtener_servicio_preventivo(
+        servicio = obtener_servicio_preventivo(
             settings.ia_preventivo_modo, settings.ia_preventivo_version, settings.ia_preventivo_sha256
         )
-        motivo_preventivo = preventivo.motivo_rechazo()
+        preventivo = {
+            "modo": settings.ia_preventivo_modo,
+            "motivo_rechazo": servicio.motivo_rechazo(),
+            "motivo_codigo": servicio.motivo_codigo(),
+            "disponible": servicio.disponible,
+            "version": settings.ia_preventivo_version or None,
+            "es_version_activa_registrada": servicio.es_version_activa_registrada(),
+        }
     except Exception as exc:
-        motivo_preventivo = f"error_al_consultar:{type(exc).__name__}"
+        preventivo = {
+            "modo": settings.ia_preventivo_modo, "motivo_rechazo": f"error_al_consultar:{type(exc).__name__}",
+            "motivo_codigo": "error_al_consultar", "disponible": False, "version": None,
+            "es_version_activa_registrada": False,
+        }
+    # Qué decide el riesgo efectivo de una lectura en rango (HU-20/HU-34):
+    # el preventivo activo, el legado activo o, si no, solo la regla 2-8 °C
+    # (el legado experimental es evidencia marcada, no decide).
+    if settings.ia_preventivo_modo == "activo":
+        en_uso = {
+            "modelo": "preventivo", "version": preventivo["version"], "disponible": preventivo["disponible"],
+            "aprobado": preventivo["disponible"] and preventivo["es_version_activa_registrada"]
+            and preventivo["version"] == version_activa,
+        }
+    elif modo_legado_efectivo == "activo":
+        en_uso = {
+            "modelo": "legado", "version": legado.get("version"), "disponible": bool(legado.get("disponible")),
+            "aprobado": bool(legado.get("disponible")) and bool(legado.get("hash_aprobado_fijado"))
+            and version_activa is not None,
+        }
+    else:
+        en_uso = {"modelo": "regla_2_8", "version": None, "disponible": False, "aprobado": False}
     return {
         **legado,
         "modo_legado": settings.ia_legado_modo,
-        "preventivo": {"modo": settings.ia_preventivo_modo, "motivo_rechazo": motivo_preventivo},
+        # HU-46: `activo` sin versión aprobada (o con el preventivo gobernando)
+        # opera como `experimental`.
+        "modo_legado_efectivo": modo_legado_efectivo,
+        "preventivo": preventivo,
+        "version_activa_registrada": version_activa,
+        "en_uso": en_uso,
     }
 
 
 async def _aplicar_version_activa() -> None:
-    """HU-46 esc. 3: la versión activa de la base decide qué artefacto se acepta."""
+    """HU-46 esc. 3: la versión activa de la base decide qué artefacto se
+    acepta: el preventivo con IA_PREVENTIVO_MODO=activo, si no el legado."""
     async with _session_factory() as session:
         activa = await SQLAlchemyModeloIARepository(session).obtener_activa()
-    if activa is not None:
-        get_random_forest_service().fijar_hash_aprobado(activa.model_hash)
+    gobierno.aplicar_version_activa(get_settings(), activa)
 
 
 @contextlib.asynccontextmanager
@@ -1369,13 +1469,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         _session_factory, app.state.sse_broadcaster, app.state.notificaciones,
         settings.sin_datos_periodo_segundos, settings.sin_datos_n_intervalos,
     )
+    # HU-29 esc. 3: alerta crítica en este log si el respaldo programado falla.
+    app.state.vigilante_respaldos = VigilanteRespaldos(
+        _session_factory, settings.respaldo_vigilancia_periodo_segundos, settings.respaldo_max_antiguedad_horas,
+    )
     if settings.environment != "test":
         await app.state.notificaciones.iniciar()
         app.state.vigilante_sin_datos.iniciar()
+        app.state.vigilante_respaldos.iniciar()
     try:
         async with _ingesta_mqtt(app, settings):
             yield
     finally:
+        await app.state.vigilante_respaldos.detener()
         await app.state.vigilante_sin_datos.detener()
         await app.state.notificaciones.detener()
 
@@ -1532,8 +1638,14 @@ def create_app() -> FastAPI:
         vigilante = getattr(request.app.state, "vigilante_sin_datos", None)
         api_broker = getattr(request.app.state, "broker_api", None)
         broker_api = "sin_configurar" if api_broker is None else ("ok" if api_broker else "error")
+        try:
+            activa = await SQLAlchemyModeloIARepository(session).obtener_activa()
+            version_activa = activa.version if activa is not None else None
+        except Exception:  # pragma: no cover - depende de una BD caída
+            await session.rollback()
+            version_activa = None
         # HU-16: la carga del modelo es CPU y disco; fuera del bucle de eventos.
-        modelo_ia = await asyncio.to_thread(_estado_modelos_ia, get_settings())
+        modelo_ia = await asyncio.to_thread(_estado_modelos_ia, get_settings(), version_activa)
         # Un artefacto rechazado (alterado o distinto del aprobado) degrada el
         # estado; uno simplemente ausente, no: la ingesta no depende de la IA.
         modelo_rechazado = bool(modelo_ia["motivo_rechazo"] or modelo_ia["preventivo"]["motivo_rechazo"])
@@ -1542,6 +1654,9 @@ def create_app() -> FastAPI:
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             "db": db,
             "alembic_revision": revision,
+            # HU-55 esc. 1: cabeza de migraciones del código desplegado. Si no
+            # coincide con `alembic_revision`, el pre-deploy no se aplicó.
+            "alembic_head": _alembic_head(),
             # Resultado de BrokerAdmin.verificar_api() al arrancar.
             "broker_api": broker_api,
             "mqtt": {
@@ -1553,6 +1668,13 @@ def create_app() -> FastAPI:
             "notificaciones": {
                 "worker_activo": despachador is not None and despachador.activo,
                 "cola_pendiente": despachador.pendientes if despachador is not None else 0,
+            },
+            # HU-55 / HU-12 esc. 4: con qué comando arrancó el proceso. Lo deja
+            # scripts/arrancar_api.py (1 worker, proxy de confianza); None si el
+            # panel de la plataforma arrancó uvicorn con otro comando.
+            "arranque": {
+                "lanzador": os.environ.get("COLDCARE_ARRANQUE") or None,
+                "workers": _entero_o_none(os.environ.get("COLDCARE_WORKERS")),
             },
             # B-11: lo que el backend ve detrás del proxy de la plataforma. Con
             # las cabeceras bien configuradas, `esquema` es https y `ip_cliente`
@@ -1567,6 +1689,8 @@ def create_app() -> FastAPI:
                 "activa": vigilante is not None and vigilante.activo,
                 "ultima_pasada": vigilante.ultima_pasada.isoformat() if vigilante and vigilante.ultima_pasada else None,
             },
+            # HU-29 esc. 3: resultado del respaldo programado visto desde el backend.
+            "respaldos": _estado_respaldos(getattr(request.app.state, "vigilante_respaldos", None)),
             # HU-16 esc. 2: modelo no disponible y por qué (sin rutas ni secretos).
             "modelo_ia": modelo_ia,
         }

@@ -5,6 +5,7 @@ from uuid import UUID
 
 from src.domain.entities.alerta_termica import AlertaTermica
 from src.domain.repositories.i_alerta_repository import IAlertaRepository
+from src.domain.value_objects.estado_alerta import EstadoAlerta
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 
 logger = logging.getLogger("application.generar_alerta")
@@ -18,8 +19,9 @@ MENSAJES_POR_RIESGO = {
 # cerrado del mismo dispositivo y tipo de riesgo se reabre (no se crea uno
 # nuevo) si la siguiente lectura crítica llega dentro de esta ventana,
 # evitando flapping de apertura/cierre por una única lectura normal aislada
-# (histéresis). Valor por defecto; configurable por instancia via Settings
-# (ver GenerarAlertaUseCase.__init__ y su construcción en los routers).
+# (histéresis). Nunca se reabre un episodio ATENDIDO (HU-21 esc. 3). Valor por
+# defecto; configurable por instancia via Settings (ver
+# GenerarAlertaUseCase.__init__ y su construcción en los routers).
 COOLDOWN_MINUTOS = 15
 
 # HU-20 esc. 3: un episodio PREVENTIVO no se resuelve con la primera lectura
@@ -38,6 +40,10 @@ TRANSICION_NORMALIZACION = "normalizacion_en_curso"
 CIERRE_RECUPERACION = "recuperacion"
 CIERRE_NORMALIZACION = "ventana_normalizacion_cumplida"
 CIERRE_CAMBIO_NIVEL = "cambio_de_nivel"
+# IA-D18: el episodio crítico ATENDIDO seguía abierto, pero la excursión nueva
+# no continúa la anterior (entre medio hubo una lectura sin temperatura válida o
+# un hueco mayor que la ventana): se cierra y la excursión abre otra alerta.
+CIERRE_SIN_CONTINUIDAD = "sin_continuidad_tras_atencion"
 
 # HU-53 (P4): una lectura que llega más de esto después de capturada viene del
 # buffer offline del nodo: el aviso debe decir que la excursión es diferida.
@@ -46,6 +52,26 @@ RETRASO_LECTURA_DIFERIDA = timedelta(minutes=5)
 
 def _a_utc(valor: datetime) -> datetime:
     return valor if valor.tzinfo is not None else valor.replace(tzinfo=timezone.utc)
+
+
+# Para comparar niveles: una lectura atrasada nunca baja el nivel del episodio.
+_GRAVEDAD = {
+    NivelRiesgo.NORMAL: 0,
+    NivelRiesgo.RIESGO_PREVENTIVO: 1,
+    NivelRiesgo.EXCURSION_CRITICA: 2,
+}
+
+
+def _es_anterior_al_episodio(episodio: AlertaTermica | None, timestamp: datetime) -> bool:
+    """La lectura se capturó antes que la última que ya cuenta el episodio
+    abierto: una carga manual retroactiva (hasta 24 h atrás) o una lectura
+    del buffer que llega después de otra en vivo. No dice nada de lo que pasa
+    ahora con el equipo."""
+    return (
+        episodio is not None
+        and episodio.ultima_actualizacion is not None
+        and _a_utc(timestamp) < _a_utc(episodio.ultima_actualizacion)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,14 +110,26 @@ class GenerarAlertaUseCase:
     - Una lectura NORMAL cierra el episodio CRÍTICO abierto del dispositivo
       (evento de recuperación), sin crear ninguna fila nueva. Un episodio
       PREVENTIVO entra en normalización y se cierra cuando el riesgo lleva
-      `minutos_normales_preventiva` seguidos en Normal (HU-20 esc. 3).
+      `minutos_normales_preventiva` seguidos en Normal (HU-20 esc. 3); solo
+      cuentan las lecturas Normal confirmadas (`normal_confirmado`).
     - Una lectura crítica del MISMO tipo que el episodio ya abierto solo
-      actualiza ese episodio (lectura más reciente + timestamp).
+      actualiza ese episodio (lectura más reciente + timestamp). Excepción
+      (IA-D18): si el episodio crítico ya está ATENDIDO y la excursión no
+      continúa la anterior (`continua_excursion=False`), se cierra y la
+      excursión abre una alerta PENDIENTE nueva, con su aviso.
     - Una lectura crítica de OTRO tipo (escalamiento/desescalamiento) cierra
       el episodio anterior y abre uno nuevo.
+    - Una lectura capturada ANTES de la última lectura del episodio abierto
+      (manual retroactiva, buffer fuera de orden) queda solo como evidencia:
+      no lo cierra por recuperación, no cuenta para la normalización, no lo
+      baja de nivel ni le aplica el cierre sin continuidad. Del mismo nivel,
+      solo puede cambiar la temperatura pico. Una más grave sí escala, como
+      siempre: la excursión ocurrió y se avisa.
     - Sin episodio abierto: si el último episodio CERRADO del mismo
-      dispositivo+tipo terminó hace menos de COOLDOWN_MINUTOS, se reabre en
-      vez de crear una fila nueva. Si no, se crea una alerta nueva.
+      dispositivo+tipo terminó hace menos de COOLDOWN_MINUTOS y todavía no
+      fue ATENDIDO, se reabre en vez de crear una fila nueva. Si no (fuera de
+      la ventana, o ya atendido: HU-21 esc. 3 / HU-23 esc. 3), se crea una
+      alerta nueva PENDIENTE, que se avisa.
 
     HU-53: la apertura o reapertura de un episodio crítico deja un
     `AvisoExcursion` en `avisos_pendientes`. Este caso de uso no envía nada:
@@ -121,6 +159,10 @@ class GenerarAlertaUseCase:
     def minutos_normales_preventiva(self) -> int:
         return self._minutos_normales_preventiva
 
+    @property
+    def ventana_normalizacion_minutos(self) -> int:
+        return self._ventana_normalizacion_minutos
+
     @staticmethod
     def _es_diferida(timestamp: datetime, received_at: datetime | None) -> bool:
         """Lectura que llegó más de RETRASO_LECTURA_DIFERIDA después de capturada."""
@@ -133,11 +175,28 @@ class GenerarAlertaUseCase:
         if episodio.id is not None:
             self.motivos_cierre[episodio.id] = motivo
 
-    async def _normalizar_o_cerrar(self, episodio: AlertaTermica, timestamp: datetime) -> None:
+    async def _normalizar_o_cerrar(
+        self, episodio: AlertaTermica, timestamp: datetime, normal_confirmado: bool = True
+    ) -> None:
         """Lectura Normal con un episodio abierto. Crítico: se cierra ya
-        (HU-21 esc. 2). Preventivo: cuenta la ventana de normalización y se
-        cierra solo al completarla (HU-20 esc. 3)."""
-        if episodio.nivel_riesgo != NivelRiesgo.RIESGO_PREVENTIVO or self._minutos_normales_preventiva <= 0:
+        (HU-21 esc. 2), aunque el modelo no haya clasificado la lectura (la
+        regla 2-8 °C basta). Preventivo: cuenta la ventana de normalización y
+        se cierra solo al completarla (HU-20 esc. 3).
+
+        Una lectura en rango sin clase del modelo (`normal_confirmado=False`:
+        historial insuficiente, reloj sin sincronizar, inferencia fallida) no
+        es «el riesgo vuelve a Normal» (HU-20 esc. 3, HU-34 esc. 4): no inicia
+        ni completa la ventana del preventivo, y la que estaba en curso vuelve
+        a empezar en la próxima Normal confirmada. Así, tras reiniciar el nodo,
+        el episodio no se cierra con una ventana que el modelo no observó."""
+        if episodio.nivel_riesgo != NivelRiesgo.RIESGO_PREVENTIVO:
+            await self._cerrar(episodio, timestamp)
+            return
+        if not normal_confirmado:
+            if episodio.interrumpir_normalizacion():
+                await self._alerta_repository.actualizar(episodio)
+            return
+        if self._minutos_normales_preventiva <= 0:
             await self._cerrar(episodio, timestamp)
             return
         if episodio.iniciar_normalizacion(timestamp):
@@ -188,14 +247,56 @@ class GenerarAlertaUseCase:
         temperatura_interna: float | None = None,
         received_at: datetime | None = None,
         time_quality: str | None = None,
+        continua_excursion: bool = True,
+        normal_confirmado: bool = True,
     ) -> AlertaTermica | None:
+        """`continua_excursion`: la lectura anterior del dispositivo también
+        estaba fuera de 2-8 °C, con temperatura válida, y llegó dentro de la
+        ventana. `normal_confirmado`: el tablero muestra la lectura como Normal
+        (`LecturaTermica.estado_riesgo`), no como «Sin clasificación IA». Los
+        valores por defecto conservan el comportamiento anterior."""
         self.transicion = None
         episodio_abierto = await self._alerta_repository.obtener_episodio_abierto(device_id)
+        # Capturada antes que la última lectura del episodio: no puede decir
+        # que el equipo volvió a rango ni que la excursión se cortó (el
+        # episodio cerraría con una hora anterior a su inicio y la lectura
+        # siguiente, todavía fuera de rango, abriría otra alerta y otro aviso).
+        anterior_al_episodio = _es_anterior_al_episodio(episodio_abierto, timestamp)
 
         if nivel_riesgo is None or nivel_riesgo == NivelRiesgo.NORMAL:
-            if episodio_abierto is not None:
-                await self._normalizar_o_cerrar(episodio_abierto, timestamp)
+            if episodio_abierto is not None and not anterior_al_episodio:
+                await self._normalizar_o_cerrar(episodio_abierto, timestamp, normal_confirmado)
             return None
+
+        if anterior_al_episodio:
+            if episodio_abierto.nivel_riesgo == nivel_riesgo:
+                # Evidencia del mismo episodio: la lectura más reciente y su
+                # hora no retroceden, ni se reinicia la normalización.
+                episodio_abierto.actualizar_pico(temperatura_interna)
+                if self._es_diferida(timestamp, received_at):
+                    episodio_abierto.historica = True
+                self.transicion = TRANSICION_ACTUALIZACION
+                return await self._alerta_repository.actualizar(episodio_abierto)
+            if _GRAVEDAD[nivel_riesgo] < _GRAVEDAD[episodio_abierto.nivel_riesgo]:
+                return None
+            # Más grave que el episodio abierto (crítica con un preventivo
+            # abierto): la excursión ocurrió; escala y se avisa como siempre.
+
+        if (
+            episodio_abierto is not None
+            and not continua_excursion
+            and nivel_riesgo == NivelRiesgo.EXCURSION_CRITICA
+            and episodio_abierto.nivel_riesgo == NivelRiesgo.EXCURSION_CRITICA
+            and episodio_abierto.estado == EstadoAlerta.ATENDIDA
+        ):
+            # IA-D18 (P0): el episodio ATENDIDO quedó abierto porque ninguna
+            # lectura válida en rango lo cerró (sensor en falla, hueco sin
+            # lecturas). Sumarle la excursión nueva la escondería en una alerta
+            # «atendida», sin pendiente ni aviso. Se cierra aquí y, como el
+            # último cerrado está ATENDIDO, abajo se crea una alerta PENDIENTE
+            # nueva que sí se avisa (HU-21 esc. 3 / HU-23 esc. 3).
+            await self._cerrar(episodio_abierto, timestamp, CIERRE_SIN_CONTINUIDAD)
+            episodio_abierto = None
 
         if episodio_abierto is not None:
             if episodio_abierto.nivel_riesgo == nivel_riesgo:
@@ -212,6 +313,12 @@ class GenerarAlertaUseCase:
         ultimo_cerrado = await self._alerta_repository.obtener_ultimo_cerrado(device_id, nivel_riesgo)
         if (
             ultimo_cerrado is not None
+            # HU-21 esc. 3 / HU-23 esc. 3: un episodio ATENDIDO cerró su ciclo
+            # (reconocimiento + acción correctiva). Reabrirlo escondería la
+            # nueva excursión dentro de una alerta «atendida»: fuera de las
+            # pendientes del dashboard y sin correo (ya estaba notificada).
+            # Se crea una alerta PENDIENTE nueva, que sí se avisa.
+            and ultimo_cerrado.estado != EstadoAlerta.ATENDIDA
             and ultimo_cerrado.cerrada_en is not None
             and (_a_utc(timestamp) - _a_utc(ultimo_cerrado.cerrada_en))
             <= timedelta(minutes=self._ventana_normalizacion_minutos)

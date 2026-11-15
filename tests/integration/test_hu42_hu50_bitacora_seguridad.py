@@ -98,6 +98,15 @@ def test_resultado_de_accion_cubre_los_rechazos_conocidos():
     assert resultado_de_accion("ALTA_DISPOSITIVO") == ResultadoAuditoria.EXITOSO
 
 
+def test_fallos_de_sistema_se_registran_como_fallidos():
+    """HU-42 esc. 1 / HU-52 esc. 2 / HU-29 esc. 3: el envío de correo o el
+    respaldo que fallan no quedan como `exitoso` en la bitácora."""
+    assert resultado_de_accion("NOTIFICACION_FALLIDA") == ResultadoAuditoria.FALLIDO
+    assert resultado_de_accion("RESPALDO_FALLIDO") == ResultadoAuditoria.FALLIDO
+    assert resultado_de_accion("NOTIFICACION_ENVIADA") == ResultadoAuditoria.EXITOSO
+    assert resultado_de_accion("RESPALDO_COMPLETADO") == ResultadoAuditoria.EXITOSO
+
+
 def test_filtros_por_periodo_y_actor(client, token_admin, token_auditor):
     admin_id = _id_de(client, token_admin, "administrador")
     ahora = datetime.now(tz=timezone.utc)

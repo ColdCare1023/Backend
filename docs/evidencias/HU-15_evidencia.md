@@ -21,3 +21,21 @@ cuarentena y sigue).
 
 Pruebas: `test_mutaciones_invalidas_se_rechazan_con_identidad` (6 casos con el contrato v1.0),
 `test_payload_fuera_de_contrato_se_acusa_y_no_se_persiste`, `test_json_malformado_se_descarta_sin_excepcion`.
+
+## Límites de tamaño
+
+| Tamaño del mensaje | Tratamiento |
+|---|---|
+| ≤ 768 B (contrato v1.0) | Se valida con el esquema |
+| > 768 B y ≤ 5 KiB, con identidad recuperable | Se rechaza con acuse `rejected` (`excede_768_bytes`), esc. 3 |
+| > 5 KiB (`MAX_BYTES_PAYLOAD_MQTT`) en `farmacias/<id>/lecturas` | Se descarta **sin acuse** y antes de deserializar; queda auditado como `LECTURA_RECHAZADA_TAMANO` con los bytes recibidos |
+| > 5 KiB en `farmacias/<id>/eventos` | Se descarta sin acuse ni auditoría (solo log) |
+
+Por encima de 5 KiB el backend no convierte el mensaje en objetos de Python,
+así que no puede extraer una identidad confiable y, como pide el esc. 3, no
+inventa un acuse. El firmware nunca publica algo así (no publica payloads de
+más de 768 B); un mensaje de ese tamaño no viene del nodo legítimo.
+
+«Mismo payload» (HU-11) significa misma identidad y mismos valores, no los
+mismos bytes: ver `docs/evidencias/HU-11_evidencia.md`.
+

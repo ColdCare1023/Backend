@@ -7,11 +7,20 @@
 """
 
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
 
+from src.application.use_cases.registrar_accion_correctiva import RegistrarAccionCorrectivaUseCase
 from src.domain.value_objects.rol import Rol
+from src.infrastructure.database.repositories.accion_correctiva_repository import (
+    SQLAlchemyAccionCorrectivaRepository,
+)
+from src.infrastructure.database.repositories.alerta_repository import SQLAlchemyAlertaRepository
+from src.infrastructure.database.repositories.audit_log_repository import SQLAlchemyAuditLogRepository
+from src.infrastructure.database.repositories.trazabilidad_repository import SQLAlchemyTrazabilidadRepository
+from src.infrastructure.database.repositories.usuario_repository import SQLAlchemyUsuarioRepository
 from src.infrastructure.pdf.generador_pdf import _registro_checklist
 from tests.conftest import auth_header
 
@@ -27,7 +36,7 @@ async def token_otro_tecnico(crear_usuario, client):
     return respuesta.json()["access_token"]
 
 
-def _accion_de(client, token) -> dict:
+def _alerta_de(client, token) -> dict:
     lectura = {
         "device_id": DEVICE_ID,
         "timestamp": datetime.now(tz=timezone.utc).isoformat(),
@@ -38,7 +47,12 @@ def _accion_de(client, token) -> dict:
         "estado_conectividad": "online",
     }
     assert client.post("/api/lecturas", json=lectura, headers=auth_header(token)).status_code == 201
-    alerta = client.get("/api/alertas", params={"device_id": DEVICE_ID}, headers=auth_header(token)).json()[0]
+    return client.get("/api/alertas", params={"device_id": DEVICE_ID}, headers=auth_header(token)).json()[0]
+
+
+def _accion_de(client, token) -> dict:
+    """HU-27/H16: la acción la registra el Químico Farmacéutico responsable."""
+    alerta = _alerta_de(client, token)
     respuesta = client.post(
         f"/api/alertas/{alerta['id']}/acciones-correctivas",
         json={"decision": "Trasladar el lote", "justificacion": "Lectura fuera de rango", "descripcion": "Se trasladaron los viales al refrigerador de respaldo."},
@@ -46,6 +60,21 @@ def _accion_de(client, token) -> dict:
     )
     assert respuesta.status_code == 201
     return respuesta.json()
+
+
+async def _accion_heredada_de_tecnico(client, token_tecnico, db_session_factory) -> dict:
+    """Acción que un técnico registró ANTES de H16 (hoy su POST recibe 403):
+    se crea con el caso de uso, que no aplica RBAC, para probar que las reglas
+    de autoría siguen protegiendo esos registros."""
+    alerta = _alerta_de(client, token_tecnico)
+    async with db_session_factory() as session:
+        tecnico = await SQLAlchemyUsuarioRepository(session).obtener_por_email("tecnico@farmacia.example.org")
+        accion = await RegistrarAccionCorrectivaUseCase(
+            SQLAlchemyAccionCorrectivaRepository(session), SQLAlchemyAlertaRepository(session),
+            SQLAlchemyTrazabilidadRepository(session), SQLAlchemyAuditLogRepository(session),
+        ).execute(UUID(alerta["id"]), tecnico.id, "Se trasladaron los viales.", "Trasladar el lote", "Fuera de rango")
+        await session.commit()
+    return {"id": str(accion.id), "alert_id": alerta["id"]}
 
 
 def _rectificar(client, accion_id, token):
@@ -60,8 +89,10 @@ def _rectificar(client, accion_id, token):
 # ── Rectificaciones ───────────────────────────────────────────────────────
 
 
-def test_un_tecnico_no_rectifica_la_accion_de_otro(client, token_tecnico, token_otro_tecnico):
-    accion = _accion_de(client, token_tecnico)
+async def test_un_tecnico_no_rectifica_la_accion_de_otro(
+    client, token_tecnico, token_otro_tecnico, db_session_factory
+):
+    accion = await _accion_heredada_de_tecnico(client, token_tecnico, db_session_factory)
 
     respuesta = _rectificar(client, accion["id"], token_otro_tecnico)
 
@@ -72,14 +103,26 @@ def test_un_tecnico_no_rectifica_la_accion_de_otro(client, token_tecnico, token_
     assert [a["id"] for a in ciclo] == [accion["id"]]
 
 
-def test_el_autor_rectifica_su_propia_accion(client, token_tecnico):
-    accion = _accion_de(client, token_tecnico)
+def test_el_autor_rectifica_su_propia_accion(client, token_farmaceutico):
+    accion = _accion_de(client, token_farmaceutico)
+
+    assert _rectificar(client, accion["id"], token_farmaceutico).status_code == 201
+
+
+async def test_el_tecnico_autor_de_una_accion_heredada_aun_puede_rectificarla(
+    client, token_tecnico, db_session_factory
+):
+    """La ruta de rectificación conserva al técnico solo para lo que él mismo
+    registró antes de H16 (el caso de uso exige autor o farmacéutico)."""
+    accion = await _accion_heredada_de_tecnico(client, token_tecnico, db_session_factory)
 
     assert _rectificar(client, accion["id"], token_tecnico).status_code == 201
 
 
-def test_el_farmaceutico_responsable_rectifica_acciones_ajenas(client, token_tecnico, token_farmaceutico):
-    accion = _accion_de(client, token_tecnico)
+async def test_el_farmaceutico_responsable_rectifica_acciones_ajenas(
+    client, token_tecnico, token_farmaceutico, db_session_factory
+):
+    accion = await _accion_heredada_de_tecnico(client, token_tecnico, db_session_factory)
 
     respuesta = _rectificar(client, accion["id"], token_farmaceutico)
 

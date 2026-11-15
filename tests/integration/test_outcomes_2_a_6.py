@@ -2,6 +2,7 @@
 rechazos auditados y estado del aviso por correo."""
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -156,7 +157,7 @@ async def test_una_falla_sostenida_no_abre_otro_incidente(db_session_factory):
 # ── Outcome 4: el modelo alterado deja rastro ──────────────────────────────────
 
 
-async def test_un_modelo_rechazado_se_audita_al_arrancar(db_session_factory, monkeypatch):
+async def test_un_modelo_rechazado_se_audita_al_arrancar(db_session_factory, monkeypatch, caplog):
     class _Ajustes:
         ia_legado_modo = "activo"
         ia_preventivo_modo = "desactivado"
@@ -167,14 +168,24 @@ async def test_un_modelo_rechazado_se_audita_al_arrancar(db_session_factory, mon
         def motivo_rechazo(self):
             return "Checksum SHA-256 inválido para el artefacto del modelo"
 
+        def motivo_codigo(self):
+            return "checksum_invalido"
+
     monkeypatch.setattr(main, "_session_factory", db_session_factory)
     monkeypatch.setattr(main, "get_random_forest_service", lambda: _Servicio())
+    # alembic.fileConfig (test_migraciones) deshabilita los loggers existentes.
+    monkeypatch.setattr(main.logger, "disabled", False)
 
-    await main._auditar_modelos_rechazados(_Ajustes())
+    with caplog.at_level(logging.WARNING, logger=main.logger.name):
+        await main._auditar_modelos_rechazados(_Ajustes())
 
     filas = [f for f in await _todos(db_session_factory, AuditLogModel) if f.accion == "MODELO_RECHAZADO"]
     assert len(filas) == 1
+    # HU-46 esc. 3: el modelo que decide (modo activo) rechazado es un error crítico.
+    assert any(r.levelno == logging.CRITICAL and "Modelo rechazado" in r.getMessage() for r in caplog.records)
     assert "Checksum" in json.dumps(filas[0].detalle)
+    # P1-7: el código estable del motivo también queda en la bitácora.
+    assert filas[0].detalle["motivo_codigo"] == "checksum_invalido"
 
 
 async def test_un_modelo_sano_no_deja_fila(db_session_factory, monkeypatch):

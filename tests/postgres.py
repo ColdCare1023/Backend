@@ -28,12 +28,29 @@ def _con_base(url: str, base: str) -> str:
     return urlunsplit(partes._replace(path=f"/{base}"))
 
 
+def binarios_pgserver() -> pathlib.Path | None:
+    """Carpeta con pg_dump/pg_restore del PostgreSQL embebido (misma versión
+    que su servidor), o None si pgserver no está instalado."""
+    try:
+        import pgserver
+    except ImportError:
+        return None
+    carpeta = pathlib.Path(pgserver.__file__).parent / "pginstall" / "bin"
+    return carpeta if (carpeta / "pg_dump").exists() else None
+
+
 @contextmanager
-def _servidor():
-    """Devuelve el DSN libpq (`postgresql://…`) de una base vacía y exclusiva."""
+def _servidor(preferir_embebido: bool = False):
+    """Devuelve el DSN libpq (`postgresql://…`) de una base vacía y exclusiva.
+
+    `preferir_embebido`: usar pgserver aunque haya TEST_POSTGRES_URL, para las
+    pruebas que necesitan pg_dump/pg_restore de la MISMA versión del servidor
+    (HU-29): pgserver los trae; el runner del CI puede tener otros."""
     asyncpg = pytest.importorskip("asyncpg")
     base = f"prueba_{uuid.uuid4().hex[:12]}"
     externo = os.environ.get("TEST_POSTGRES_URL")
+    if preferir_embebido and binarios_pgserver() is not None:
+        externo = None
     if externo:
         async def _admin(sentencia: str) -> None:
             conexion = await asyncpg.connect(externo)
@@ -69,14 +86,14 @@ def a_asyncpg(dsn: str) -> str:
 
 
 @contextmanager
-def base_migrada():
+def base_migrada(preferir_embebido: bool = False):
     """Base PostgreSQL exclusiva con `alembic upgrade head` aplicado."""
     from alembic.config import Config
 
     from alembic import command
     from src.infrastructure.config import get_settings
 
-    with _servidor() as dsn:
+    with _servidor(preferir_embebido) as dsn:
         parche = pytest.MonkeyPatch()
         parche.setenv("DATABASE_URL", a_asyncpg(dsn))
         get_settings.cache_clear()

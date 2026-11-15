@@ -16,6 +16,7 @@ from src.domain.exceptions import DispositivoNoAutorizadoError, LecturaInvalidaE
 from src.domain.value_objects.device_id import PATRON_DEVICE_ID
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 from src.domain.value_objects.rol import Rol
+from src.infrastructure.ai import gobierno
 from src.infrastructure.ai.random_forest_service import get_random_forest_service
 from src.infrastructure.database.repositories.alerta_repository import SQLAlchemyAlertaRepository
 from src.infrastructure.database.repositories.audit_log_repository import SQLAlchemyAuditLogRepository
@@ -27,7 +28,12 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
 )
 from src.interface.api.api_protection import limitar_ingesta_lecturas
 from src.interface.api.deps import DbSessionDep, SettingsDep, require_roles
-from src.interface.api.mappers import lectura_to_response, serie_to_response, tipo_sse_lectura
+from src.interface.api.mappers import (
+    lectura_to_response,
+    serie_to_response,
+    tipo_sse_episodio,
+    tipo_sse_lectura,
+)
 from src.interface.api.schemas import LecturaIngestRequest, LecturaResponse, SerieTermicaResponse
 
 router = APIRouter(prefix="/api/lecturas", tags=["lecturas"])
@@ -59,7 +65,9 @@ async def ingestar_lectura(
     lectura_repository = SQLAlchemyLecturaRepository(session)
     alerta_repository = SQLAlchemyAlertaRepository(session)
     trazabilidad_repository = SQLAlchemyTrazabilidadRepository(session)
-    clasificar_use_case = ClasificarRiesgoTermicoUseCase(get_random_forest_service(), settings.ia_legado_modo)
+    # HU-46: el legado solo decide si es la versión activa y aprobada del registro.
+    modo_legado = gobierno.modo_legado_efectivo(settings)
+    clasificar_use_case = ClasificarRiesgoTermicoUseCase(get_random_forest_service(), modo_legado)
 
     use_case = RegistrarLecturaTermicaUseCase(
         lectura_repository,
@@ -72,7 +80,7 @@ async def ingestar_lectura(
         ventana_normalizacion_alerta_minutos=settings.alerta_ventana_normalizacion_minutos,
         minutos_normales_preventiva=settings.alerta_preventiva_minutos_normales,
         antiguedad_maxima_horas=settings.lectura_antiguedad_max_horas,
-        ia_legado_modo=settings.ia_legado_modo,
+        ia_legado_modo=modo_legado,
         ia_timeout_s=settings.ia_inferencia_timeout_s,
         ia_prueba_retardo_s=settings.ia_prueba_retardo_s,
         ia_prueba_excepcion=settings.ia_prueba_excepcion,
@@ -148,11 +156,15 @@ async def _emitir_eventos_sse(
     evento = respuesta.model_dump(mode="json")
     await broadcaster.publicar(evento, tipo_sse_lectura(lectura_guardada))
 
-    if lectura_guardada.nivel_riesgo is None:
+    # Como en MQTT: se sigue riesgo_efectivo (la regla 2-8 °C decide aunque el
+    # modelo no clasifique, IA-D18), y un episodio abierto distinto del previo
+    # es una alerta nueva (`tipo_sse_episodio`).
+    tipo_episodio = tipo_sse_episodio(episodio_previo, episodio_actual)
+    if lectura_guardada.riesgo_efectivo is None or tipo_episodio is None:
         return
-    if episodio_previo is not None and episodio_actual is None:
+    if tipo_episodio == "recuperacion":
         await broadcaster.publicar(evento, "recuperacion")
-    elif episodio_actual is not None:
+    else:
         await broadcaster.publicar(
             {
                 **evento,
@@ -165,7 +177,7 @@ async def _emitir_eventos_sse(
                     if episodio_actual.normalizacion_desde else None
                 ),
             },
-            "alerta" if episodio_previo is None else "episodio_actualizado",
+            tipo_episodio,
         )
 
 

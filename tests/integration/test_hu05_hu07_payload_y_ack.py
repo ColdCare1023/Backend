@@ -131,6 +131,39 @@ async def test_backend_publica_ack_solo_despues_del_commit(entorno):
 
 
 @pytest.mark.asyncio
+async def test_hu22_commit_fallido_no_publica_acuse(entorno, monkeypatch):
+    """HU-22 esc. 3: si PostgreSQL no confirma el COMMIT, no sale el acuse
+    lógico (el nodo conserva la lectura en LittleFS) y no queda nada a medias;
+    cuando la base vuelve, el reenvío de la MISMA lectura se persiste y se acusa."""
+    from sqlalchemy import func, select
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from src.infrastructure.database.models import ThermalReadingModel
+
+    cliente = _ClienteEspia()
+    commit_real = AsyncSession.commit
+
+    async def commit_que_falla(self):
+        raise RuntimeError("PostgreSQL no disponible")
+
+    mensaje = _payload(reading_id="esp32-hu22-1", boot_id=9, seq_no=1)
+    monkeypatch.setattr(AsyncSession, "commit", commit_que_falla)
+    with pytest.raises(RuntimeError):
+        await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, mensaje), _BroadcasterMudo(), cliente)
+    monkeypatch.setattr(AsyncSession, "commit", commit_real)
+
+    assert cliente.publicados == []
+    async with entorno() as session:
+        assert await session.scalar(select(func.count()).select_from(ThermalReadingModel)) == 0
+
+    # Reenvío desde el buffer: ahora sí se confirma y se acusa una sola vez.
+    await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, mensaje), _BroadcasterMudo(), cliente)
+    assert [(c["reading_id"], c["estado"]) for _, c, _ in cliente.publicados] == [("esp32-hu22-1", "commit_confirmado")]
+    async with entorno() as session:
+        assert await session.scalar(select(func.count()).select_from(ThermalReadingModel)) == 1
+
+
+@pytest.mark.asyncio
 async def test_sin_cliente_no_falla_el_pipeline(entorno):
     """Pruebas/entornos que invocan el manejador directamente sin un broker
     real (client=None) no deben romperse: el acuse simplemente se omite."""

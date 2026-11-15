@@ -354,7 +354,12 @@ class RegistrarAltaDispositivoUseCase:
 class ActualizarUbicacionYMetadatosInstalacionUseCase:
     """HU-51: documenta la ubicación física del DS18B20 y los metadatos de
     instalación. Un cambio de ubicación genera un evento histórico (HU-49)
-    en vez de sobrescribir en silencio la ubicación previa."""
+    en vez de sobrescribir en silencio la ubicación previa.
+
+    `campos_enviados` (semántica PATCH): si se indica, los campos que no
+    figuran conservan su valor actual — omitir `ubicacion` ya no la borra. Un
+    `None` enviado explícitamente sí la borra. Sin `campos_enviados` se
+    reemplazan los tres (comportamiento anterior, para otros llamadores)."""
 
     def __init__(
         self, device_repository: IDeviceRepository, registrar_hash: RegistrarHashEncadenadoUseCase
@@ -369,10 +374,18 @@ class ActualizarUbicacionYMetadatosInstalacionUseCase:
         fecha_instalacion: date | None,
         instalado_por: UUID,
         observaciones: str | None,
+        campos_enviados: set[str] | frozenset[str] | None = None,
     ) -> dict:
         anterior = await self._device_repository.obtener(device_id)
         if anterior is None:
             raise RecursoNoEncontradoError(f"Dispositivo {device_id} no encontrado")
+        if campos_enviados is not None:
+            if "ubicacion" not in campos_enviados:
+                ubicacion = anterior["ubicacion"]
+            if "fecha_instalacion" not in campos_enviados:
+                fecha_instalacion = anterior.get("fecha_instalacion")
+            if "observaciones" not in campos_enviados:
+                observaciones = anterior.get("observaciones_instalacion")
 
         actualizado = await self._device_repository.actualizar_ubicacion_y_metadata(
             device_id, ubicacion, fecha_instalacion, instalado_por, observaciones
@@ -415,9 +428,10 @@ class ActualizarUbicacionYMetadatosInstalacionUseCase:
 
 
 class ActualizarResponsableDispositivoUseCase:
-    """HU-53/HU-54: registra quién recibe los avisos de excursión crítica de
-    este dispositivo por correo y SMS — reemplaza el destinatario único
-    global (SMTP_TO) por uno propio de cada unidad monitoreada."""
+    """HU-52: registra quién recibe el correo de excursión crítica de este
+    dispositivo — reemplaza el destinatario único global (SMTP_TO) por uno
+    propio de cada unidad monitoreada. HU-53 (v3.3): el SMS se retiró; el
+    teléfono se sigue guardando solo por compatibilidad."""
 
     def __init__(
         self, device_repository: IDeviceRepository, registrar_hash: RegistrarHashEncadenadoUseCase
@@ -481,6 +495,47 @@ class ActualizarResponsableDispositivoUseCase:
 # HU-43/HU-44: operaciones sobre el usuario del nodo en el broker.
 OPERACION_BROKER_APROVISIONAR = "aprovisionar"
 OPERACION_BROKER_RETIRAR = "retirar"
+# Expulsión de la sesión MQTT abierta (`DELETE /clients/{id}`). No deja nada
+# pendiente: la sesión ya no existe o el nodo se reconectará con la credencial
+# vigente; solo se registra su resultado.
+OPERACION_BROKER_EXPULSAR_SESION = "expulsar_sesion"
+
+# Eventos (bitácora y cadena del dispositivo) del resultado de una llamada a la
+# API del broker. BROKER_OPERACION_PENDIENTE (lo que el broker no confirmó)
+# lo registra RegistrarResultadoBrokerUseCase.
+EVENTO_BROKER_SINCRONIZADO = "BROKER_OPERACION_SINCRONIZADA"
+EVENTO_BROKER_FALLIDO = "BROKER_OPERACION_FALLIDA"
+
+
+class RegistrarSincronizacionBrokerUseCase:
+    """HU-43 esc. 4 / HU-44 esc. 3: el resultado de una operación que la API del
+    broker SÍ ejecutó (o que falló sin dejar nada pendiente, como una expulsión)
+    queda como eslabón de la cadena del dispositivo, igual que
+    BROKER_OPERACION_PENDIENTE y BROKER_CONSOLA_CONFIRMADA. Antes solo dejaba
+    rastro lo que quedaba pendiente: un aprovisionamiento por API no tenía
+    evidencia del resultado de sincronización que piden los criterios."""
+
+    def __init__(self, registrar_hash: RegistrarHashEncadenadoUseCase) -> None:
+        self._registrar_hash = registrar_hash
+
+    async def execute(
+        self, device_id: str, operacion: str, exitosa: bool, actor_id: UUID | None, detalle: dict
+    ) -> str:
+        """Devuelve la acción registrada (sincronizada o fallida)."""
+        evento = EVENTO_BROKER_SINCRONIZADO if exitosa else EVENTO_BROKER_FALLIDO
+        await self._registrar_hash.execute(
+            tipo_evento=evento,
+            payload={
+                **detalle,
+                "device_id": device_id,
+                "operacion": operacion,
+                "actor_id": str(actor_id) if actor_id else None,
+            },
+            device_id=device_id,
+            usuario_id=actor_id,
+            timestamp=datetime.now(tz=timezone.utc),
+        )
+        return evento
 
 
 class RegistrarResultadoBrokerUseCase:
@@ -665,6 +720,10 @@ class ConsultarHistorialConfiguracionUseCase:
         desde: datetime | None = None,
         hasta: datetime | None = None,
     ) -> list[dict]:
+        # Un device_id inexistente no es «sin cambios»: 404 (un dispositivo
+        # dado de baja sigue existiendo y conserva su historial).
+        if await self._device_repository.obtener(device_id) is None:
+            raise RecursoNoEncontradoError(f"Dispositivo {device_id} no encontrado")
         filas = describir_historial(await self._device_repository.listar_historial_configuracion(device_id))
         if categoria is not None:
             filas = [f for f in filas if f["categoria"] == categoria]

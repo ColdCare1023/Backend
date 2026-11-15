@@ -295,15 +295,15 @@ async def test_probar_notificaciones_usa_el_notificador_real(monkeypatch):
         def __init__(self, ajustes) -> None:
             pass
 
-        async def notificar(self, nombre, email, telefono):
+        async def notificar(self, nombre, email):
             from src.infrastructure.notifications.bienvenida import ResultadoBienvenida
 
-            llamadas.append((email, telefono))
-            return ResultadoBienvenida(correo="enviado", sms="no_configurado")
+            llamadas.append(email)
+            return ResultadoBienvenida(correo="enviado")
 
     monkeypatch.setattr(probar_notificaciones, "NotificadorBienvenida", _Notificador)
-    assert await probar_notificaciones.probar("yo@ejemplo.com", "+51999888777") == ("enviado", "no_configurado")
-    assert llamadas == [("yo@ejemplo.com", "+51999888777")]
+    assert await probar_notificaciones.probar("yo@ejemplo.com") == "enviado"
+    assert llamadas == ["yo@ejemplo.com"]
 
 
 def test_guardar_credenciales_reemplaza_sin_romperse_con_caracteres_especiales():

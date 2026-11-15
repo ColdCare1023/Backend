@@ -47,6 +47,13 @@ VERSION = "rf-integracion-1.0.0"
 BASE = datetime.now(tz=timezone.utc).replace(microsecond=0) - timedelta(hours=3)
 
 
+def _activo(raiz) -> ServicioPrediccionPreventiva:
+    """Modo activo con la versión ACTIVA del registro de la base (HU-46): la
+    misma versión y el mismo SHA-256 configurados."""
+    sha = registro.leer_manifiesto(VERSION, raiz)["artefacto"]["sha256"]
+    return ServicioPrediccionPreventiva(MODO_ACTIVO, VERSION, sha, raiz=raiz, version_activa=(VERSION, sha))
+
+
 def _registrar_modelo(raiz, aprobado: bool):
     nombres = nombres_features(CONFIG)
     rng = np.random.default_rng(0)
@@ -145,7 +152,7 @@ async def test_modo_sombra_no_cambia_el_payload_de_trazabilidad(db_session_facto
 
 async def test_modo_activo_decide_el_nivel_y_la_excursion_sigue_siendo_critica(db_session_factory, tmp_path):
     _registrar_modelo(tmp_path, aprobado=True)
-    servicio = ServicioPrediccionPreventiva(MODO_ACTIVO, VERSION, raiz=tmp_path)
+    servicio = _activo(tmp_path)
     temps = [5.0] * 20 + [5.0 + 0.12 * i for i in range(1, 6)] + [9.5]
     lecturas = await _ingestar_serie(db_session_factory, "ESP32-PREV-ACT", servicio, temps)
     assert lecturas[0].origen_clasificacion == "dato_insuficiente"
@@ -154,7 +161,11 @@ async def test_modo_activo_decide_el_nivel_y_la_excursion_sigue_siendo_critica(d
     # Con el preventivo activo y aprobado manda el modelo: el riesgo efectivo es preventivo.
     assert subida.riesgo_efectivo == NivelRiesgo.RIESGO_PREVENTIVO
     assert subida.modelo_version == VERSION
-    assert subida.confianza_ia is None, "una puntuación no calibrada no se presenta como probabilidad"
+    # HU-18 esc. 1: se guardan las probabilidades de ambas clases (predict_proba)
+    # y la lectura deja constancia de que el manifiesto no las declara calibradas.
+    assert set(subida.probabilidades_ia) == {"normal", "riesgo_preventivo"}
+    assert subida.confianza_ia == round(subida.probabilidades_ia["riesgo_preventivo"], 4)
+    assert subida.payload["puntuacion_calibrada"] is False
     critica = lecturas[-1]
     assert critica.nivel_riesgo is None
     assert critica.riesgo_efectivo == NivelRiesgo.EXCURSION_CRITICA
@@ -221,7 +232,7 @@ async def test_preventivo_activo_aprobado_abre_la_alerta_preventiva_aun_con_el_l
     db_session_factory, tmp_path
 ):
     _registrar_modelo(tmp_path, aprobado=True)
-    servicio = ServicioPrediccionPreventiva(MODO_ACTIVO, VERSION, raiz=tmp_path)
+    servicio = _activo(tmp_path)
     temps = [5.0] * 20 + [5.0 + 0.12 * i for i in range(1, 6)]
     await _ingestar_serie(db_session_factory, "ESP32-PREV-ACTALERTA", servicio, temps, legado="experimental")
     async with db_session_factory() as session:

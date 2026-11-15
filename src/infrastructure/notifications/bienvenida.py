@@ -1,11 +1,12 @@
-"""Aviso real al crear una cuenta: correo y SMS al usuario recién registrado.
+"""Aviso real al crear una cuenta: correo al usuario recién registrado.
 
 Usa los mismos transportes de producción que las alertas (SMTP/Resend/Apps
-Script para el correo, pasarela compatible con Twilio para el SMS); no hay un
-canal de prueba aparte. Nunca incluye una contraseña. Con correo disponible, la
-bienvenida lleva un código de activación (48 h) para que el titular elija su
-propia contraseña en FRONTEND_URL/recuperar-contrasena. Nunca lanza: cada canal
-devuelve su resultado y quien llama lo audita.
+Script); no hay un canal de prueba aparte. Nunca incluye una contraseña. Con
+correo disponible, la bienvenida lleva un código de activación (48 h) para que
+el titular elija su propia contraseña en FRONTEND_URL/recuperar-contrasena.
+Nunca lanza: devuelve el resultado y quien llama lo audita.
+
+HU-53 (v3.3): el SMS de bienvenida se retiró junto con el canal SMS.
 """
 
 import logging
@@ -14,7 +15,6 @@ from typing import TYPE_CHECKING
 
 from src.infrastructure.config import Settings
 from src.infrastructure.notifications.correos_cuenta import correo_cuenta_creada
-from src.infrastructure.notifications.notificacion_service import obtener_notificacion_service
 from src.infrastructure.notifications.transporte_email import (
     ErrorEnvioCorreo,
     MensajeCorreo,
@@ -31,13 +31,11 @@ logger = logging.getLogger("infrastructure.notifications.bienvenida")
 ENVIADO = "enviado"
 FALLIDO = "fallido"
 NO_CONFIGURADO = "no_configurado"
-SIN_TELEFONO = "sin_telefono"
 
 
 @dataclass(frozen=True, slots=True)
 class ResultadoBienvenida:
     correo: str
-    sms: str
 
 
 def componer_correo(settings: Settings, nombre: str, email: str) -> MensajeCorreo:
@@ -49,11 +47,6 @@ def componer_correo(settings: Settings, nombre: str, email: str) -> MensajeCorre
         cuerpo=correo.cuerpo,
         html=correo.html,
     )
-
-
-def componer_sms(settings: Settings) -> str:
-    enlace = f" {settings.frontend_url.rstrip('/')}" if settings.frontend_url else ""
-    return f"ColdCare: se creo tu cuenta. Tu usuario es tu correo; el administrador te dara la clave temporal.{enlace}"
 
 
 class NotificadorBienvenida:
@@ -87,14 +80,12 @@ class NotificadorBienvenida:
         )
 
     async def notificar(
-        self, nombre: str, email: str, telefono: str | None, activacion: MensajeCorreo | None = None
+        self, nombre: str, email: str, activacion: MensajeCorreo | None = None
     ) -> ResultadoBienvenida:
-        return ResultadoBienvenida(
-            correo=await self._correo(nombre, email, activacion), sms=await self._sms(telefono)
-        )
+        return ResultadoBienvenida(correo=await self._correo(nombre, email, activacion))
 
     async def enviar_activacion(self, mensaje: MensajeCorreo) -> str:
-        """Solo el correo de activación (sin SMS): lo usa `scripts.asegurar_admins`."""
+        """Solo el correo de activación: lo usa `scripts.asegurar_admins`."""
         return await self._correo("", mensaje.destinatario, mensaje)
 
     async def _correo(self, nombre: str, email: str, activacion: MensajeCorreo | None = None) -> str:
@@ -106,12 +97,3 @@ class NotificadorBienvenida:
             logger.exception("No se pudo enviar el correo de bienvenida.")  # sin el destinatario en el log
             return FALLIDO
         return ENVIADO
-
-    async def _sms(self, telefono: str | None) -> str:
-        if not telefono:
-            return SIN_TELEFONO
-        if not self._settings.sms_enabled:
-            return NO_CONFIGURADO
-        servicio = obtener_notificacion_service(self._settings)
-        enviado = await servicio.enviar_sms_a(telefono, componer_sms(self._settings), "bienvenida")
-        return ENVIADO if enviado else FALLIDO

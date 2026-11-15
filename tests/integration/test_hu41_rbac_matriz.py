@@ -29,7 +29,9 @@ MATRIZ_ESPERADA: dict[tuple[str, str], frozenset[str] | str] = {
     ("GET", "/api/alertas"): frozenset({AU, F, T}),
     ("PATCH", "/api/alertas/{alerta_id}/revisar"): frozenset({F}),
     ("GET", "/api/alertas/{alerta_id}/acciones-correctivas"): frozenset({AU, F, T}),
-    ("POST", "/api/alertas/{alerta_id}/acciones-correctivas"): frozenset({F, T}),
+    # H16 (HU-27: «Químico Farmacéutico responsable»): el técnico ya no la
+    # registra; sobre una alerta PENDIENTE equivaldría a reconocerla (HU-23).
+    ("POST", "/api/alertas/{alerta_id}/acciones-correctivas"): frozenset({F}),
     ("POST", "/api/alertas/acciones-correctivas/{accion_id}/rectificar"): frozenset({F, T}),
     ("GET", "/api/auditoria"): frozenset({A, AU}),
     # HU-42/HU-50: exportación CSV de la bitácora (auditada).
@@ -75,7 +77,11 @@ MATRIZ_ESPERADA: dict[tuple[str, str], frozenset[str] | str] = {
     ("POST", "/api/ia/modelo/versiones"): frozenset({A}),
     ("GET", "/api/ia/modelo/versiones"): frozenset({A, AU}),
     ("POST", "/api/ia/modelo/versiones/{version}/activar"): frozenset({A}),
+    # P-12: desactivar es la otra mitad del gobierno de versiones (mismo rol).
+    ("POST", "/api/ia/modelo/versiones/{version}/desactivar"): frozenset({A}),
     ("GET", "/api/ia/inferencia/{lectura_id}"): frozenset({AU, F}),
+    # HU-47 esc. 3: todo intento de escritura (también POST) se rechaza con 405 y se audita.
+    ("POST", "/api/ia/inferencia/{lectura_id}"): AUTENTICADO,
     ("PUT", "/api/ia/inferencia/{lectura_id}"): AUTENTICADO,
     ("PATCH", "/api/ia/inferencia/{lectura_id}"): AUTENTICADO,
     ("DELETE", "/api/ia/inferencia/{lectura_id}"): AUTENTICADO,

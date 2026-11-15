@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, sta
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.gestionar_dispositivos import (
     OPERACION_BROKER_APROVISIONAR,
+    OPERACION_BROKER_EXPULSAR_SESION,
     OPERACION_BROKER_RETIRAR,
     ActualizarIntervaloReporteUseCase,
     ActualizarResponsableDispositivoUseCase,
@@ -18,6 +19,7 @@ from src.application.use_cases.gestionar_dispositivos import (
     RegistrarAltaDispositivoUseCase,
     RegistrarCalibracionUseCase,
     RegistrarResultadoBrokerUseCase,
+    RegistrarSincronizacionBrokerUseCase,
     RevocarCredencialDispositivoUseCase,
     RotarCredencialDispositivoUseCase,
 )
@@ -38,6 +40,7 @@ from src.domain.repositories.i_incidente_repository import (
     IncidenteOperativo,
 )
 from src.domain.value_objects.device_id import PATRON_DEVICE_ID
+from src.domain.value_objects.resultado_auditoria import ResultadoAuditoria
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.database.repositories.audit_log_repository import SQLAlchemyAuditLogRepository
 from src.infrastructure.database.repositories.device_repository import SQLAlchemyDeviceRepository
@@ -112,9 +115,15 @@ async def _registrar_resultado_broker(
     resultado: bool | None,
     actor_id,
     ip: str | None,
+    *,
+    origen: str,
+    motivo_operacion: str | None = None,
 ) -> bool:
     """HU-44 Escenario 3: tras el COMMIT de la operación, deja persistente (y
-    auditado) lo que el broker no confirmó. Devuelve True si quedó pendiente."""
+    auditado) lo que el broker no confirmó. Devuelve True si quedó pendiente.
+
+    HU-43 esc. 4: si la API del broker SÍ la confirmó, el resultado también
+    queda auditado y encadenado (BROKER_OPERACION_SINCRONIZADA)."""
     motivo = _motivo_pendiente(broker, resultado)
     pendiente = await RegistrarResultadoBrokerUseCase(
         SQLAlchemyDeviceRepository(session), RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session))
@@ -130,8 +139,63 @@ async def _registrar_resultado_broker(
             ip_origen=ip,
             device_id=device_id,
         )
-    await session.commit()
+        await session.commit()
+    else:
+        await _registrar_sincronizacion(session, device_id, operacion, True, actor_id, ip, origen, motivo_operacion)
     return pendiente
+
+
+async def _registrar_sincronizacion(
+    session,
+    device_id: str,
+    operacion: str,
+    exitosa: bool,
+    actor_id,
+    ip: str | None,
+    origen: str,
+    motivo_operacion: str | None = None,
+) -> None:
+    """HU-43 esc. 4 / HU-44 esc. 3: resultado de una llamada a la API del broker,
+    con quién, qué operación, desde qué flujo (`origen`) y el motivo declarado.
+    Eslabón propio en la cadena del dispositivo y fila de la bitácora (de solo
+    anexado), también encadenada en esa cadena."""
+    detalle: dict = {"operacion": operacion, "origen": origen}
+    if motivo_operacion:
+        detalle["motivo"] = motivo_operacion
+    accion = await RegistrarSincronizacionBrokerUseCase(
+        RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session))
+    ).execute(device_id, operacion, exitosa, actor_id, detalle)
+    await AuditarAccionCriticaUseCase(
+        SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+    ).execute(
+        usuario_id=actor_id,
+        accion=accion,
+        recurso=f"dispositivos/{device_id}/broker",
+        detalle=detalle,
+        ip_origen=ip,
+        device_id=device_id,
+        resultado=ResultadoAuditoria.EXITOSO if exitosa else ResultadoAuditoria.FALLIDO,
+    )
+    await session.commit()
+
+
+async def _registrar_expulsion(
+    session,
+    device_id: str,
+    resultado: bool | None,
+    actor_id,
+    ip: str | None,
+    origen: str,
+    motivo_operacion: str | None = None,
+) -> None:
+    """Resultado de `desconectar_cliente`: True (cerrada o sin sesión abierta)
+    queda como sincronizada; False, como fallida. None = sin API del broker
+    configurada: no se intentó y no se inventa ningún resultado."""
+    if resultado is None:
+        return
+    await _registrar_sincronizacion(
+        session, device_id, OPERACION_BROKER_EXPULSAR_SESION, resultado, actor_id, ip, origen, motivo_operacion
+    )
 
 
 def _mensaje_aprovisionar(device_id: str, resultado: bool | None, alta: bool = False) -> str | None:
@@ -238,7 +302,7 @@ async def dar_de_alta(
     # BE-002: tras el COMMIT, igual que en la rotación.
     aprovisionada = await broker.aprovisionar_credencial(body.device_id, token)
     await _registrar_resultado_broker(
-        session, broker, body.device_id, OPERACION_BROKER_APROVISIONAR, aprovisionada, admin.id, ip
+        session, broker, body.device_id, OPERACION_BROKER_APROVISIONAR, aprovisionada, admin.id, ip, origen="alta"
     )
     dispositivo = await repositorio.obtener(body.device_id)
     return DispositivoAltaResponse(
@@ -518,9 +582,14 @@ async def dar_de_baja(
     eliminada = await broker.eliminar_credencial(device_id)
     if eliminada is not True:
         logger.warning("Dispositivo %s dado de baja, pero su credencial no se eliminó del broker.", device_id)
-    if await broker.desconectar_cliente(device_id) is not True:
+    expulsada = await broker.desconectar_cliente(device_id)
+    if expulsada is not True:
         logger.warning("Dispositivo %s dado de baja, pero su sesión MQTT no se pudo expulsar.", device_id)
-    await _registrar_resultado_broker(session, broker, device_id, OPERACION_BROKER_RETIRAR, eliminada, admin.id, ip)
+    await _registrar_resultado_broker(
+        session, broker, device_id, OPERACION_BROKER_RETIRAR, eliminada, admin.id, ip,
+        origen="baja", motivo_operacion=body.motivo,
+    )
+    await _registrar_expulsion(session, device_id, expulsada, admin.id, ip, "baja", body.motivo)
     return DispositivoResponse(**(await repositorio.obtener(device_id) or dispositivo))
 
 
@@ -571,8 +640,10 @@ async def rotar_credencial(
     await _anotar_expulsion(session, device_id, "rotacion")
     cerrada = await broker.desconectar_cliente(device_id)
     pendiente = await _registrar_resultado_broker(
-        session, broker, device_id, OPERACION_BROKER_APROVISIONAR, aprovisionada, admin.id, ip
+        session, broker, device_id, OPERACION_BROKER_APROVISIONAR, aprovisionada, admin.id, ip,
+        origen="rotacion", motivo_operacion=body.motivo,
     )
+    await _registrar_expulsion(session, device_id, cerrada, admin.id, ip, "rotacion", body.motivo)
     # HU-44: si el token anterior se filtró y la consola sigue sin cambiar, el
     # broker aún lo acepta y el backend no distingue al nodo de quien lo tenga.
     # Hasta la confirmación, la ingesta retiene la telemetría sin acuse.
@@ -664,9 +735,14 @@ async def revocar_credencial(
     if eliminada is not True:
         logger.warning("Credencial de %s revocada, pero no se eliminó del broker.", device_id)
     await _anotar_expulsion(session, device_id, "revocacion")
-    if await broker.desconectar_cliente(device_id) is not True:
+    expulsada = await broker.desconectar_cliente(device_id)
+    if expulsada is not True:
         logger.warning("Credencial de %s revocada, pero su sesión MQTT no se pudo expulsar.", device_id)
-    await _registrar_resultado_broker(session, broker, device_id, OPERACION_BROKER_RETIRAR, eliminada, admin.id, ip)
+    await _registrar_resultado_broker(
+        session, broker, device_id, OPERACION_BROKER_RETIRAR, eliminada, admin.id, ip,
+        origen="revocacion", motivo_operacion=body.motivo,
+    )
+    await _registrar_expulsion(session, device_id, expulsada, admin.id, ip, "revocacion", body.motivo)
 
 
 @router.post("/{device_id}/broker/confirmar", response_model=DispositivoResponse)
@@ -717,8 +793,13 @@ async def confirmar_operacion_broker(
         )
     await session.commit()
     await _anotar_expulsion(session, device_id, "consola_confirmada")
-    if await broker.desconectar_cliente(device_id) is not True:
+    expulsada = await broker.desconectar_cliente(device_id)
+    if expulsada is not True:
         logger.warning("Consola confirmada para %s, pero su sesión MQTT no se pudo expulsar.", device_id)
+    await _registrar_expulsion(
+        session, device_id, expulsada, admin.id, request.client.host if request.client else None,
+        "consola_confirmada",
+    )
     if nonce is not None and await publicador.publicar(device_id, mensaje_desafio(device_id, nonce)) is not True:
         # El nodo puede estar reconectando: la ingesta lo reenvía con su próximo mensaje.
         logger.warning("Desafío de posesión para %s no publicado; se reenviará desde la ingesta.", device_id)
@@ -761,8 +842,13 @@ async def reenviar_desafio_posesion(
     )
     await session.commit()
     await _anotar_expulsion(session, device_id, "reenvio_desafio")
-    if await broker.desconectar_cliente(device_id) is not True:
+    expulsada = await broker.desconectar_cliente(device_id)
+    if expulsada is not True:
         logger.warning("Reenvío del desafío para %s: la sesión MQTT no se pudo expulsar.", device_id)
+    await _registrar_expulsion(
+        session, device_id, expulsada, admin.id, request.client.host if request.client else None,
+        "reenvio_desafio",
+    )
     if nonce is not None and await publicador.publicar(device_id, mensaje_desafio(device_id, nonce)) is not True:
         logger.warning("Desafío de posesión para %s no publicado; se reenviará desde la ingesta.", device_id)
     return DispositivoResponse(**(await repositorio.obtener(device_id) or {}))
@@ -819,7 +905,9 @@ async def actualizar_instalacion(
     )
     try:
         dispositivo = await use_case.execute(
-            device_id, body.ubicacion, body.fecha_instalacion, admin.id, body.observaciones
+            device_id, body.ubicacion, body.fecha_instalacion, admin.id, body.observaciones,
+            # PATCH: lo que el cliente no envía se conserva (exclude_unset).
+            campos_enviados=set(body.model_dump(exclude_unset=True)),
         )
     except RecursoNoEncontradoError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -830,7 +918,7 @@ async def actualizar_instalacion(
         usuario_id=admin.id,
         accion="ACTUALIZAR_INSTALACION_DISPOSITIVO",
         recurso=f"dispositivos/{device_id}/instalacion",
-        detalle={"ubicacion": body.ubicacion},
+        detalle={"ubicacion": dispositivo["ubicacion"]},
         ip_origen=request.client.host if request.client else None,
         device_id=device_id,
     )
@@ -846,9 +934,10 @@ async def actualizar_responsable(
     request: Request,
     admin=Depends(router_dep),
 ) -> DispositivoResponse:
-    """HU-53/HU-54: destinatario de las notificaciones de excursión crítica
-    de este dispositivo por correo y SMS, en vez del destinatario único
-    global. Un cambio queda como evento histórico (HU-49)."""
+    """HU-52: destinatario del correo de excursión crítica de este
+    dispositivo, en vez del destinatario único global. Un cambio queda como
+    evento histórico (HU-49). HU-53 (v3.3): sin SMS; `telefono` se conserva
+    solo por compatibilidad."""
     repositorio = SQLAlchemyDeviceRepository(session)
     use_case = ActualizarResponsableDispositivoUseCase(
         repositorio, RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session))
@@ -888,9 +977,13 @@ async def historial_configuracion(
     """HU-49: historial auditable de cambios de configuración/instalación/
     calibración/reemplazo de un dispositivo, de solo lectura. Esc. 2: cada
     cambio dice desde cuándo y hasta cuándo estuvo vigente, quién lo hizo
-    (`actor_nombre`) y se filtra por categoría, campo o periodo."""
+    (`actor_nombre`) y se filtra por categoría, campo o periodo. 404 si el
+    dispositivo no existe."""
     use_case = ConsultarHistorialConfiguracionUseCase(SQLAlchemyDeviceRepository(session))
-    historial = await use_case.execute(device_id, categoria=categoria, campo=campo, desde=desde, hasta=hasta)
+    try:
+        historial = await use_case.execute(device_id, categoria=categoria, campo=campo, desde=desde, hasta=hasta)
+    except RecursoNoEncontradoError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     usuarios = SQLAlchemyUsuarioRepository(session)
     nombres = {
         actor: nombre_visible(await usuarios.obtener_por_id(actor))

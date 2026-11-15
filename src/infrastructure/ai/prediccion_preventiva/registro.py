@@ -108,10 +108,34 @@ def registrar(modelo, manifiesto: dict, raiz: Path = RAIZ_REGISTRO) -> Path:
 
 
 def leer_manifiesto(version: str, raiz: Path = RAIZ_REGISTRO) -> dict:
-    ruta = directorio_version(version, raiz) / ARCHIVO_MANIFIESTO
+    ruta = ruta_manifiesto(version, raiz)
     if not ruta.exists():
         raise ErrorRegistro(f"No existe el manifiesto de la versión {version}")
     return json.loads(ruta.read_text(encoding="utf-8"))
+
+
+def ruta_manifiesto(version: str, raiz: Path = RAIZ_REGISTRO) -> Path:
+    return directorio_version(version, raiz) / ARCHIVO_MANIFIESTO
+
+
+def sha256_manifiesto_en_historial(version: str, raiz: Path = RAIZ_REGISTRO) -> str | None:
+    """SHA-256 que la bitácora `historial.json` anotó para el manifiesto de
+    `version` en su último registro o cambio de estado, o None si la bitácora
+    no existe, no se puede leer o no tiene esa versión.
+
+    Solo `registrar` y `cambiar_estado` (la CLI) escriben el manifiesto y
+    anotan su hash: un manifiesto editado a mano ya no coincide (IA-B05 v7)."""
+    ruta = raiz / ARCHIVO_HISTORIAL
+    try:
+        historial = json.loads(ruta.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(historial, list):
+        return None
+    for entrada in reversed(historial):
+        if isinstance(entrada, dict) and entrada.get("version") == version and entrada.get("sha256_manifiesto"):
+            return str(entrada["sha256_manifiesto"])
+    return None
 
 
 def cargar_verificado(version: str, raiz: Path = RAIZ_REGISTRO, sha256_esperado: str | None = None):

@@ -48,17 +48,22 @@ class SQLAlchemyTrazabilidadRepository(ITrazabilidadRepository):
         await self._session.refresh(model)
         return _to_entity(model)
 
-    async def obtener_ultimo_eslabon(self, chain_id: str) -> tuple[str, int]:
+    async def bloquear_cadena(self, chain_id: str) -> None:
         if self._session.bind is not None and self._session.bind.dialect.name == "postgresql":
             # Candado por cadena (hashtext(chain_id) -> int, cast implícito a
             # bigint): serializa lectura-luego-escritura SOLO dentro de la
             # misma cadena; cadenas de dispositivos distintos no se bloquean
             # entre sí. Se libera automáticamente al terminar la transacción
-            # (variante _xact_). Sin efecto en SQLite (tests con aiosqlite).
+            # (variante _xact_) y es reentrante dentro de ella: tomarlo antes
+            # de actualizar una alerta y otra vez al encadenar su eslabón no
+            # espera. Sin efecto en SQLite (tests con aiosqlite).
             await self._session.execute(
                 text("SELECT pg_advisory_xact_lock(hashtext(:chain_id))"),
                 {"chain_id": chain_id},
             )
+
+    async def obtener_ultimo_eslabon(self, chain_id: str) -> tuple[str, int]:
+        await self.bloquear_cadena(chain_id)
         # Desempate por `id` además de `chain_seq`/`created_at`: incluso dentro
         # de una misma cadena, dos inserciones podrían compartir created_at por
         # resolución de reloj; el mismo criterio de desempate debe usarse aquí

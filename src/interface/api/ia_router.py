@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
@@ -8,7 +9,9 @@ from src.application.use_cases.gestionar_modelo_ia import (
     ActivacionBloqueadaError,
     ActivarVersionModeloUseCase,
     ConsultarInferenciaLecturaUseCase,
+    DesactivarVersionModeloUseCase,
     RegistrarVersionModeloUseCase,
+    VersionNoActivaError,
     evaluar_criterios_modelo,
     motivos_bloqueo_activacion,
 )
@@ -16,10 +19,14 @@ from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEnc
 from src.domain.entities.version_modelo_ia import VersionModeloIA
 from src.domain.exceptions import DomainError, RecursoNoEncontradoError
 from src.domain.value_objects.rol import Rol
+from src.infrastructure.ai import gobierno
 from src.infrastructure.ai.features import FeaturesRiesgoTermico
 from src.infrastructure.ai.prediccion_preventiva import registro as registro_preventivo
 from src.infrastructure.ai.prediccion_preventiva.servicio import obtener_servicio_preventivo
-from src.infrastructure.ai.random_forest_service import get_random_forest_service
+from src.infrastructure.ai.random_forest_service import (
+    CODIGOS_RECHAZO,
+    get_random_forest_service,
+)
 from src.infrastructure.config import get_settings
 from src.infrastructure.database.repositories.audit_log_repository import SQLAlchemyAuditLogRepository
 from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
@@ -32,6 +39,7 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
 )
 from src.interface.api.deps import CurrentUserDep, DbSessionDep, SettingsDep, require_roles
 from src.interface.api.schemas import (
+    DesactivarVersionModeloRequest,
     InferenciaLecturaResponse,
     RegistrarVersionModeloRequest,
     VersionModeloResponse,
@@ -92,7 +100,21 @@ class ClasificacionResponse(BaseModel):
     estado_inferencia: str
 
 
-@router.get("/modelo")
+def _no_disponible(detalle: str, codigo: str, rechazado: bool) -> JSONResponse:
+    """503 del modelo legado: `detail` como siempre y, aditivos, `motivo`
+    (no_entrenado, sin_metricas, checksum_invalido, hash_distinto_de_la_version_activa,
+    sin_verificacion_de_integridad, incompatible, error_de_lectura) y
+    `rechazado_por_verificacion`."""
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": detalle, "motivo": codigo, "rechazado_por_verificacion": rechazado},
+    )
+
+
+@router.get(
+    "/modelo",
+    responses={503: {"description": "Modelo no disponible: `motivo` distingue no entrenado de rechazado."}},
+)
 async def obtener_metadata_modelo(
     _usuario=Depends(require_roles(Rol.FARMACEUTICO, Rol.AUDITOR)),
 ) -> dict:
@@ -102,17 +124,22 @@ async def obtener_metadata_modelo(
     servicio = get_random_forest_service()
     metricas = servicio.metricas_entrenamiento()
     # HU-16 esc. 2: un artefacto alterado o que no es el de la versión activa
-    # deja el modelo «no disponible» (503), nunca un 500.
-    if servicio.motivo_rechazo() is not None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="El modelo Random Forest no está disponible: el artefacto no superó la verificación de "
+    # deja el modelo «no disponible» (503), nunca un 500. P1-7: el cuerpo dice
+    # además, con un código estable, si fue un rechazo por verificación o si
+    # simplemente no hay modelo entrenado (`detail` se conserva igual).
+    codigo = servicio.motivo_codigo()
+    if codigo in CODIGOS_RECHAZO:
+        return _no_disponible(
+            "El modelo Random Forest no está disponible: el artefacto no superó la verificación de "
             "integridad o compatibilidad al cargarse.",
+            codigo,
+            rechazado=True,
         )
-    if not servicio.modelo_disponible or metricas is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="El modelo Random Forest no está entrenado en este entorno.",
+    if codigo is not None or metricas is None:
+        return _no_disponible(
+            "El modelo Random Forest no está entrenado en este entorno.",
+            codigo or "sin_metricas",
+            rechazado=False,
         )
     return {
         "modelo_disponible": True,
@@ -191,20 +218,40 @@ async def clasificar_prueba(
 
 
 @router.post(
-    "/modelo/versiones", response_model=VersionModeloResponse, status_code=status.HTTP_201_CREATED
+    "/modelo/versiones",
+    response_model=VersionModeloResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        409: {
+            "description": "La versión ya está registrada o, con `activar=true`, no puede activarse "
+            "(nada queda registrado). En el segundo caso, `codigos` trae un código estable por "
+            "motivo, igual que POST /modelo/versiones/{version}/activar.",
+        },
+    },
 )
 async def registrar_version_modelo(
     body: RegistrarVersionModeloRequest,
     session: DbSessionDep,
     request: Request,
+    settings: SettingsDep,
     admin=Depends(require_roles(Rol.ADMINISTRADOR)),
 ) -> VersionModeloResponse:
-    """HU-46 Escenario 1: registra una versión aprobada del modelo. No la
-    activa — ver POST /modelo/versiones/{version}/activar."""
+    """HU-46 Escenario 1: registra una versión aprobada del modelo. Con
+    `activar=true` además la marca como versión activa de producción, con las
+    mismas validaciones y auditoría que POST /modelo/versiones/{version}/activar;
+    si la activación se rechaza (409), no queda ni registrada ni activa y el
+    rechazo queda en la bitácora. Sin `activar` solo la registra."""
     repositorio = SQLAlchemyModeloIARepository(session)
     use_case = RegistrarVersionModeloUseCase(
         repositorio, RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session))
     )
+    if body.activar:
+        # Mismo orden de candados que /activar y /desactivar: primero el del
+        # cambio de versión y después el de la cadena SISTEMA, que el registro
+        # toma ya. Al revés, un /desactivar simultáneo era un interbloqueo en
+        # PostgreSQL (500 para uno de los dos). El candado es reentrante: la
+        # activación de más abajo lo vuelve a pedir sin esperar.
+        await repositorio.bloquear_cambio_de_version()
     try:
         registrada = await use_case.execute(
             version=body.version,
@@ -231,8 +278,68 @@ async def registrar_version_modelo(
         detalle={"version": body.version, "model_hash": body.model_hash},
         ip_origen=request.client.host if request.client else None,
     )
+    if not body.activar:
+        await session.commit()
+        return _version_a_response(registrada)
+
+    ip_origen = request.client.host if request.client else None
+    try:
+        activada = await _ejecutar_activacion(session, settings, body.version, admin.id)
+    except ActivacionBloqueadaError as exc:
+        # Registrar y activar es una sola operación: nada queda a medias.
+        await session.rollback()
+        await _auditar_rechazo_activacion(
+            session, admin.id, body.version, ip_origen,
+            {
+                "motivo": "criterios_no_cumplidos", "motivos": exc.motivos, "codigos": exc.codigos,
+                "al_registrar": True,
+            },
+        )
+        await session.commit()
+        # Mismas validaciones que /activar (IA-B05 v6 y v7 incluidas) y mismo
+        # cuerpo del 409: `detail` en texto y `codigos` estables (aditivo).
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": f"La versión no se registró ni se activó: {exc}", "codigos": exc.codigos},
+        )
+    await AuditarAccionCriticaUseCase(
+        SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+    ).execute(
+        usuario_id=admin.id,
+        accion="ACTIVAR_VERSION_MODELO_IA",
+        recurso=f"ia/modelo/versiones/{body.version}/activar",
+        detalle={"version": body.version, "al_registrar": True},
+        ip_origen=ip_origen,
+    )
     await session.commit()
-    return _version_a_response(registrada)
+    # HU-46 esc. 3: desde aquí solo se carga el artefacto de la versión activa.
+    gobierno.aplicar_version_activa(settings, activada)
+    return _version_a_response(activada)
+
+
+async def _ejecutar_activacion(session, settings, version: str, admin_id):
+    """HU-16 esc. 4 / HU-46: se valida el artefacto que realmente se cargará
+    (el preventivo con IA_PREVENTIVO_MODO=activo; si no, el legado)."""
+    use_case = ActivarVersionModeloUseCase(
+        SQLAlchemyModeloIARepository(session),
+        RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session)),
+        settings.ia_criterio_principal,
+        verificar_artefacto=gobierno.verificador_de_activacion(settings),
+        modelo=gobierno.modelo_gobernado(settings),
+    )
+    return await use_case.execute(version, admin_id)
+
+
+async def _auditar_rechazo_activacion(session, admin_id, version: str, ip_origen, detalle: dict) -> None:
+    await AuditarAccionCriticaUseCase(
+        SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+    ).execute(
+        usuario_id=admin_id,
+        accion="ACTIVAR_VERSION_MODELO_IA_RECHAZADO",
+        recurso=f"ia/modelo/versiones/{version}/activar",
+        detalle=detalle,
+        ip_origen=ip_origen,
+    )
 
 
 @router.get("/modelo/versiones", response_model=list[VersionModeloResponse])
@@ -244,7 +351,17 @@ async def listar_versiones_modelo(
     return [_version_a_response(v) for v in await repositorio.listar()]
 
 
-@router.post("/modelo/versiones/{version}/activar", response_model=VersionModeloResponse)
+@router.post(
+    "/modelo/versiones/{version}/activar",
+    response_model=VersionModeloResponse,
+    responses={
+        404: {"description": "Versión no registrada."},
+        409: {
+            "description": "La versión no puede activarse. `detail` trae los motivos en texto y "
+            "`codigos`, un código estable por motivo y en el mismo orden.",
+        },
+    },
+)
 async def activar_version_modelo(
     version: str,
     session: DbSessionDep,
@@ -256,36 +373,21 @@ async def activar_version_modelo(
     — la versión activa vigente permanece intacta. Escenario 4 de HU-18: una
     versión sin métricas, H y particiones, o que no cumple el criterio
     principal, tampoco se activa (409)."""
-    repositorio = SQLAlchemyModeloIARepository(session)
-    use_case = ActivarVersionModeloUseCase(
-        repositorio, RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session)),
-        settings.ia_criterio_principal,
-        get_random_forest_service().hash_artefacto,
-    )
+    ip_origen = request.client.host if request.client else None
     try:
-        activada = await use_case.execute(version, admin.id)
+        activada = await _ejecutar_activacion(session, settings, version, admin.id)
     except ActivacionBloqueadaError as exc:
-        await AuditarAccionCriticaUseCase(
-            SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
-        ).execute(
-            usuario_id=admin.id,
-            accion="ACTIVAR_VERSION_MODELO_IA_RECHAZADO",
-            recurso=f"ia/modelo/versiones/{version}/activar",
-            detalle={"motivo": "criterios_no_cumplidos", "motivos": exc.motivos},
-            ip_origen=request.client.host if request.client else None,
+        await _auditar_rechazo_activacion(
+            session, admin.id, version, ip_origen,
+            {"motivo": "criterios_no_cumplidos", "motivos": exc.motivos, "codigos": exc.codigos},
         )
         await session.commit()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except RecursoNoEncontradoError as exc:
-        await AuditarAccionCriticaUseCase(
-            SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
-        ).execute(
-            usuario_id=admin.id,
-            accion="ACTIVAR_VERSION_MODELO_IA_RECHAZADO",
-            recurso=f"ia/modelo/versiones/{version}/activar",
-            detalle={"motivo": "version_no_registrada"},
-            ip_origen=request.client.host if request.client else None,
+        # `detail` conserva el texto de siempre; `codigos` es aditivo (IA-B05).
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT, content={"detail": str(exc), "codigos": exc.codigos}
         )
+    except RecursoNoEncontradoError as exc:
+        await _auditar_rechazo_activacion(session, admin.id, version, ip_origen, {"motivo": "version_no_registrada"})
         await session.commit()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -300,8 +402,73 @@ async def activar_version_modelo(
     )
     await session.commit()
     # HU-46 esc. 3: desde aquí solo se carga el artefacto de la versión activa.
-    get_random_forest_service().fijar_hash_aprobado(activada.model_hash)
+    gobierno.aplicar_version_activa(settings, activada)
     return _version_a_response(activada)
+
+
+@router.post(
+    "/modelo/versiones/{version}/desactivar",
+    response_model=VersionModeloResponse,
+    responses={
+        404: {"description": "Versión no registrada."},
+        409: {"description": "`detail` = `version_no_activa`: la versión no es la activa (o ya se desactivó)."},
+    },
+)
+async def desactivar_version_modelo(
+    version: str,
+    body: DesactivarVersionModeloRequest,
+    session: DbSessionDep,
+    request: Request,
+    settings: SettingsDep,
+    admin=Depends(require_roles(Rol.ADMINISTRADOR)),
+) -> VersionModeloResponse:
+    """P-12: desactiva la versión activa sin activar otra. No queda ninguna
+    versión activa: el modelo preventivo en modo activo deja de cargarse
+    (`modelo_ia.preventivo.motivo_codigo=sin_version_activa_registrada` en
+    /health/detalle) y el riesgo efectivo vuelve a la línea base, la misma de
+    antes de cualquier activación. Queda el evento encadenado
+    MODELO_IA_VERSION_DESACTIVADA y la fila DESACTIVAR_VERSION_MODELO_IA."""
+    repositorio = SQLAlchemyModeloIARepository(session)
+    use_case = DesactivarVersionModeloUseCase(
+        repositorio, RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session)),
+        modelo=gobierno.modelo_gobernado(settings),
+    )
+    auditoria = AuditarAccionCriticaUseCase(
+        SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+    )
+    recurso = f"ia/modelo/versiones/{version}/desactivar"[:100]
+    ip_origen = request.client.host if request.client else None
+    try:
+        desactivada = await use_case.execute(version, admin.id, body.motivo)
+    except (RecursoNoEncontradoError, VersionNoActivaError) as exc:
+        no_activa = isinstance(exc, VersionNoActivaError)
+        await auditoria.execute(
+            usuario_id=admin.id,
+            accion="DESACTIVAR_VERSION_MODELO_IA_RECHAZADO",
+            recurso=recurso,
+            detalle={
+                "motivo": VersionNoActivaError.codigo if no_activa else "version_no_registrada",
+                "justificacion": body.motivo,
+            },
+            ip_origen=ip_origen,
+        )
+        await session.commit()
+        if no_activa:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=VersionNoActivaError.codigo) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    await auditoria.execute(
+        usuario_id=admin.id,
+        accion="DESACTIVAR_VERSION_MODELO_IA",
+        recurso=recurso,
+        detalle={"version": version, "motivo": body.motivo, "model_hash": desactivada.model_hash},
+        ip_origen=ip_origen,
+    )
+    await session.commit()
+    # Sin versión activa: el preventivo no carga y el legado vuelve a su
+    # verificación de siempre (línea base, P-12).
+    gobierno.aplicar_version_activa(settings, None)
+    return _version_a_response(desactivada)
 
 
 @router.get("/inferencia/{lectura_id}", response_model=InferenciaLecturaResponse)
@@ -327,7 +494,8 @@ async def consultar_inferencia_lectura(
 
 
 @router.api_route(
-    "/inferencia/{lectura_id}", methods=["PUT", "PATCH", "DELETE"], include_in_schema=False
+    # HU-47 esc. 3: cualquier método de escritura, incluido POST.
+    "/inferencia/{lectura_id}", methods=["POST", "PUT", "PATCH", "DELETE"], include_in_schema=False
 )
 async def rechazar_modificacion_inferencia(
     lectura_id: UUID,

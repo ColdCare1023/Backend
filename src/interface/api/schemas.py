@@ -125,8 +125,15 @@ class UsuarioCreateRequest(_PeticionEstricta):
     email: EmailStr
     password: PasswordNueva
     rol: Rol
-    # Celular E.164 (+51999888777): recibe el SMS de bienvenida al crear la cuenta.
-    telefono: str | None = Field(default=None, pattern=r"^\+[1-9]\d{7,14}$")
+    # HU-53 (v3.3): el SMS de bienvenida se retiró. El campo se sigue
+    # aceptando (y guardando) por compatibilidad con clientes antiguos, pero
+    # ya no envía nada; está marcado como obsoleto en el OpenAPI.
+    telefono: str | None = Field(
+        default=None,
+        pattern=r"^\+[1-9]\d{7,14}$",
+        description="Obsoleto (HU-53 retirada): se acepta por compatibilidad; no se envía ningún SMS.",
+        json_schema_extra={"deprecated": True},
+    )
 
 
 class CambiarPasswordRequest(_PeticionEstricta):
@@ -529,9 +536,10 @@ class DispositivoResponse(BaseModel):
     fecha_instalacion: date | None = None
     instalado_por: UUID | None = None
     observaciones_instalacion: str | None = None
-    # HU-53/HU-54: responsable registrado (destinatario de notificaciones).
+    # HU-52: responsable registrado (destinatario del correo de excursión).
     responsable_nombre: str | None = None
     responsable_email: str | None = None
+    # HU-53 (v3.3, retirada): se conserva por compatibilidad; ya no se usa.
     responsable_telefono: str | None = None
     # HU-43/HU-44: operación en el broker sin confirmar («aprovisionar» o
     # «retirar»). Mientras no sea None, la consola de EMQX no refleja el estado
@@ -697,12 +705,18 @@ class InstalacionDispositivoRequest(_PeticionEstricta):
 
 
 class ResponsableDispositivoRequest(_PeticionEstricta):
-    """HU-53/HU-54: destinatario de las notificaciones de excursión crítica
-    de este dispositivo por correo y SMS."""
+    """HU-52: destinatario del correo de excursión crítica de este
+    dispositivo. HU-53 (v3.3): el SMS se retiró; `telefono` se acepta por
+    compatibilidad, pero no se usa para enviar nada."""
 
     nombre: str | None = Field(default=None, max_length=120)
     email: EmailStr | None = None
-    telefono: str | None = Field(default=None, max_length=20)
+    telefono: str | None = Field(
+        default=None,
+        max_length=20,
+        description="Obsoleto (HU-53 retirada): se acepta por compatibilidad; no se envía ningún SMS.",
+        json_schema_extra={"deprecated": True},
+    )
 
 
 class HistorialConfiguracionResponse(BaseModel):
@@ -791,6 +805,18 @@ class RegistrarVersionModeloRequest(_PeticionEstricta):
     horizonte_min: int | None = Field(default=None, ge=1, le=24 * 60)
     metricas: dict[str, float | int] | None = None
     particiones: dict[str, str | int | float | list[str]] | None = None
+    # HU-46 esc. 1: registrar y marcar como versión activa en una sola
+    # operación (mismas validaciones y auditoría que /activar). Por omisión
+    # solo se registra, como antes.
+    activar: bool = False
+
+
+class DesactivarVersionModeloRequest(_PeticionEstricta):
+    """P-12: por qué se desactiva la versión activa (queda en el evento
+    encadenado y en la bitácora). De 10 a 500 caracteres sin contar los
+    espacios de los extremos."""
+
+    motivo: Annotated[str, StringConstraints(strip_whitespace=True, min_length=10, max_length=500)]
 
 
 class VersionModeloResponse(BaseModel):
@@ -831,6 +857,9 @@ class InferenciaLecturaResponse(BaseModel):
     confianza: float | None
     origen_clasificacion: str | None
     version_era_activa_y_aprobada_en_ese_momento: bool | None
+    # HU-18 esc. 1 / HU-47 esc. 1: False = salida de predict_proba que el
+    # manifiesto del modelo no declara calibrada; None = no consta.
+    probabilidades_calibradas: bool | None = None
     # HU-47 esc. 2: versión registrada que estaba activa al clasificar (None si
     # ninguna). Si difiere de `modelo_version`, la clase no salió del modelo aprobado.
     version_activa_en_ese_momento: str | None = None

@@ -100,7 +100,7 @@ async def revisar_alerta(
     (/revisar) se conserva por compatibilidad; el efecto ahora es un
     reconocimiento formal con máquina de estados, no solo un booleano."""
     alerta_repository = SQLAlchemyAlertaRepository(session)
-    use_case = MarcarAlertaRevisadaUseCase(alerta_repository)
+    use_case = MarcarAlertaRevisadaUseCase(alerta_repository, SQLAlchemyTrazabilidadRepository(session))
     try:
         alerta = await use_case.execute(alerta_id, usuario.id)
     except RecursoNoEncontradoError as exc:
@@ -158,15 +158,27 @@ async def registrar_accion_correctiva(
     body: AccionCorrectivaCreateRequest,
     session: DbSessionDep,
     request: Request,
-    usuario=Depends(require_roles(Rol.TECNICO, Rol.FARMACEUTICO)),
+    # HU-27: la registra el Químico Farmacéutico responsable (H16). El técnico
+    # no puede: registrar la acción sobre una alerta PENDIENTE la reconoce
+    # (HU-23 esc. 1), y reconocer es solo del QF (PATCH /revisar). El
+    # administrador conserva su acceso implícito (rbac.verificar_permiso).
+    usuario=Depends(require_roles(Rol.FARMACEUTICO)),
 ) -> AccionCorrectivaResponse:
+    """HU-27 + HU-23: acción correctiva sobre una alerta PENDIENTE o
+    RECONOCIDA. Si estaba PENDIENTE, primero queda RECONOCIDA por quien
+    registra la acción (REVISAR_ALERTA con origen `accion_correctiva`) y
+    después ATENDIDA. 409 si ya estaba ATENDIDA (otra acción ganó)."""
     accion_repository = SQLAlchemyAccionCorrectivaRepository(session)
     alerta_repository = SQLAlchemyAlertaRepository(session)
     trazabilidad_repository = SQLAlchemyTrazabilidadRepository(session)
-    use_case = RegistrarAccionCorrectivaUseCase(accion_repository, alerta_repository, trazabilidad_repository)
+    auditoria_repository = SQLAlchemyAuditLogRepository(session)
+    use_case = RegistrarAccionCorrectivaUseCase(
+        accion_repository, alerta_repository, trazabilidad_repository, auditoria_repository
+    )
     try:
         accion = await use_case.execute(
-            alerta_id, usuario.id, body.descripcion, body.decision, body.justificacion
+            alerta_id, usuario.id, body.descripcion, body.decision, body.justificacion,
+            ip_origen=request.client.host if request.client else None,
         )
     except RecursoNoEncontradoError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -175,7 +187,6 @@ async def registrar_accion_correctiva(
         # atendió primero) — 409, no un 500 ni una sobrescritura silenciosa.
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
-    auditoria_repository = SQLAlchemyAuditLogRepository(session)
     # La alerta ya cambió de estado (ATENDIDA) dentro del use case; se relee
     # solo para obtener su device_id y encadenar este evento en la cadena de
     # ESE dispositivo (HU-25/HU-28), no en la cadena de sistema.

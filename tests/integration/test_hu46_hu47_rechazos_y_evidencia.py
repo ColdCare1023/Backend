@@ -147,13 +147,23 @@ async def test_artefacto_cambiado_tras_activar_no_clasifica_y_deja_error_critico
     monkeypatch.setattr(rf, "_instancia", RandomForestRiesgoService(model_path=otro, metadata_path=metadata))
     monkeypatch.setattr(main, "_session_factory", db_session_factory)
     # alembic.fileConfig (test_migraciones) deshabilita los loggers existentes.
-    monkeypatch.setattr(rf.logger, "disabled", False)
+    for registrador in (rf.logger, main.logger):
+        monkeypatch.setattr(registrador, "disabled", False)
+        monkeypatch.setattr(registrador, "propagate", True)
 
     with caplog.at_level(logging.CRITICAL, logger="infrastructure.ai.random_forest_service"):
         await main._aplicar_version_activa()
         await main._auditar_modelos_rechazados(main.get_settings())
 
-    assert any(r.levelno == logging.CRITICAL for r in caplog.records)
+    assert any(r.name == rf.logger.name and r.levelno == logging.CRITICAL for r in caplog.records)
+    # El arranque registra el mismo rechazo con el mismo nivel que el servicio,
+    # también con el legado en `experimental` (el valor por defecto): antes
+    # salía CRITICAL en el servicio y WARNING en la auditoría del arranque.
+    assert main.get_settings().ia_legado_modo == "experimental"
+    assert any(
+        r.name == main.logger.name and r.levelno == logging.CRITICAL and "legado" in r.getMessage()
+        for r in caplog.records
+    )
     (fila,) = await _auditoria(db_session_factory, "MODELO_RECHAZADO")
     assert fila.detalle["modelo"] == "legado"
     assert "versión activa" in fila.detalle["motivo"]

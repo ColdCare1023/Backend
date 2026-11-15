@@ -9,11 +9,26 @@ despliegue y la evidencia se hacen en la cuenta de Railway del equipo.
 | Requisito | Dónde |
 |---|---|
 | Imagen con Python 3.12 y `postgresql-client` | `infra-local/backend/Dockerfile` |
-| `alembic upgrade head` antes de arrancar | `railway.json` → `preDeployCommand` |
-| 1 réplica, 1 worker, healthcheck `/health` | `railway.json`, `CMD` del Dockerfile |
-| Sin suspensión por inactividad | `railway.json` → `sleepApplication: false` |
+| `alembic upgrade head` antes de arrancar | `railway.json` → `preDeployCommand` (con Railpack: a mano en el panel) |
+| 1 réplica, healthcheck `/health` | `railway.json` (con Railpack: a mano en el panel) |
+| 1 worker, `$PORT`, cabeceras del proxy (`--proxy-headers`, `--forwarded-allow-ips`) | `scripts/arrancar_api.py`, al que apuntan el `CMD` del Dockerfile, `railway.json`, `railpack.json` y el `Procfile` |
+| Sin suspensión por inactividad | `railway.json` → `sleepApplication: false` (con Railpack: *Serverless* desactivado en el panel) |
 | `DATABASE_URL` `postgres://` → `postgresql+asyncpg://` | `Settings._normalizar_database_url` |
-| Cabeceras del proxy (`--proxy-headers`, `--forwarded-allow-ips`) | `CMD` del Dockerfile |
+
+## Builder: Dockerfile o Railpack
+
+El servicio de producción se construye con **Railpack**. Railpack no usa el
+`CMD` del Dockerfile y el servicio tampoco aplicó `railway.json`, así que el
+*pre-deploy*, el healthcheck, las réplicas y el apagado por inactividad se
+configuran en el panel (*Settings → Deploy*). El comando de arranque ya no
+depende del panel: Railpack lo toma de `RAILPACK_START_CMD`, luego de
+`railpack.json` y luego del `Procfile`, y los tres caminos del repositorio
+llevan `python -m scripts.arrancar_api`. Lo único que lo reemplaza es un
+*Custom Start Command* escrito en el panel: déjelo vacío o con ese mismo
+comando. `/health/detalle` → `arranque` muestra con qué comando arrancó el
+proceso (`{"lanzador": "scripts.arrancar_api", "workers": 1}`; `null` si fue
+otro). Para el respaldo programado (HU-29, `pg_dump`) se necesita la imagen
+del Dockerfile: Railpack no instala `postgresql-client`.
 
 ## Variables del servicio (Railway → Variables)
 
@@ -29,6 +44,8 @@ despliegue y la evidencia se hacen en la cuenta de Railway del equipo.
 | `BROKER_USUARIOS_MODO` | `manual` (Serverless no tiene API de usuarios) |
 | `IA_LEGADO_MODO` | `experimental` (o `desactivado`, decisión D-2) |
 | `FORWARDED_ALLOW_IPS` | ver «Proxy» |
+| `SSE_MAX_STREAMS_POR_USUARIO` | opcional, por defecto `10` (flujos SSE por cuenta; pasado el tope, 429 `demasiados_flujos`) |
+| `CODIGOS_HMAC_KEY`, `OTP_LOGIN_ENABLED`, `PASSWORD_RESET_URL` | ver `docs/operacion/CODIGOS_VERIFICACION.md` y la tabla del README |
 | `EMAIL_*` / `SMTP_*`, `FRONTEND_URL` | si se habilita el correo (HU-52) |
 
 ## Proxy (B-11)
@@ -55,8 +72,13 @@ BACKEND_URL=https://<servicio>.up.railway.app EVIDENCIA_TOKEN=<JWT admin> \
 ```
 
 Sale con 0 solo si: HTTPS, `/health` 200, base de datos ok, migraciones
-aplicadas, MQTT conectado, el proxy entrega `https` y `/docs` no está publicado.
-Adjunte también la captura de *Settings → Deploy* con «Serverless» desactivado.
+aplicadas, MQTT conectado, el proceso arrancó con `scripts.arrancar_api` y 1
+worker, el proxy entrega `https` y la IP pública del cliente, `/docs` no está
+publicado y el Procfile, `railpack.json`, `railway.json` y el Dockerfile
+llevan el mismo comando. Es seguro sin red o sin token: no lanza una traza,
+lo deja escrito en el JSON (`error_conexion`) y sale con 1; el token nunca se
+escribe en la evidencia. Adjunte también la captura de *Settings → Deploy*
+con «Serverless» desactivado y *Replicas* 1.
 
 ## Primer administrador (H9)
 

@@ -108,7 +108,12 @@ class Settings(BaseSettings):
     # se ejecutan a la vez en el proceso, y streams SSE simultáneos por
     # usuario. Por encima, 503/429 en vez de agotar memoria o conexiones.
     operaciones_costosas_concurrentes: int = 2
-    sse_max_streams_por_usuario: int = 3
+    # HU-32 esc. 3: pestañas o dispositivos con el dashboard en tiempo real a la
+    # vez por cuenta (SSE_MAX_STREAMS_POR_USUARIO). Pasado el tope, el ticket y
+    # el stream responden 429 `demasiados_flujos`. El criterio pide que «todas
+    # las instancias» del cliente se actualicen: 10 cubre el uso real de una
+    # cuenta (varias pestañas y dispositivos) sin anular la protección BE-019.
+    sse_max_streams_por_usuario: int = Field(default=10, ge=1, le=100)
 
     # Mínimo privilegio de dispositivos: en estricto, solo device_id
     # provisionados en la tabla `devices` pueden registrar lecturas.
@@ -225,18 +230,10 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
-    # HU-54 (backlog 54 HU): canal SMS opcional, "sujeto a viabilidad y
-    # configuración del proveedor" — se modela contra una pasarela
-    # compatible con la API REST de Twilio (Account SID + Auth Token, la
-    # forma más extendida entre proveedores SMS), sin atarse a un SDK
-    # propietario. `sms_from` es el número/ID remitente que exige el
-    # proveedor; el destinatario es el teléfono del responsable registrado
-    # en cada dispositivo (devices.responsable_telefono), no uno global.
-    sms_enabled: bool = False
-    sms_api_url: str = "https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
-    sms_account_sid: str = ""
-    sms_auth_token: str = ""
-    sms_from: str = ""
+    # HU-53 (v3.3): el canal SMS se retiró del alcance; el aviso externo es
+    # solo por correo (HU-52). Las variables SMS_* de despliegues anteriores
+    # (SMS_ENABLED, SMS_API_URL, SMS_ACCOUNT_SID, SMS_AUTH_TOKEN, SMS_FROM) ya
+    # no son campos: `extra="ignore"` las descarta sin impedir el arranque.
 
     # Un episodio crítico genera una lectura cada pocos segundos; sin esta
     # ventana el responsable recibiría cientos de avisos y silenciaría el canal.
@@ -263,6 +260,14 @@ class Settings(BaseSettings):
     # revisa a todos los nodos cada SIN_DATOS_PERIODO_SEGUNDOS.
     sin_datos_n_intervalos: int = Field(default=3, ge=2, le=20)
     sin_datos_periodo_segundos: int = Field(default=30, ge=5, le=600)
+    # HU-29 esc. 3: el backend revisa periódicamente el resultado de la tarea
+    # programada de respaldo (servicio cron aparte) y deja una alerta CRÍTICA
+    # en SU log si el último respaldo falló. Con RESPALDO_MAX_ANTIGUEDAD_HORAS
+    # > 0 también avisa si en ese plazo no hubo ningún respaldo completado (el
+    # cron no corrió). 0 (por defecto) desactiva solo esa segunda revisión:
+    # mientras el cron no exista, no hay alerta que dar.
+    respaldo_vigilancia_periodo_segundos: int = Field(default=3600, ge=60, le=86400)
+    respaldo_max_antiguedad_horas: int = Field(default=0, ge=0, le=24 * 30)
 
     # HU-35 / HU-04 esc. 3: segundos de apertura continua a partir de los
     # cuales el dashboard destaca la puerta abierta como prolongada.
@@ -535,12 +540,6 @@ class Settings(BaseSettings):
             ):
                 raise ValueError(
                     "TELEGRAM_ENABLED requiere TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID."
-                )
-            if self.sms_enabled and not all(
-                (self.sms_account_sid, self.sms_auth_token, self.sms_from)
-            ):
-                raise ValueError(
-                    "SMS_ENABLED requiere SMS_ACCOUNT_SID, SMS_AUTH_TOKEN y SMS_FROM."
                 )
             self._validar_codigos_en_produccion()
         return self

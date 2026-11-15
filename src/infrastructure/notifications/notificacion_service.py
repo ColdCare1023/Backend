@@ -11,9 +11,12 @@ Reparto de responsabilidades (HU-53):
 - `despachador.DespachadorNotificaciones` decide CUÁNDO: después del COMMIT,
   fuera del consumidor MQTT, una sola vez por episodio y con reintentos
   auditados.
-- `NotificacionService` (este módulo) conserva los canales opcionales de
-  HU-54 —Telegram y SMS—, que nunca bloquean ni rompen la ingesta: cualquier
-  fallo se registra y se traga, con cooldown por dispositivo en memoria.
+- `NotificacionService` (este módulo) conserva el canal opcional Telegram,
+  que nunca bloquea ni rompe la ingesta: cualquier fallo se registra y se
+  traga, con cooldown por dispositivo en memoria.
+
+HU-53 (v3.3): el SMS se retiró del alcance; el aviso externo es solo por
+correo (HU-52). Ya no hay pasarela SMS ni variables SMS_*.
 """
 
 import logging
@@ -225,6 +228,14 @@ def componer_correo_preventivo(
     return MensajeCorreo(remitente=remitente, destinatario=destinatario, asunto=asunto, cuerpo="\n".join(lineas), html=html)
 
 
+def _linea_enlace_incidentes(frontend_url: str) -> str:
+    """HU-54: los incidentes operativos (SIN_DATOS, retención por compromiso,
+    falla del sensor, colisión) se ven en el rail de incidentes de /alertas,
+    que abren el QF, el técnico y el auditor. /dispositivos es solo del
+    administrador: el QF que recibe el correo no podría abrirlo."""
+    return f"Ver el incidente en el panel de alertas: {frontend_url.rstrip('/')}/alertas"
+
+
 def _correo_retencion(
     aviso: AvisoSinDatos, remitente: str, destinatario: str, frontend_url: str, dispositivo: dict
 ) -> MensajeCorreo:
@@ -286,7 +297,7 @@ def _correo_retencion(
             "el refrigerador con el termómetro de respaldo.",
         ]
     if frontend_url:
-        lineas += ["", f"Ver el estado del nodo: {frontend_url.rstrip('/')}/dispositivos?id={aviso.device_id}"]
+        lineas += ["", _linea_enlace_incidentes(frontend_url)]
     return MensajeCorreo(
         remitente=remitente,
         destinatario=destinatario,
@@ -322,7 +333,7 @@ def componer_correo_sin_datos(
         "lecturas manuales con el termómetro de respaldo.",
     ]
     if frontend_url:
-        lineas += ["", f"Ver el estado del nodo: {frontend_url.rstrip('/')}/dispositivos?id={aviso.device_id}"]
+        lineas += ["", _linea_enlace_incidentes(frontend_url)]
     return MensajeCorreo(
         remitente=remitente,
         destinatario=destinatario,
@@ -332,11 +343,8 @@ def componer_correo_sin_datos(
 
 
 class NotificacionService:
-    """HU-54: canales opcionales (Telegram y SMS). El correo NO pasa por aquí.
-
-    Devuelven el resultado del SMS para que el despachador lo audite:
-    "enviado", "fallido", "sin_telefono", "cooldown", o None si el canal SMS
-    está deshabilitado."""
+    """Canal opcional Telegram (desactivado por defecto). El correo NO pasa
+    por aquí. HU-53: el canal SMS se retiró; nada de este servicio envía SMS."""
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
@@ -345,7 +353,7 @@ class NotificacionService:
 
     @property
     def habilitado(self) -> bool:
-        return self._settings.telegram_enabled or self._settings.sms_enabled
+        return self._settings.telegram_enabled
 
     def _debe_notificar(self, device_id: str) -> bool:
         ahora = datetime.now(tz=timezone.utc)
@@ -361,58 +369,18 @@ class NotificacionService:
         device_id: str,
         temperatura: float | None,
         timestamp: str,
-        telefono_destino: str | None = None,
         origen_no_verificado: bool = False,
-    ) -> str | None:
-        """El SMS, al ser un canal explícitamente opcional (HU-54) y personal,
-        no tiene destinatario global: sin número registrado, no se envía.
-
-        HU-44: `origen_no_verificado` marca una lectura recibida durante una
-        rotación por compromiso (puede venir de quien tiene el token filtrado)."""
-        if not self.habilitado:
+    ) -> None:
+        """Aviso por Telegram, si está habilitado. HU-44: `origen_no_verificado`
+        marca una lectura recibida durante una rotación por compromiso (el
+        correo ya lo dice en su asunto)."""
+        if not self.habilitado or not self._debe_notificar(device_id):
             return None
-        if not self._debe_notificar(device_id):
-            return "cooldown" if self._settings.sms_enabled else None
-
         temp_texto = f"{temperatura:.1f} °C" if temperatura is not None else "sin dato de sensor"
-        if self._settings.telegram_enabled:
-            await self._enviar_telegram(device_id, temp_texto, timestamp)
-        if not self._settings.sms_enabled:
-            return None
-        if not telefono_destino:
-            return "sin_telefono"
-        if origen_no_verificado:
-            texto = (
-                f"[ColdCare] EXCURSION CRITICA (ORIGEN NO VERIFICADO) {device_id}: {temp_texto} a las "
-                f"{timestamp}. Llego durante una rotacion de credencial: compruebe el refrigerador con "
-                "el termometro de respaldo."
-            )
-        else:
-            texto = (
-                f"[ColdCare] EXCURSION CRITICA {device_id}: {temp_texto} a las {timestamp}. "
-                "Verifique el refrigerador de inmediato."
-            )
-        return "enviado" if await self._enviar_sms(device_id, texto, telefono_destino) else "fallido"
+        await self._enviar_telegram(device_id, temp_texto, timestamp)
+        return None
 
-    async def notificar_sin_datos(
-        self, device_id: str, ultimo_reporte: str | None, telefono_destino: str | None = None
-    ) -> str | None:
-        """HU-54: mismo canal y mismo cooldown por dispositivo que la excursión:
-        un nodo que se apaga y además registra una excursión no manda dos SMS
-        seguidos."""
-        if not self._settings.sms_enabled:
-            return None
-        if not telefono_destino:
-            return "sin_telefono"
-        if not self._debe_notificar(device_id):
-            return "cooldown"
-        texto = (
-            f"[ColdCare] SIN DATOS {device_id}: el nodo no reporta desde {ultimo_reporte or 'hace rato'}. "
-            "Revise alimentacion y red del nodo."
-        )
-        return "enviado" if await self._enviar_sms(device_id, texto, telefono_destino) else "fallido"
-
-    # ── Canales ───────────────────────────────────────────────────────────
+    # ── Canal ─────────────────────────────────────────────────────────────
     async def _enviar_telegram(self, device_id: str, temp_texto: str, timestamp: str) -> None:
         texto = (
             "🚨 *EXCURSIÓN CRÍTICA — Cadena de frío*\n\n"
@@ -435,35 +403,6 @@ class NotificacionService:
             logger.info("Aviso por Telegram enviado para %s", device_id)
         except Exception:
             logger.exception("No se pudo enviar el aviso por Telegram para %s", device_id)
-
-    async def enviar_sms_a(self, telefono_destino: str, texto: str, referencia: str) -> bool:
-        """SMS directo a un número (p. ej. la bienvenida a un usuario nuevo). `referencia`
-        solo identifica el motivo en el log; el número no se registra."""
-        if not self._settings.sms_enabled:
-            return False
-        return await self._enviar_sms(referencia, texto, telefono_destino)
-
-    async def _enviar_sms(self, device_id: str, texto: str, telefono_destino: str) -> bool:
-        """HU-54: pasarela compatible con la API REST de Twilio (Account SID
-        + Auth Token vía HTTP Basic, cuerpo form-encoded) — el proveedor
-        concreto es responsabilidad de configuración/despliegue (Settings),
-        no de este servicio. No declara envío exitoso salvo que el proveedor
-        confirme con 2xx (HU-54 criterio 2: "sin declarar entrega exitosa si
-        ningún proveedor la confirma")."""
-        url = self._settings.sms_api_url.format(account_sid=self._settings.sms_account_sid)
-        try:
-            async with httpx.AsyncClient(timeout=10) as cliente:
-                respuesta = await cliente.post(
-                    url,
-                    auth=(self._settings.sms_account_sid, self._settings.sms_auth_token),
-                    data={"From": self._settings.sms_from, "To": telefono_destino, "Body": texto},
-                )
-                respuesta.raise_for_status()
-            logger.info("Aviso por SMS enviado para %s", device_id)
-            return True
-        except Exception:
-            logger.exception("No se pudo enviar el aviso por SMS para %s", device_id)
-            return False
 
 
 _instancia: NotificacionService | None = None

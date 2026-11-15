@@ -149,6 +149,28 @@ def tipo_sse_lectura(lectura: LecturaTermica) -> str:
     return "lectura"
 
 
+def tipo_sse_episodio(episodio_previo: AlertaTermica | None, episodio_actual: AlertaTermica | None) -> str | None:
+    """Tipo del evento SSE del episodio de alerta tras una lectura; mismo
+    criterio en la ingesta MQTT y en la HTTP. `episodio_previo` y
+    `episodio_actual` son el episodio abierto del dispositivo antes y después
+    de registrar la lectura.
+
+    - `alerta`: hay un episodio abierto que no es el que estaba abierto antes.
+      Incluye la alerta PENDIENTE nueva tras cerrar una ATENDIDA sin
+      continuidad (IA-D18), el escalamiento preventiva → crítica y el cambio
+      de nivel inverso (IA-D07), y la reapertura dentro de la ventana de un
+      episodio no atendido (antes no había ninguno abierto). El tablero solo
+      avisa de una alerta nueva con este evento.
+    - `episodio_actualizado`: sigue abierto el mismo episodio.
+    - `recuperacion`: había un episodio abierto y ya no queda ninguno.
+    - None: sin episodio antes ni después (solo sale el evento de la lectura)."""
+    if episodio_actual is None:
+        return "recuperacion" if episodio_previo is not None else None
+    if episodio_previo is None or episodio_previo.id != episodio_actual.id:
+        return "alerta"
+    return "episodio_actualizado"
+
+
 def alerta_to_response(alerta: AlertaTermica, revisada_por_nombre: str | None = None) -> AlertaResponse:
     return AlertaResponse(
         revisada_por_nombre=revisada_por_nombre,

@@ -14,3 +14,17 @@ Entorno: `infra-local/` (PostgreSQL 16, EMQX 5.8.6 con TLS 8883 y CA propia, bac
 | [BE] Persistencia en PostgreSQL real | ✅ Migraciones aplicadas desde cero; lecturas del ESP32 persistidas |
 | [BE] Idempotencia | ✅ Misma lectura 3 veces → 3 acuses, 1 fila |
 | [QA] Solo persiste lo validado | ✅ Humedad 150 % → `rejected`, 0 filas |
+
+## `boot_id` y `seq_no` como BIGINT (migración 0042)
+
+El contrato v1.0 admite `boot_id` y `seq_no` hasta UINT32 (4 294 967 295),
+pero en `thermal_readings` eran `INTEGER` de PostgreSQL (máximo
+2 147 483 647). Una lectura con un valor entre ambos pasaba la validación y
+fallaba ya en la consulta de idempotencia (`$2::INTEGER` fuera de rango): sin
+COMMIT no había acuse y el nodo la reintentaba para siempre con su cola FIFO
+bloqueada (esc. 3). La migración `0042_bigint_identidad` las pasa a `BIGINT`,
+como ya lo eran `devices.conectividad_boot_id`, `estado_nodo_dispositivo.boot_id`
+y los `*_boot_id`/`*_seq_no` de `episodios_buffer_saturado`. Es reversible: el
+downgrade vuelve a `INTEGER` y se niega si alguna lectura ya no cabe.
+
+Pruebas (PostgreSQL real): `tests/integration/test_hu22_identidad_bigint_postgres.py`.

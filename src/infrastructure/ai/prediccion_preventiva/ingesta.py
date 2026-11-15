@@ -356,9 +356,13 @@ def importar_coldcare_csv(ruta_csv: Path) -> tuple[pd.DataFrame, InformeImportac
       etiqueta la atraviesa) y la unidad de partición (particion.py).
     - `time_quality`: `unsynced` (sin hora real) se excluye; se cuenta.
     - `ds18b20_status` / `sensor_fault`: una lectura con SENSOR_FAULT no aporta
-      temperatura; se convierte en hueco y se cuenta.
+      temperatura; se convierte en hueco y se cuenta. Manda `ds18b20_status`;
+      `sensor_fault` (que en el contrato v1 incluye el SHT31) solo cuenta en
+      filas sin estado del DS18B20.
     - `temperatura_ambiental`, `humedad_ambiental`: contexto del SHT31 para la
-      ablación con y sin ese sensor."""
+      ablación con y sin ese sensor.
+
+    Exportador de referencia: `scripts/exportar_corridas.py` (P-1)."""
     informe = InformeImportacion(fuente="coldcare")
     texto = _leer_texto_acotado(ruta_csv)
     df = pd.read_csv(io.StringIO(texto), sep=detectar_separador(texto), dtype=str)
@@ -375,11 +379,17 @@ def importar_coldcare_csv(ruta_csv: Path) -> tuple[pd.DataFrame, InformeImportac
         sin_hora = df["time_quality"].str.strip().str.lower().eq("unsynced") & ok
         informe.descartar("time_quality_unsynced", int(sin_hora.sum()))
         ok &= ~sin_hora
-    falla = pd.Series(False, index=df.index)
-    if "ds18b20_status" in df.columns:
-        falla |= df["ds18b20_status"].str.strip().str.upper().eq("SENSOR_FAULT")
+    estado_ds = (
+        df["ds18b20_status"].fillna("").str.strip().str.upper()
+        if "ds18b20_status" in df.columns
+        else pd.Series("", index=df.index)
+    )
+    falla = estado_ds.eq("SENSOR_FAULT")
     if "sensor_fault" in df.columns:
-        falla |= df["sensor_fault"].str.strip().str.lower().isin(("true", "1"))
+        # `sensor_fault` del contrato v1 es «DS18B20 o SHT31». Solo decide en
+        # las filas que no declaran el estado del DS18B20: si no, una falla del
+        # SHT31 sola borraría una temperatura interna válida (P-1).
+        falla |= estado_ds.eq("") & df["sensor_fault"].fillna("").str.strip().str.lower().isin(("true", "1"))
     informe.descartar("sensor_fault", int((falla & ok).sum()))
     temperatura = temperatura.mask(falla)
     puerta = (

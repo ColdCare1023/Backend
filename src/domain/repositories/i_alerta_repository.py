@@ -3,6 +3,7 @@ from datetime import datetime
 from uuid import UUID
 
 from src.domain.entities.alerta_termica import AlertaTermica
+from src.domain.value_objects.estado_alerta import EstadoAlerta
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 
 
@@ -11,7 +12,10 @@ class IAlertaRepository(ABC):
     async def agregar(self, alerta: AlertaTermica) -> AlertaTermica: ...
 
     @abstractmethod
-    async def obtener_por_id(self, alerta_id: UUID) -> AlertaTermica | None: ...
+    async def obtener_por_id(self, alerta_id: UUID, refrescar: bool = False) -> AlertaTermica | None:
+        """`refrescar`: releer de la base aunque la sesión ya tenga la fila
+        (tras un UPDATE atómico como `reconocer_si_pendiente`)."""
+        ...
 
     @abstractmethod
     async def listar(
@@ -30,13 +34,29 @@ class IAlertaRepository(ABC):
 
     @abstractmethod
     async def marcar_atendida_si_no_atendida(self, alerta_id: UUID, timestamp: datetime) -> bool:
-        """HU-27 Escenario 2: transición atómica a ATENDIDA a nivel de base de
-        datos (UPDATE ... WHERE estado != 'atendida'), no un patrón
-        leer-modificar-escribir en memoria. Dos solicitudes casi simultáneas
-        sobre la misma alerta deben resolverse de forma que solo una gane —
-        la que pierde recibe False y NO debe registrar su acción correctiva.
-        Devuelve True si esta llamada fue la que transicionó la alerta."""
+        """HU-27 Escenario 2 y HU-23 Escenario 3: transición atómica
+        RECONOCIDA -> ATENDIDA a nivel de base de datos (UPDATE ... WHERE
+        estado = 'reconocida'), no un patrón leer-modificar-escribir en
+        memoria. Una alerta PENDIENTE no puede saltar a ATENDIDA sin que conste
+        quién la reconoció. Dos solicitudes casi simultáneas sobre la misma
+        alerta deben resolverse de forma que solo una gane — la que pierde
+        recibe False y NO debe registrar su acción correctiva. Devuelve True si
+        esta llamada fue la que transicionó la alerta. (El nombre se conserva
+        por compatibilidad.)"""
         ...
+
+    async def reconocer_si_pendiente(self, alerta_id: UUID, usuario_id: UUID, timestamp: datetime) -> bool:
+        """HU-23 Escenario 1: PENDIENTE -> RECONOCIDA, registrando quién y
+        cuándo. Devuelve False si la alerta no existe o ya no está PENDIENTE.
+        Las implementaciones sobre base de datos deben hacerlo de forma atómica
+        (UPDATE ... WHERE estado = 'pendiente'); esta versión por defecto sirve
+        para los repositorios en memoria."""
+        alerta = await self.obtener_por_id(alerta_id)
+        if alerta is None or alerta.estado != EstadoAlerta.PENDIENTE:
+            return False
+        alerta.reconocer(usuario_id, timestamp)
+        await self.actualizar(alerta)
+        return True
 
     @abstractmethod
     async def obtener_episodio_abierto(self, device_id: str) -> AlertaTermica | None:

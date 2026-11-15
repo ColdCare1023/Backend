@@ -15,7 +15,7 @@
 | Interfaz | `interface/api/ia_router.py` | `GET /api/ia/preventivo`, `GET /api/ia/preventivo/predicciones`; `/api/ia/modelo` declara `datos_simulados` |
 | Configuración | `infrastructure/config.py` | `IA_PREVENTIVO_MODO`, `IA_PREVENTIVO_VERSION`, `IA_PREVENTIVO_SHA256` |
 
-El entrenamiento es **offline** (CLI). No hay rutas HTTP para entrenar, subir ni activar modelos.
+El entrenamiento es **offline** (CLI). No hay rutas HTTP para entrenar ni subir modelos; la versión que clasifica se registra y se activa en el registro de la base (HU-46), que valida el artefacto preventivo desplegado cuando `IA_PREVENTIVO_MODO=activo`.
 
 ## 2. Modos
 
@@ -23,7 +23,7 @@ El entrenamiento es **offline** (CLI). No hay rutas HTTP para entrenar, subir ni
 |---|---|
 | `desactivado` (por defecto) | Flujo exactamente igual al anterior. No se consulta ni se carga nada. |
 | `sombra` | Se predice y se guarda en `predicciones_preventivas`; `nivel_riesgo`, alertas, SSE y cadena hash **no cambian**. Admite modelos EXPERIMENTAL / VALIDATED_OFFLINE / APPROVED. Es el modo recomendado para TP2 (evidencia prospectiva). |
-| `activo` | Además decide `nivel_riesgo` (normal / riesgo_preventivo). **Solo** carga un modelo `APPROVED_FOR_DEPLOYMENT`; en producción exige versión y SHA-256 (si faltan, el arranque falla). |
+| `activo` | Además decide `nivel_riesgo` (normal / riesgo_preventivo). **Solo** carga un modelo `APPROVED_FOR_DEPLOYMENT`, y únicamente si `IA_PREVENTIVO_VERSION` e `IA_PREVENTIVO_SHA256` coinciden con la versión **activa del registro de la base** (HU-46; activación por `POST /api/ia/modelo/versiones/{v}/activar` y vuelta a la línea base por `POST /api/ia/modelo/versiones/{v}/desactivar`, ver `docs/operacion/IA_PREVENTIVA_ACTIVACION.md`). En producción exige versión y SHA-256 (si faltan, el arranque falla). |
 
 ## 3. Precedencia por lectura
 

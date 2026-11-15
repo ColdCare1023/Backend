@@ -30,7 +30,8 @@ termine la retención.
   incidente **«excursion_no_verificada»**:
   - crítico y con origen no verificado, porque puede venir de quien tiene el
     token filtrado;
-  - se avisa por correo y, si hay SMS, como una excursión crítica;
+  - se avisa por correo (y por Telegram, si está habilitado) como una
+    excursión crítica;
   - la auditoría guarda el tiempo entre la captura y la alerta
     (`captura_a_alerta_s`).
 - Un sensor en falla (`null`) nunca dispara la regla.
@@ -40,7 +41,8 @@ termine la retención.
   captura (`ultima_temperatura_interna`, `ultima_captura` y `ultima_en_rango`).
   Una lectura retenida que el nodo reintenta desde su cola es anterior a la
   muestra vigente y no la reemplaza.
-- El SMS también lo marca como «ORIGEN NO VERIFICADO».
+- El correo lo marca como «de origen no verificado» en el asunto. (El SMS
+  que también lo hacía se retiró con HU-53.)
 - El incidente no se persiste como lectura ni entra en la cadena de lecturas.
   Cuando el nodo prueba la posesión, entrega lo retenido con su hora de captura
   original y la regla abre entonces la alerta térmica normal.
@@ -146,6 +148,27 @@ expulsión se auditan con `motivo` = `reconexion_por_rotacion`,
 > auditarse un `DISPOSITIVO_OFFLINE`/`DISPOSITIVO_ONLINE` que la lleve. Que no
 > estén no indica un fallo; el cierre de la retención se ve en
 > `CREDENCIAL_POSESION_VERIFICADA`.
+
+## Resultado de la sincronización en la bitácora (HU-43 esc. 4, HU-44 esc. 3)
+
+Cada llamada a la API del broker deja su resultado en `audit_logs` (de solo
+anexado) y un eslabón en la cadena del dispositivo (`chain_id = device_id`),
+con quién la pidió, desde qué flujo y el motivo declarado:
+
+| Acción | Cuándo | `detalle` | `resultado` |
+|---|---|---|---|
+| `BROKER_OPERACION_SINCRONIZADA` | La API confirmó `aprovisionar` (alta, rotación), `retirar` (revocación, baja) o `expulsar_sesion` (expulsión, o no había sesión abierta) | `{"operacion", "origen", "motivo"?}` | `exitoso` |
+| `BROKER_OPERACION_PENDIENTE` | El broker no confirmó `aprovisionar`/`retirar` (modo manual, API sin configurar o con error): queda pendiente hasta confirmar la consola | `{"operacion", "motivo"}` | `exitoso` (la operación administrativa sí ocurrió) |
+| `BROKER_OPERACION_FALLIDA` | La API no expulsó la sesión (error o ruta equivocada) | `{"operacion": "expulsar_sesion", "origen", "motivo"?}` | `fallido` |
+| `BROKER_CONSOLA_CONFIRMADA` | El administrador confirmó la consola | `{"operacion", "nota"}` | `exitoso` |
+
+`origen` es `alta`, `baja`, `rotacion`, `revocacion`, `consola_confirmada` o
+`reenvio_desafio`. Sin `BROKER_API_URL` configurada no se intenta ninguna
+llamada y no se registra éxito ni fallo de la expulsión (solo el pendiente).
+Con EMQX Serverless (`BROKER_USUARIOS_MODO=manual`) lo normal es ver, en una
+revocación, `BROKER_OPERACION_PENDIENTE` (retirar) más
+`BROKER_OPERACION_SINCRONIZADA` (expulsar_sesion). Pruebas:
+`tests/integration/test_hu43_hu44_sincronizacion_broker.py`.
 
 ## Límites conocidos
 

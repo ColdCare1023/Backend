@@ -102,4 +102,5 @@ def test_health_detalle_con_el_modelo_oficial(client, token_admin):
     assert modelo["disponible"] is True
     assert modelo["motivo_rechazo"] is None
     assert modelo["version"]
-    assert modelo["preventivo"] == {"modo": "desactivado", "motivo_rechazo": None}
+    assert modelo["preventivo"]["modo"] == "desactivado"
+    assert modelo["preventivo"]["motivo_rechazo"] is None
