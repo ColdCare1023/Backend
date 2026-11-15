@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 from src.infrastructure.database.repositories.device_repository import SQLAlchemyDeviceRepository
 from src.interface import main
+from src.interface.api import sse_broadcaster
 from src.interface.api.sse_broadcaster import SSEBroadcaster
 from tests.conftest import auth_header
 
@@ -44,9 +45,20 @@ async def test_publicar_sin_suscriptores_no_falla_y_la_lectura_persiste(
     broadcaster = SSEBroadcaster()
     broadcaster.unsubscribe(broadcaster.subscribe())  # el último cliente cerró la pestaña
     assert broadcaster._subscribers == set()
-    # Sin suscriptores no hay a quién despachar: publicar no falla ni crea colas.
+    # Sin suscriptores no hay a quién despachar: publicar no falla, no crea
+    # colas y ni siquiera serializa el evento (el despacho se omite).
+    serializaciones: list[object] = []
+    json_dumps_real = sse_broadcaster.json.dumps
+
+    def _json_dumps_espia(*args, **kwargs):
+        serializaciones.append(args[0] if args else None)
+        return json_dumps_real(*args, **kwargs)
+
+    monkeypatch.setattr(sse_broadcaster.json, "dumps", _json_dumps_espia)
     await broadcaster.publicar({"device_id": DEVICE}, "lectura")
     assert broadcaster._subscribers == set()
+    assert serializaciones == []
+    monkeypatch.setattr(sse_broadcaster.json, "dumps", json_dumps_real)
 
     # Una lectura en rango y una excursión (que además publica `alerta`).
     inicio = datetime.now(tz=timezone.utc).replace(microsecond=0) - timedelta(minutes=5)

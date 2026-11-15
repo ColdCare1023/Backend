@@ -414,7 +414,8 @@ Si los pasos 1 a 9 no se completan con datos reales antes de la sustentación, e
 backlog y la tesis es este:
 
 > La clasificación preventiva con Random Forest y la alerta preventiva que deriva de ella quedan
-> **fuera de operación en el despliegue de producción** evaluado: HU-18 esc. 1 y 4, HU-20 esc. 1 a 4,
+> **fuera de operación en el despliegue de producción** evaluado: HU-16 esc. 1, HU-17 esc. 1,
+> HU-18 esc. 1 y 4, HU-20 esc. 1 a 4,
 > HU-34 esc. 2, HU-46 esc. 1, 3 y 4 aplicados al modelo preventivo y HU-47 esc. 2. El motivo es que no
 > se dispone de corridas controladas en hardware ni del Experimento D con datos ColdCare reales que
 > permitan aprobar un modelo con evidencia válida (el modelo legado se entrenó con escenarios
@@ -431,7 +432,10 @@ backlog y la tesis es este:
 > `tests/integration/test_p12_activar_desactivar_concurrencia_postgres.py`,
 > `tests/integration/test_hu46_e3_rechazo_critico_al_arrancar.py`,
 > `tests/unit/test_b05_hu46_e3_gobierno_preventivo.py`,
-> `tests/unit/test_hu46_preventivo_gobernado_por_registro.py` y
-> `tests/unit/test_hu16_p17_verificacion_antes_de_deserializar.py`. Activarlo solo requiere los pasos
+> `tests/unit/test_hu46_preventivo_gobernado_por_registro.py`,
+> `tests/unit/test_hu16_p17_verificacion_antes_de_deserializar.py`,
+> `tests/integration/test_hu17_contexto_sht31_servicio.py`,
+> `tests/integration/test_r3_termico_ambiente_cli_a_sombra_e2e.py` y
+> `tests/integration/test_hu18_p2_registrar_corridas_e2e.py`. Activarlo solo requiere los pasos
 > operativos de este documento. Por eso esos escenarios no se cuentan como pendientes de software,
 > sino como **no operados por falta de datos de validación**.

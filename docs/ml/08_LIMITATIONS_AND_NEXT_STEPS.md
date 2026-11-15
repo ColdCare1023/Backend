@@ -44,3 +44,17 @@
 No activar el modelo preventivo para decidir alertas. Mantener la regla determinista para
 excursiones críticas y la clasificación existente. Usar el modo sombra para obtener la evidencia
 prospectiva que falta. Instalar MC-38 donde sea posible: es la señal que aportó valor predictivo.
+
+## Decisiones abiertas (control de cambios)
+
+- **P-5, calibración de la puntuación (pendiente de decisión del equipo).** Hoy el manifiesto que
+  escribe `corridas --registrar` declara `puntuacion_calibrada: false` y la API lo expone como
+  `probabilidades_calibradas: false`. Hay dos salidas: (a) calibrar (sigmoide o isotónica) sobre las
+  corridas de validación, agrupadas por corrida, y volver a medir; o (b) reformular HU-18 esc. 1 como
+  "puntuaciones p y 1 − p no calibradas del modelo". Mientras no se decida, la interfaz y la
+  evidencia las presentan como puntuaciones, no como probabilidades.
+- **Ningún conjunto servido combina SHT31 y MC-38.** HU-17 esc. 1 los cita como ejemplos ("por
+  ejemplo"); se sirven `termico_minimo`, `termico_puerta` (MC-38) y `termico_ambiente` (SHT31). Un
+  nodo sin MC-38 con `termico_puerta` devuelve el motivo genérico
+  `ventana_15min_sin_cobertura_suficiente`; un motivo específico (`…_sin_contexto_puerta`) cambiaría
+  el contrato de la API y queda para una ronda posterior.

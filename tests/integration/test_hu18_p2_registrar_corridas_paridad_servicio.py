@@ -10,11 +10,11 @@ clasificaba. Ahora, antes de escribir, `comprobar_servicio` carga el modelo en
 sombra desde un registro temporal y exige que el servicio clasifique una
 lectura de prueba del CSV con el vector y la puntuación del entrenamiento.
 
-Mientras el servicio no reciba el SHT31 (HU-17 sin integrar) `termico_ambiente`
-se rechaza solo; con HU-17 integrado (`features.MOTIVO_SIN_CONTEXTO_AMBIENTAL`)
-se registra, clasifica con el SHT31 y, sin él, la lectura queda sin clasificar
-con el motivo `ventana_15min_sin_contexto_ambiental`. Cada rama se ejerce con
-el código que la hace posible."""
+Con HU-17 integrado, `termico_ambiente` se registra, clasifica con el SHT31 y,
+sin él, la lectura queda sin clasificar con el motivo
+`ventana_15min_sin_contexto_ambiental`. El rechazo cuando el servicio no
+reproduce el vector del entrenamiento lo cubre
+`test_un_vector_distinto_del_entrenamiento_no_se_registra`."""
 
 import json
 from datetime import datetime, timedelta, timezone
@@ -24,7 +24,7 @@ import pytest
 
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
-from src.infrastructure.ai.prediccion_preventiva import features, registro_corridas
+from src.infrastructure.ai.prediccion_preventiva import registro_corridas
 from src.infrastructure.ai.prediccion_preventiva.__main__ import main
 from src.infrastructure.ai.prediccion_preventiva.servicio import MODO_SOMBRA, ServicioPrediccionPreventiva
 from tests.corridas_sinteticas import escribir_corridas
@@ -32,7 +32,6 @@ from tests.corridas_sinteticas import escribir_corridas
 VERSION = "rf-corridas-h30-paridad-0.1.0"
 # Contrato entre pistas (HU-17): motivo de omisión cuando falta el SHT31.
 MOTIVO_SIN_CONTEXTO_AMBIENTAL = "ventana_15min_sin_contexto_ambiental"
-SERVICIO_RECIBE_SHT31 = hasattr(features, "MOTIVO_SIN_CONTEXTO_AMBIENTAL")
 
 
 def _registrar(csv, raiz, conjunto):
@@ -78,20 +77,6 @@ def test_un_vector_distinto_del_entrenamiento_no_se_registra(csv, tmp_path, caps
     assert not raiz.exists()
 
 
-@pytest.mark.skipif(SERVICIO_RECIBE_SHT31, reason="el servicio ya recibe el SHT31 (HU-17 integrado)")
-def test_sin_el_sht31_en_el_servicio_termico_ambiente_no_se_registra(csv, tmp_path, capsys):
-    raiz = tmp_path / "registro"
-
-    assert _registrar(csv, raiz, "termico_ambiente") == 2
-
-    error = capsys.readouterr().err
-    assert error.startswith("No se registra el modelo: el conjunto termico_ambiente no se puede servir: ")
-    assert "de la corrida de prueba C" in error
-    assert "el servicio de inferencia la deja sin clasificar (HISTORIAL_INSUFICIENTE" in error
-    assert "nunca clasificaría" in error
-    assert not raiz.exists()
-
-
 def _historial(t0: datetime, minutos: int, *, con_sht31: bool) -> list[LecturaTermica]:
     return [
         LecturaTermica(
@@ -103,7 +88,6 @@ def _historial(t0: datetime, minutos: int, *, con_sht31: bool) -> list[LecturaTe
     ]
 
 
-@pytest.mark.skipif(not SERVICIO_RECIBE_SHT31, reason="hasta integrar HU-17 el servicio no recibe el SHT31")
 def test_con_hu17_termico_ambiente_se_registra_clasifica_con_sht31_y_sin_el_da_el_motivo_de_contexto(
     csv, tmp_path, capsys
 ):
