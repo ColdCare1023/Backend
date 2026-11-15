@@ -141,7 +141,8 @@ reconexión. Con 5 min justos hay tramos en los que vuelve a clasificar; por eso
    **Antes del paso 5**, compruebe la precondición en
    `GET /api/lecturas?device_id=PRUEBA_P13_01&limite=10`: las lecturas del paso 4 tienen que estar con
    `estado_inferencia=omitida` y `motivo_no_inferencia` = `ventana_15min_sin_cobertura_suficiente` (o
-   `reloj_no_sincronizado`). Si alguna está `completada`, la precondición no se cumplió y D18 no se da
+   `reloj_no_sincronizado`; con un modelo `termico_ambiente` y el SHT31 sin dato,
+   `ventana_15min_sin_contexto_ambiental`). Si alguna está `completada`, la precondición no se cumplió y D18 no se da
    por pasado: repita con un hueco mayor.
 5. Antes de que vuelva la cobertura, dentro de los 10 min siguientes a la reconexión:
    `python scripts/publicador_prueba_mqtt.py valores --valores 8.5`. Usa otro `boot_id`, lo que no

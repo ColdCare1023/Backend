@@ -1,6 +1,8 @@
 import asyncio
-from datetime import datetime, timezone
+import math
+from datetime import datetime, timedelta, timezone
 
+from src.application.use_cases.gestionar_dispositivos import ActualizarIntervaloReporteUseCase
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.entities.prediccion_preventiva import PrediccionPreventiva
 from src.domain.repositories.i_lectura_repository import ILecturaRepository
@@ -22,9 +24,19 @@ from src.infrastructure.ai.random_forest_service import (
     ORIGEN_REGLA_SALVAGUARDA,
 )
 
-# La ventana más larga es de 15 min (+90 s de agregación). Con el intervalo
-# mínimo del ESP32 (10 s) eso son ~100 lecturas; con el de fábrica (30 s), 33.
-LIMITE_HISTORIAL_PREVENTIVO = 120
+# HU-17: el historial se pide por ALCANCE TEMPORAL (servicio.alcance_historial:
+# 15 min de ventana + 3 min de segmentación + 90 s de agregación = 1170 s por
+# defecto), no por cantidad. El antiguo tope fijo de 120 filas solo cubría ese
+# alcance con un intervalo de captura de ~9,75 s o más, y el backend admite
+# nodos a 5 s (HU-54). El tope de filas queda como defensa ante un nodo que
+# reporte más rápido de lo admitido: el doble de las lecturas que caben en el
+# alcance al intervalo mínimo (468 filas con 1170 s).
+INTERVALO_MINIMO_CAPTURA_S = ActualizarIntervaloReporteUseCase.MINIMO_SEGUNDOS
+FACTOR_MARGEN_FILAS = 2
+
+
+def limite_historial_preventivo(alcance: timedelta) -> int:
+    return FACTOR_MARGEN_FILAS * math.ceil(alcance.total_seconds() / INTERVALO_MINIMO_CAPTURA_S)
 
 # Estados sin predicción que, en modo activo, SÍ sustituyen a la clasificación
 # legada (no hay clase que inventar). MODELO_NO_DISPONIBLE y FALLO_INFERENCIA
@@ -66,11 +78,18 @@ class PredecirRiesgoPreventivoUseCase:
     async def predecir(self, lectura: LecturaTermica) -> PrediccionPreventiva | None:
         if not self._servicio.habilitado or lectura.es_manual or (lectura.payload or {}).get("simulated"):
             return None
-        # HU-17: las LIMITE lecturas anteriores a t, no las más recientes del
-        # equipo (al reenviar el buffer, estas serían posteriores y el extractor
-        # las descartaría, dejando la ventana vacía).
+        # HU-17: las lecturas del alcance del extractor ANTERIORES a t, no las
+        # más recientes del equipo (al reenviar el buffer, estas serían
+        # posteriores y el extractor las descartaría, dejando la ventana vacía).
+        # El alcance sale de la configuración del manifiesto cargado; pedirlo
+        # puede cargar el modelo, por eso en un hilo.
+        alcance = await asyncio.to_thread(self._servicio.alcance_historial)
         historial = await self._lectura_repository.listar_recientes_por_device(
-            lectura.device_id, limite=LIMITE_HISTORIAL_PREVENTIVO, solo_dispositivo=True, hasta=lectura.timestamp
+            lectura.device_id,
+            limite=limite_historial_preventivo(alcance),
+            solo_dispositivo=True,
+            hasta=lectura.timestamp,
+            desde=lectura.timestamp - alcance,
         )
         # En un hilo: el modelo es CPU y no debe bloquear el bucle de eventos.
         return await asyncio.to_thread(self._servicio.predecir, lectura, historial)

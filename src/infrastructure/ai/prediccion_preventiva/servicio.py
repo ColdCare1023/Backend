@@ -11,7 +11,8 @@ Precedencia (docs/ml/06_BACKEND_INTEGRATION.md), evaluada por lectura:
    de la versión ACTIVA del registro de la base (HU-16/HU-46): el modelo
    preventivo se gobierna desde ese registro, no solo por variables de entorno.
 4. Historial suficiente (ventana de 15 min con cobertura ≥ 80 %, reloj
-   sincronizado) → si no, HISTORIAL_INSUFICIENTE.
+   sincronizado y, si el conjunto lo usa, el SHT31 en el punto actual) → si
+   no, HISTORIAL_INSUFICIENTE con su motivo.
 5. Features con el MISMO extractor del entrenamiento e inferencia.
 
 Nunca lanza: cualquier fallo se convierte en un estado explícito, para que
@@ -26,13 +27,14 @@ from threading import Lock
 from typing import NamedTuple
 
 import numpy as np
+import pandas as pd
 import sklearn
 
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.entities.prediccion_preventiva import PrediccionPreventiva
 from src.domain.value_objects.motivo_bloqueo import MotivoBloqueo
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
-from src.infrastructure.ai.prediccion_preventiva import registro
+from src.infrastructure.ai.prediccion_preventiva import calidad, registro
 from src.infrastructure.ai.prediccion_preventiva.configuracion import (
     CALIDAD_EXCURSION_EN_CURSO,
     CALIDAD_FALLO_INFERENCIA,
@@ -40,12 +42,21 @@ from src.infrastructure.ai.prediccion_preventiva.configuracion import (
     CALIDAD_MODELO_NO_DISPONIBLE,
     CALIDAD_OK,
     CALIDAD_SENSOR_FAULT,
+    CONFIGURACION_POR_DEFECTO,
     ESTADO_APROBADO,
     ESTADO_EXPERIMENTAL,
     ESTADO_VALIDADO_OFFLINE,
     configuracion_desde_manifiesto,
 )
-from src.infrastructure.ai.prediccion_preventiva.features import features_en_instante, nombres_features
+from src.infrastructure.ai.prediccion_preventiva.features import (
+    CANAL_AMBIENTE,
+    CANAL_HUMEDAD,
+    CANAL_PUERTA,
+    CANALES_POR_CONJUNTO,
+    alcance_historial_s,
+    evaluar_en_instante,
+    nombres_features,
+)
 
 logger = logging.getLogger("infrastructure.ai.prediccion_preventiva.servicio")
 
@@ -111,6 +122,34 @@ ACTIVACION_HORIZONTE_DISTINTO = "horizonte_distinto_del_manifiesto"
 ACTIVACION_ESQUEMA_DISTINTO = "esquema_features_distinto_del_manifiesto"
 ACTIVACION_SKLEARN_DISTINTO_DEL_MANIFIESTO = "sklearn_distinto_del_manifiesto"
 ACTIVACION_SKLEARN_INCOMPATIBLE = "sklearn_incompatible_con_el_instalado"
+# HU-17: el servicio no sabe calcular las features del manifiesto (conjunto
+# sin canales servidos, lista de features distinta de la del extractor o
+# configuración ilegible). Al cargar, el mismo caso es CODIGO_INCOMPATIBLE.
+ACTIVACION_ESQUEMA_NO_SERVIBLE = "esquema_features_no_servible"
+
+# Señales que `predecir` sabe construir a partir de LecturaTermica. Un conjunto
+# cuyos canales (features.CANALES_POR_CONJUNTO) no estén aquí no se sirve.
+CANALES_SERVIDOS = frozenset({CANAL_PUERTA, CANAL_AMBIENTE, CANAL_HUMEDAD})
+
+
+def motivo_esquema_no_servible(manifiesto: dict) -> str | None:
+    """HU-17: por qué el servicio NO puede calcular las features del
+    manifiesto, o None si puede. Lo usan la carga y /activar, para que un
+    conjunto que solo existe en el entrenamiento no cargue y deje toda
+    lectura sin clasificar."""
+    conjunto = manifiesto.get("conjunto_features")
+    canales = CANALES_POR_CONJUNTO.get(conjunto) if isinstance(conjunto, str) else None
+    if canales is None:
+        return f"el servicio no calcula el conjunto de features {conjunto!r}"
+    if not set(canales) <= CANALES_SERVIDOS:
+        return f"el servicio no recibe las señales {sorted(set(canales) - CANALES_SERVIDOS)} del conjunto {conjunto}"
+    try:
+        esperadas = nombres_features(configuracion_desde_manifiesto(manifiesto), conjunto)
+    except (KeyError, TypeError, ValueError) as exc:
+        return f"la configuración del manifiesto no permite calcular las features ({type(exc).__name__})"
+    if manifiesto.get("features") != esperadas:
+        return f"las features del manifiesto no son las que el extractor calcula para el conjunto {conjunto}"
+    return None
 
 
 class VersionActivaRegistrada(NamedTuple):
@@ -138,6 +177,56 @@ def _a_ns(ts: datetime) -> int:
 
 def _version_menor(v: str) -> tuple[str, ...]:
     return tuple(v.split(".")[:2])
+
+
+def _valor(x) -> float:
+    """Señal de una lectura como float; NaN si falta o no es un número finito
+    (la celda vacía de la exportación que lee el entrenamiento)."""
+    if x is None or not isinstance(x, (int, float)):
+        return math.nan
+    valor = float(x)
+    return valor if math.isfinite(valor) else math.nan
+
+
+# Columnas de `calidad.limpiar` (y de la rejilla) para cada señal de la lectura.
+_SENAL_DE_CANAL = {
+    CANAL_PUERTA: ("puerta", "apertura_refrigerador"),
+    CANAL_AMBIENTE: ("ambiente", "temperatura_ambiental"),
+    CANAL_HUMEDAD: ("humedad", "humedad_ambiental"),
+}
+
+
+def _orden_de_exportacion(h: LecturaTermica) -> tuple:
+    """Orden de `scripts/exportar_corridas.py` (hora de captura, boot_id,
+    seq_no; NULL al final, como en PostgreSQL). Decide cuál de dos duplicados
+    exactos conserva `calidad.limpiar` (el primero)."""
+    return (_a_ns(h.timestamp), h.boot_id is None, h.boot_id or 0, h.seq_no is None, h.seq_no or 0)
+
+
+def _senales_limpias(filas: list[LecturaTermica], canales: tuple[str, ...]) -> dict[str, np.ndarray]:
+    """HU-17: las señales de `filas` tras la MISMA limpieza que el
+    entrenamiento (`calidad.limpiar` sobre la exportación de corridas): un
+    duplicado exacto (misma hora y misma temperatura interna) cuenta una vez,
+    y una hora con temperaturas distintas se descarta entera (no hay forma de
+    saber cuál es la verdadera). Sin esto, el servicio promediaba ambas.
+    Devuelve `ts` (ns), `temperatura` y una entrada por canal del conjunto."""
+    ordenadas = sorted(filas, key=_orden_de_exportacion)
+    tabla = {
+        "serie_id": [0] * len(ordenadas),
+        "timestamp": np.array([_a_ns(h.timestamp) for h in ordenadas], dtype=np.int64),
+        "temperatura_interna": np.array([_valor(h.temperatura_interna) for h in ordenadas], dtype=float),
+    }
+    for canal in canales:
+        columna, atributo = _SENAL_DE_CANAL[canal]
+        tabla[columna] = np.array([_valor(getattr(h, atributo)) for h in ordenadas], dtype=float)
+    limpio, _ = calidad.limpiar(pd.DataFrame(tabla))
+    senales = {
+        "ts": limpio["timestamp"].to_numpy(dtype=np.int64),
+        "temperatura": limpio["temperatura_interna"].to_numpy(dtype=float),
+    }
+    for canal in canales:
+        senales[canal] = limpio[_SENAL_DE_CANAL[canal][0]].to_numpy(dtype=float)
+    return senales
 
 
 class ServicioPrediccionPreventiva:
@@ -278,6 +367,14 @@ class ServicioPrediccionPreventiva:
                 f"el esquema de features registrado ({feature_schema_version}) no es el del manifiesto "
                 f"({esquema_manifiesto})",
             ))
+        # HU-17: un esquema que el servicio no sabe calcular cargaría (o no) y
+        # dejaría toda lectura sin clasificación IA: no se activa.
+        if motivo_esquema_no_servible(manifiesto) is not None:
+            motivos.append(MotivoBloqueo(
+                ACTIVACION_ESQUEMA_NO_SERVIBLE,
+                f"el servicio de inferencia no puede calcular las features del esquema del manifiesto "
+                f"({esquema_manifiesto})",
+            ))
         sklearn_manifiesto = (manifiesto.get("versiones") or {}).get("scikit_learn")
         if scikit_learn_version is not None and scikit_learn_version != sklearn_manifiesto:
             motivos.append(MotivoBloqueo(
@@ -298,6 +395,16 @@ class ServicioPrediccionPreventiva:
     @property
     def habilitado(self) -> bool:
         return self.modo != MODO_DESACTIVADO
+
+    def alcance_historial(self) -> timedelta:
+        """HU-17: cuánto historial anterior a t necesita `predecir` para
+        reproducir el vector del entrenamiento (`features.alcance_historial_s`
+        con la configuración del manifiesto cargado; 1170 s por defecto). El
+        caso de uso lo pide al repositorio por tiempo: con un tope fijo de
+        filas, un nodo que reporta cada 5-9 s dejaba fuera el inicio de la
+        ventana o de la segmentación. Puede cargar el modelo (llamar en un hilo)."""
+        self._cargar()
+        return timedelta(seconds=alcance_historial_s(self._config or CONFIGURACION_POR_DEFECTO))
 
     def _cargar(self) -> None:
         if self._intentado:
@@ -373,9 +480,13 @@ class ServicioPrediccionPreventiva:
             raise _NoDisponible(
                 CODIGO_INCOMPATIBLE, f"Modelo entrenado con scikit-learn {entrenado_con}; instalado {sklearn.__version__}"
             )
+        # HU-17: solo carga un esquema de features que el servicio sabe
+        # calcular (conjunto con canales servidos y la lista del extractor).
+        no_servible = motivo_esquema_no_servible(manifiesto)
+        if no_servible is not None:
+            raise _NoDisponible(CODIGO_INCOMPATIBLE, f"{ACTIVACION_ESQUEMA_NO_SERVIBLE}: {no_servible}")
         config = configuracion_desde_manifiesto(manifiesto)
-        esperadas = nombres_features(config, manifiesto["conjunto_features"])
-        if manifiesto["features"] != esperadas or getattr(modelo, "n_features_in_", None) != len(esperadas):
+        if getattr(modelo, "n_features_in_", None) != len(manifiesto["features"]):
             raise _NoDisponible(CODIGO_INCOMPATIBLE, "Las features del modelo no coinciden con las del extractor")
         if [int(c) for c in getattr(modelo, "classes_", [])] != [0, 1]:
             raise _NoDisponible(
@@ -478,25 +589,23 @@ class ServicioPrediccionPreventiva:
         if lectura.time_quality == TIEMPO_NO_SINCRONIZADO:
             return self._resultado(lectura, CALIDAD_HISTORIAL_INSUFICIENTE, "reloj_no_sincronizado")
 
-        previas = [
-            h for h in historial
-            if h.temperatura_interna is not None
-            and math.isfinite(h.temperatura_interna)
-            and h.time_quality != TIEMPO_NO_SINCRONIZADO
-            and not h.es_manual
-        ]
-        ts = np.array([_a_ns(h.timestamp) for h in previas] + [_a_ns(lectura.timestamp)], dtype=np.int64)
-        temps = np.array([h.temperatura_interna for h in previas] + [interna], dtype=float)
-        puertas = np.array(
-            [np.nan if h.apertura_refrigerador is None else float(h.apertura_refrigerador) for h in previas]
-            + [np.nan if lectura.apertura_refrigerador is None else float(lectura.apertura_refrigerador)]
-        )
+        # Mismas filas que el entrenamiento (exportar_corridas + ingesta): solo
+        # telemetría del nodo con hora sincronizada. Una lectura con el DS18B20
+        # en falla no aporta temperatura (NaN), pero su puerta y su SHT31 sí,
+        # igual que en `calidad.preparar_rejillas`. Y la misma limpieza de
+        # duplicados (`calidad.limpiar`).
+        previas = [h for h in historial if h.time_quality != TIEMPO_NO_SINCRONIZADO and not h.es_manual]
+        conjunto = self._manifiesto["conjunto_features"]
         try:
-            vector, calidad = features_en_instante(
-                ts, temps, puertas, _a_ns(lectura.timestamp), self._config, self._manifiesto["conjunto_features"]
+            canales = CANALES_POR_CONJUNTO[conjunto]
+            # Cada señal adicional solo se construye si el conjunto la usa.
+            senales = _senales_limpias([*previas, lectura], canales)
+            vector, estado, motivo = evaluar_en_instante(
+                senales["ts"], senales["temperatura"], senales.get(CANAL_PUERTA), _a_ns(lectura.timestamp),
+                self._config, conjunto, senales.get(CANAL_AMBIENTE), senales.get(CANAL_HUMEDAD),
             )
             if vector is None:
-                return self._resultado(lectura, calidad, "ventana_15min_sin_cobertura_suficiente")
+                return self._resultado(lectura, estado, motivo)
             puntuacion = float(self._modelo.predict_proba(vector.reshape(1, -1))[0, 1])
         except Exception as exc:  # defensa en profundidad, igual que RandomForestRiesgoService
             logger.exception("Fallo en la inferencia preventiva.")

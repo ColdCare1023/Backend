@@ -29,6 +29,7 @@ reversión»); los casos IA-xxx citados son los de ese plan.
   | `manifiesto_no_aprobado` | El manifiesto no está en `APPROVED_FOR_DEPLOYMENT` |
   | `horizonte_distinto_del_manifiesto` | `horizonte_min` registrado ≠ `configuracion.horizonte_min` del manifiesto (IA-B05 v6) |
   | `esquema_features_distinto_del_manifiesto` | `feature_schema_version` registrado ≠ `conjunto_features` del manifiesto (IA-B05 v6; es el esquema que muestra la evidencia de HU-47) |
+  | `esquema_features_no_servible` | El servicio de inferencia no sabe calcular las features del manifiesto: conjunto no declarado en `features.CANALES_POR_CONJUNTO`, una señal que `predecir` no construye o una lista de features distinta de la del extractor (HU-17). Hoy son servibles `termico_minimo`, `termico_puerta` y `termico_ambiente` |
   | `sklearn_distinto_del_manifiesto` | `scikit_learn_version` registrado ≠ `versiones.scikit_learn` del manifiesto (IA-B05 v6) |
   | `sklearn_incompatible_con_el_instalado` | El manifiesto se entrenó con otra versión menor de scikit-learn que la instalada; no cargaría (IA-B05 v6) |
   | `falta_horizonte`, `falta_esquema_features`, `faltan_particiones`, `separacion_menor_que_horizonte` | Falta evidencia de evaluación (HU-46) |
@@ -64,7 +65,7 @@ reversión»); los casos IA-xxx citados son los de ese plan.
   | `sha256_no_configurado` / `version_no_configurada` | Falta la variable | WARNING |
   | `artefacto_no_verificado` | El archivo no coincide con su manifiesto o con el hash | CRITICAL |
   | `estado_no_admitido` | El manifiesto no está en `APPROVED_FOR_DEPLOYMENT` | CRITICAL |
-  | `incompatible` | Otra versión de scikit-learn, otras features u otras clases | CRITICAL |
+  | `incompatible` | Otra versión de scikit-learn, otras features, un esquema de features que el servicio no calcula (mensaje `esquema_features_no_servible: …`) u otras clases | CRITICAL |
   | `modo_desactivado` | `IA_PREVENTIVO_MODO=desactivado` (lo normal hoy) | WARNING (una vez por proceso) |
 
   Cada motivo sale una sola vez por proceso, en la primera consulta del modelo (`/health/detalle`
@@ -113,7 +114,8 @@ Se exportan las lecturas del nodo de banco a CSV con el exportador de corridas (
 columnas: `device_id`, `timestamp` (o `timestamp_estimado` si falta), `temperatura_interna`,
 `apertura_refrigerador`, `time_quality`, `ds18b20_status` o `sensor_fault` y `corrida_id`. Solo
 lecturas del dispositivo (no manuales ni simuladas). `importar_coldcare_csv` descarta y cuenta las
-lecturas `unsynced` y las de `SENSOR_FAULT`.
+`unsynced`; en las de `SENSOR_FAULT` anula la temperatura interna (hueco) y conserva su puerta y su
+SHT31, y las cuenta.
 
 ### 2. Etiquetar, entrenar y evaluar con las corridas (offline, `requirements-ml.txt`)
 
