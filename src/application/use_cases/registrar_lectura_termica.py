@@ -27,6 +27,7 @@ from src.domain.repositories.i_lectura_repository import ILecturaRepository
 from src.domain.repositories.i_trazabilidad_repository import ITrazabilidadRepository
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 from src.domain.value_objects.rango_termico import RANGO_TERMICO_BPA
+from src.infrastructure.ai.prediccion_preventiva.configuracion import CALIDAD_MODELO_NO_DISPONIBLE
 from src.infrastructure.ai.random_forest_service import (
     ESTADO_COMPLETADA,
     ESTADO_FALLIDA,
@@ -56,6 +57,26 @@ async def credencial_en_cuarentena(device_repository: IDeviceRepository, device_
     # La retención dura mientras la marca siga puesta: confirmar la consola no
     # basta, el nodo debe probar que tiene el token nuevo (prueba_posesion.py).
     return bool(credencial and credencial.get("rotacion_por_compromiso"))
+
+
+def _a_utc(valor: datetime) -> datetime:
+    return valor if valor.tzinfo is not None else valor.replace(tzinfo=timezone.utc)
+
+
+def continua_excursion(lectura: LecturaTermica, historial: list, ventana_minutos: int) -> bool:
+    """IA-D18: la lectura anterior del dispositivo (`historial`, de la más
+    reciente a la más antigua) también estaba fuera de 2-8 °C con temperatura
+    válida, y la separa de esta como mucho la ventana de normalización. Una
+    lectura sin temperatura válida o un hueco más largo cortan la continuidad:
+    no se sabe si la excursión terminó entre medio."""
+    if not historial:
+        return False
+    previa = historial[0]
+    return (
+        previa.tiene_temperatura_interna_valida()
+        and previa.es_excursion_confirmada()
+        and _a_utc(lectura.timestamp) - _a_utc(previa.timestamp) <= timedelta(minutes=ventana_minutos)
+    )
 
 
 def _motivo_fallo_ia(exc: Exception) -> str:
@@ -230,6 +251,30 @@ class RegistrarLecturaTermicaUseCase:
                 motivo_no_inferencia=motivo,
             )
 
+    def _normal_confirmado(self, lectura: LecturaTermica, prediccion) -> bool:
+        """HU-20 esc. 3 / HU-34 esc. 4: ¿cuenta esta lectura en rango para la
+        ventana de normalización de un episodio preventivo?
+
+        Si un modelo decide el riesgo (preventivo activo con modelo cargado, o
+        legado activo), solo cuenta la lectura que el tablero muestra como
+        Normal: «Sin clasificación IA» (historial insuficiente, reloj sin
+        sincronizar, inferencia fallida o tiempo agotado) no es Normal, y el
+        episodio no se cierra con una ventana que el modelo no observó.
+
+        Sin modelo que decida (línea base: preventivo desactivado, en sombra o
+        sin modelo cargado —sin versión activa, artefacto rechazado—, con el
+        legado experimental o desactivado) decide la regla 2-8 °C, como antes:
+        si no, una alerta preventiva abierta antes de la vuelta atrás no se
+        cerraría nunca."""
+        preventivo = self._prediccion_preventiva
+        modelo_decide = self._ia_legado_modo == "activo" or (
+            preventivo is not None
+            and preventivo.modo == "activo"
+            # None en modo activo = la predicción falló o agotó el tiempo.
+            and (prediccion is None or prediccion.estado != CALIDAD_MODELO_NO_DISPONIBLE)
+        )
+        return not modelo_decide or lectura.estado_riesgo() == NivelRiesgo.NORMAL.value
+
     async def execute(self, lectura: LecturaTermica) -> LecturaTermica:
         # HU-05: received_at es el instante en que EL BACKEND recibió el
         # mensaje, distinto de `timestamp` (captured_at, declarado por el
@@ -355,18 +400,16 @@ class RegistrarLecturaTermicaUseCase:
         # predicción del modelo": aunque nivel_riesgo (model_class) quede en
         # None por no_clasificable, una temperatura fuera de 2-8 °C sigue
         # marcando excursion_confirmada=True y riesgo_efectivo=critica.
+        #
+        # IA-D18 (P-8): cuando el modelo no da clase —omitida (historial o reloj
+        # insuficiente), fallida, tiempo agotado o modelo no disponible, con el
+        # preventivo activo, el legado activo o ambos—, decide la regla 2-8 °C:
+        # una lectura válida EN rango es normal. Así siempre llega a la gestión
+        # de alertas y cierra por recuperación el episodio crítico abierto
+        # (también el ATENDIDO); la excursión siguiente abre una alerta
+        # PENDIENTE nueva con su aviso. Sin temperatura válida queda None.
         lectura.excursion_confirmada = lectura.es_excursion_confirmada()
         lectura.riesgo_efectivo = lectura.calcular_riesgo_efectivo()
-        # Si la IA falló (tiempo agotado o excepción) no hay nivel de modelo, pero
-        # una lectura DENTRO de 2-8 °C sigue siendo normal: sin esto no llegaría a
-        # la gestión de alertas y un episodio abierto no se cerraría nunca.
-        if (
-            lectura.riesgo_efectivo is None
-            and lectura.estado_inferencia == ESTADO_FALLIDA
-            and lectura.temperatura_interna is not None
-            and RANGO_TERMICO_BPA.contiene(lectura.temperatura_interna)
-        ):
-            lectura.riesgo_efectivo = NivelRiesgo.NORMAL
         # HU-20: el modelo legado (datos sintéticos) en modo experimental deja su
         # clase como evidencia marcada, pero no abre alertas preventivas: sin
         # excursión, el riesgo efectivo es el de la salvaguarda determinista.
@@ -381,11 +424,12 @@ class RegistrarLecturaTermicaUseCase:
         # solo opera la regla 2-8 °C: una lectura válida EN rango es normal, aunque el modelo o la
         # salvaguarda sugieran un riesgo preventivo. Una lectura sin temperatura válida (sensor en
         # falla, nula) NO pasa a normal: conserva lo que ya tenía (None). Con el preventivo activo
-        # y aprobado, o el legado activo, manda el modelo.
+        # y aprobado, o el legado activo, manda la clase del modelo cuando la hay (sin clase, la
+        # regla ya la dejó en normal arriba).
         sin_modelo_aprobado = not reemplazada and self._ia_legado_modo != "activo"
         if (
             sin_modelo_aprobado
-            and lectura.temperatura_interna is not None
+            and lectura.tiene_temperatura_interna_valida()
             and RANGO_TERMICO_BPA.contiene(lectura.temperatura_interna)
         ):
             lectura.riesgo_efectivo = NivelRiesgo.NORMAL
@@ -458,6 +502,12 @@ class RegistrarLecturaTermicaUseCase:
                 temperatura_interna=lectura_guardada.temperatura_interna,
                 received_at=lectura_guardada.received_at,
                 time_quality=lectura_guardada.time_quality,
+                # IA-D18: un episodio crítico ATENDIDO solo absorbe la excursión
+                # que continúa la anterior; si no, se abre una alerta nueva.
+                continua_excursion=continua_excursion(
+                    lectura_guardada, historial, self._generar_alerta.ventana_normalizacion_minutos
+                ),
+                normal_confirmado=self._normal_confirmado(lectura_guardada, prediccion),
             )
             if alerta is not None:
                 await self._registrar_hash.execute(

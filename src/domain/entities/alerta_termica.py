@@ -109,6 +109,15 @@ class AlertaTermica:
         self.normalizacion_desde = timestamp
         return True
 
+    def interrumpir_normalizacion(self) -> bool:
+        """IA-D18 / HU-34 esc. 4: una lectura sin clase del modelo no es Normal;
+        la ventana vuelve a empezar en la próxima Normal confirmada. Devuelve
+        True si había una normalización en curso."""
+        if self.normalizacion_desde is None:
+            return False
+        self.normalizacion_desde = None
+        return True
+
     def minutos_en_normalizacion(self, timestamp: datetime) -> float:
         if self.normalizacion_desde is None:
             return 0.0
