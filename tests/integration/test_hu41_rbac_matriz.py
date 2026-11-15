@@ -29,7 +29,9 @@ MATRIZ_ESPERADA: dict[tuple[str, str], frozenset[str] | str] = {
     ("GET", "/api/alertas"): frozenset({AU, F, T}),
     ("PATCH", "/api/alertas/{alerta_id}/revisar"): frozenset({F}),
     ("GET", "/api/alertas/{alerta_id}/acciones-correctivas"): frozenset({AU, F, T}),
-    ("POST", "/api/alertas/{alerta_id}/acciones-correctivas"): frozenset({F, T}),
+    # H16 (HU-27: «Químico Farmacéutico responsable»): el técnico ya no la
+    # registra; sobre una alerta PENDIENTE equivaldría a reconocerla (HU-23).
+    ("POST", "/api/alertas/{alerta_id}/acciones-correctivas"): frozenset({F}),
     ("POST", "/api/alertas/acciones-correctivas/{accion_id}/rectificar"): frozenset({F, T}),
     ("GET", "/api/auditoria"): frozenset({A, AU}),
     # HU-42/HU-50: exportación CSV de la bitácora (auditada).

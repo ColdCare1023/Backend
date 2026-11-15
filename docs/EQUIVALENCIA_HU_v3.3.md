@@ -12,7 +12,7 @@ mensajes de la API) también.
 | En el código / pruebas | Significa | HU en la línea base v3.3 |
 |---|---|---|
 | HU-53 (correo, `test_hu53_notificacion.py`, `despachador.py`) | Aviso por correo de excursión crítica | **HU-52** |
-| HU-54 (SMS, `notificacion_service.py`) | Aviso por SMS (opcional) | **HU-53** |
+| HU-54 (SMS, `notificacion_service.py`) | Aviso por SMS (opcional). **Retirada del alcance** en v3.3: el canal SMS se eliminó del backend (sin envío ni variables `SMS_*`); `telefono` y `responsable_telefono` se conservan en la API solo por compatibilidad | **HU-53 (retirada)** |
 | HU-33 (`test_hu33_estado_operativo.py`, SIN_DATOS en `/api/dispositivos/estado-operativo`) | Estado operativo y ausencia de datos | **HU-54** (en v3.3, HU-33 son las tarjetas KPI) |
 | HU-56 (`test_hu56_health.py`, `test_hu56_config_despliegue.py`, README «Despliegue») | Despliegue en Railway | **HU-55** |
 | HU-47 en aislamiento de corrupción, banner y snapshot forense (`gestionar_corrupcion_cadena.py`, `trazabilidad_router.py`) | Verificación e integridad de la cadena | **HU-26** |

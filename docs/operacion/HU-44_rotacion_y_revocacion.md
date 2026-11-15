@@ -30,7 +30,8 @@ termine la retención.
   incidente **«excursion_no_verificada»**:
   - crítico y con origen no verificado, porque puede venir de quien tiene el
     token filtrado;
-  - se avisa por correo y, si hay SMS, como una excursión crítica;
+  - se avisa por correo (y por Telegram, si está habilitado) como una
+    excursión crítica;
   - la auditoría guarda el tiempo entre la captura y la alerta
     (`captura_a_alerta_s`).
 - Un sensor en falla (`null`) nunca dispara la regla.
@@ -40,7 +41,8 @@ termine la retención.
   captura (`ultima_temperatura_interna`, `ultima_captura` y `ultima_en_rango`).
   Una lectura retenida que el nodo reintenta desde su cola es anterior a la
   muestra vigente y no la reemplaza.
-- El SMS también lo marca como «ORIGEN NO VERIFICADO».
+- El correo lo marca como «de origen no verificado» en el asunto. (El SMS
+  que también lo hacía se retiró con HU-53.)
 - El incidente no se persiste como lectura ni entra en la cadena de lecturas.
   Cuando el nodo prueba la posesión, entrega lo retenido con su hora de captura
   original y la regla abre entonces la alerta térmica normal.

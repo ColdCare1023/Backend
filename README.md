@@ -123,8 +123,9 @@ instancias exigiría un almacén compartido (p. ej. Redis), fuera del alcance de
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` | sí si `smtp` | `smtp.gmail.com`, `587` | |
 | `SMTP_SEGURIDAD` | — | `starttls` | `ssl` (465) o `starttls` (587) |
 | `NOTIFICACION_MAX_INTENTOS` | — | `3` | Reintentos con espera de 30 s, 2 min y 5 min |
-| `NOTIFICACION_COOLDOWN_MINUTOS` | — | `15` | Antiflood de Telegram/SMS (HU-54); el correo se deduplica por episodio |
-| `ALERTA_VENTANA_NORMALIZACION_MINUTOS` | — | `15` | HU-20: reabrir dentro de la ventana es el mismo episodio (sin correo nuevo) |
+| `NOTIFICACION_COOLDOWN_MINUTOS` | — | `15` | Antiflood de Telegram; el correo se deduplica por episodio |
+| `ALERTA_VENTANA_NORMALIZACION_MINUTOS` | — | `15` | HU-20: reabrir dentro de la ventana es el mismo episodio (sin correo nuevo). HU-21 esc. 3: una alerta ya ATENDIDA nunca se reabre; la nueva excursión es otra alerta PENDIENTE, con su correo |
 | `ALERTA_PREVENTIVA_MINUTOS_NORMALES` | — | `10` | HU-20: minutos seguidos en Normal para resolver una alerta preventiva; `0` la cierra con la primera lectura normal |
-| `TELEGRAM_*`, `SMS_*` | si se habilitan | | Canales opcionales (HU-54) |
+| `TELEGRAM_*` | si se habilita | | Canal opcional |
+| `SMS_*` | — | | **Retiradas** (HU-53 fuera del alcance): se ignoran sin impedir el arranque; se pueden borrar del entorno |
 | `GOOGLE_OAUTH_ENABLED`, `GOOGLE_CLIENT_ID` | si se habilita | | RF-17 |

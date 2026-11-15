@@ -354,7 +354,12 @@ class RegistrarAltaDispositivoUseCase:
 class ActualizarUbicacionYMetadatosInstalacionUseCase:
     """HU-51: documenta la ubicación física del DS18B20 y los metadatos de
     instalación. Un cambio de ubicación genera un evento histórico (HU-49)
-    en vez de sobrescribir en silencio la ubicación previa."""
+    en vez de sobrescribir en silencio la ubicación previa.
+
+    `campos_enviados` (semántica PATCH): si se indica, los campos que no
+    figuran conservan su valor actual — omitir `ubicacion` ya no la borra. Un
+    `None` enviado explícitamente sí la borra. Sin `campos_enviados` se
+    reemplazan los tres (comportamiento anterior, para otros llamadores)."""
 
     def __init__(
         self, device_repository: IDeviceRepository, registrar_hash: RegistrarHashEncadenadoUseCase
@@ -369,10 +374,18 @@ class ActualizarUbicacionYMetadatosInstalacionUseCase:
         fecha_instalacion: date | None,
         instalado_por: UUID,
         observaciones: str | None,
+        campos_enviados: set[str] | frozenset[str] | None = None,
     ) -> dict:
         anterior = await self._device_repository.obtener(device_id)
         if anterior is None:
             raise RecursoNoEncontradoError(f"Dispositivo {device_id} no encontrado")
+        if campos_enviados is not None:
+            if "ubicacion" not in campos_enviados:
+                ubicacion = anterior["ubicacion"]
+            if "fecha_instalacion" not in campos_enviados:
+                fecha_instalacion = anterior.get("fecha_instalacion")
+            if "observaciones" not in campos_enviados:
+                observaciones = anterior.get("observaciones_instalacion")
 
         actualizado = await self._device_repository.actualizar_ubicacion_y_metadata(
             device_id, ubicacion, fecha_instalacion, instalado_por, observaciones
@@ -415,9 +428,10 @@ class ActualizarUbicacionYMetadatosInstalacionUseCase:
 
 
 class ActualizarResponsableDispositivoUseCase:
-    """HU-53/HU-54: registra quién recibe los avisos de excursión crítica de
-    este dispositivo por correo y SMS — reemplaza el destinatario único
-    global (SMTP_TO) por uno propio de cada unidad monitoreada."""
+    """HU-52: registra quién recibe el correo de excursión crítica de este
+    dispositivo — reemplaza el destinatario único global (SMTP_TO) por uno
+    propio de cada unidad monitoreada. HU-53 (v3.3): el SMS se retiró; el
+    teléfono se sigue guardando solo por compatibilidad."""
 
     def __init__(
         self, device_repository: IDeviceRepository, registrar_hash: RegistrarHashEncadenadoUseCase
@@ -665,6 +679,10 @@ class ConsultarHistorialConfiguracionUseCase:
         desde: datetime | None = None,
         hasta: datetime | None = None,
     ) -> list[dict]:
+        # Un device_id inexistente no es «sin cambios»: 404 (un dispositivo
+        # dado de baja sigue existiendo y conserva su historial).
+        if await self._device_repository.obtener(device_id) is None:
+            raise RecursoNoEncontradoError(f"Dispositivo {device_id} no encontrado")
         filas = describir_historial(await self._device_repository.listar_historial_configuracion(device_id))
         if categoria is not None:
             filas = [f for f in filas if f["categoria"] == categoria]

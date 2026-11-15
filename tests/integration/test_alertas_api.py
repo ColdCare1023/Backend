@@ -106,7 +106,7 @@ async def test_revisar_alerta_encadena_en_la_cadena_del_dispositivo(
     assert all(r["chain_id"] == "FARM-CHAIN-01" for r in eventos_revisar)
 
 
-async def test_registrar_accion_correctiva_sobre_alerta(client, token_tecnico):
+async def test_registrar_accion_correctiva_sobre_alerta(client, token_tecnico, token_farmaceutico):
     client.post(
         "/api/lecturas",
         json=_payload_excursion_critica("FARM-ACCION"),
@@ -119,7 +119,7 @@ async def test_registrar_accion_correctiva_sobre_alerta(client, token_tecnico):
     response = client.post(
         f"/api/alertas/{alerta['id']}/acciones-correctivas",
         json={"decision": "Trasladar el lote", "justificacion": "Lectura fuera de rango", "descripcion": "Se trasladó el medicamento a refrigerador de respaldo."},
-        headers=auth_header(token_tecnico),
+        headers=auth_header(token_farmaceutico),
     )
 
     assert response.status_code == 201
@@ -127,7 +127,7 @@ async def test_registrar_accion_correctiva_sobre_alerta(client, token_tecnico):
 
 
 async def test_listar_acciones_correctivas_devuelve_ciclo_cronologico_con_rectificacion(
-    client, token_tecnico
+    client, token_tecnico, token_farmaceutico
 ):
     """HU-23 criterio 4 / HU-28: la cronología de atención de una alerta
     incluye la acción original y su rectificación, en orden, sin que la
@@ -144,7 +144,7 @@ async def test_listar_acciones_correctivas_devuelve_ciclo_cronologico_con_rectif
     original = client.post(
         f"/api/alertas/{alerta['id']}/acciones-correctivas",
         json={"decision": "Trasladar el lote", "justificacion": "Lectura fuera de rango", "descripcion": "Justificación inicial."},
-        headers=auth_header(token_tecnico),
+        headers=auth_header(token_farmaceutico),
     ).json()
 
     client.post(
@@ -153,7 +153,7 @@ async def test_listar_acciones_correctivas_devuelve_ciclo_cronologico_con_rectif
             "descripcion": "Justificación corregida con el detalle completo.",
             "motivo_rectificacion": "Faltaba el detalle del traslado del lote.",
         },
-        headers=auth_header(token_tecnico),
+        headers=auth_header(token_farmaceutico),
     )
 
     ciclo = client.get(
@@ -176,10 +176,10 @@ async def test_listar_acciones_correctivas_de_alerta_inexistente_devuelve_404(cl
     assert response.status_code == 404
 
 
-async def test_accion_correctiva_sobre_alerta_inexistente_devuelve_404(client, token_tecnico):
+async def test_accion_correctiva_sobre_alerta_inexistente_devuelve_404(client, token_farmaceutico):
     response = client.post(
         "/api/alertas/00000000-0000-0000-0000-000000000000/acciones-correctivas",
         json={"decision": "Trasladar el lote", "justificacion": "Lectura fuera de rango", "descripcion": "No debería aplicar"},
-        headers=auth_header(token_tecnico),
+        headers=auth_header(token_farmaceutico),
     )
     assert response.status_code == 404

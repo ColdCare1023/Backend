@@ -5,6 +5,7 @@ from uuid import UUID
 
 from src.domain.entities.alerta_termica import AlertaTermica
 from src.domain.repositories.i_alerta_repository import IAlertaRepository
+from src.domain.value_objects.estado_alerta import EstadoAlerta
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 
 logger = logging.getLogger("application.generar_alerta")
@@ -18,8 +19,9 @@ MENSAJES_POR_RIESGO = {
 # cerrado del mismo dispositivo y tipo de riesgo se reabre (no se crea uno
 # nuevo) si la siguiente lectura crítica llega dentro de esta ventana,
 # evitando flapping de apertura/cierre por una única lectura normal aislada
-# (histéresis). Valor por defecto; configurable por instancia via Settings
-# (ver GenerarAlertaUseCase.__init__ y su construcción en los routers).
+# (histéresis). Nunca se reabre un episodio ATENDIDO (HU-21 esc. 3). Valor por
+# defecto; configurable por instancia via Settings (ver
+# GenerarAlertaUseCase.__init__ y su construcción en los routers).
 COOLDOWN_MINUTOS = 15
 
 # HU-20 esc. 3: un episodio PREVENTIVO no se resuelve con la primera lectura
@@ -90,8 +92,10 @@ class GenerarAlertaUseCase:
     - Una lectura crítica de OTRO tipo (escalamiento/desescalamiento) cierra
       el episodio anterior y abre uno nuevo.
     - Sin episodio abierto: si el último episodio CERRADO del mismo
-      dispositivo+tipo terminó hace menos de COOLDOWN_MINUTOS, se reabre en
-      vez de crear una fila nueva. Si no, se crea una alerta nueva.
+      dispositivo+tipo terminó hace menos de COOLDOWN_MINUTOS y todavía no
+      fue ATENDIDO, se reabre en vez de crear una fila nueva. Si no (fuera de
+      la ventana, o ya atendido: HU-21 esc. 3 / HU-23 esc. 3), se crea una
+      alerta nueva PENDIENTE, que se avisa.
 
     HU-53: la apertura o reapertura de un episodio crítico deja un
     `AvisoExcursion` en `avisos_pendientes`. Este caso de uso no envía nada:
@@ -212,6 +216,12 @@ class GenerarAlertaUseCase:
         ultimo_cerrado = await self._alerta_repository.obtener_ultimo_cerrado(device_id, nivel_riesgo)
         if (
             ultimo_cerrado is not None
+            # HU-21 esc. 3 / HU-23 esc. 3: un episodio ATENDIDO cerró su ciclo
+            # (reconocimiento + acción correctiva). Reabrirlo escondería la
+            # nueva excursión dentro de una alerta «atendida»: fuera de las
+            # pendientes del dashboard y sin correo (ya estaba notificada).
+            # Se crea una alerta PENDIENTE nueva, que sí se avisa.
+            and ultimo_cerrado.estado != EstadoAlerta.ATENDIDA
             and ultimo_cerrado.cerrada_en is not None
             and (_a_utc(timestamp) - _a_utc(ultimo_cerrado.cerrada_en))
             <= timedelta(minutes=self._ventana_normalizacion_minutos)

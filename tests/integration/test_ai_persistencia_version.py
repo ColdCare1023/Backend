@@ -3,8 +3,20 @@ la confianza deben persistirse por lectura y llegar en la respuesta de la API
 (el mismo contrato que consume el frontend vía SSE)."""
 
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
+from src.infrastructure.database.models import ThermalReadingModel
 from tests.conftest import auth_header
+
+
+async def _inferido_en(db_session_factory, lectura_id: str) -> datetime | None:
+    """HU-18 esc. 1 / HU-22 esc. 2: hora real de la inferencia, guardada en la lectura."""
+    async with db_session_factory() as session:
+        return (await session.get(ThermalReadingModel, UUID(lectura_id))).inferido_en
+
+
+def _utc(valor: datetime) -> datetime:
+    return valor if valor.tzinfo is not None else valor.replace(tzinfo=timezone.utc)
 
 
 def _payload(**overrides) -> dict:
@@ -21,7 +33,7 @@ def _payload(**overrides) -> dict:
     return base
 
 
-async def test_lectura_persiste_confianza_y_version_del_modelo(client, token_tecnico):
+async def test_lectura_persiste_confianza_y_version_del_modelo(client, token_tecnico, db_session_factory):
     # HU-17: la IA necesita 2+ lecturas previas válidas para calcular
     # tendencia térmica antes de poder clasificar; se siembran dos.
     for minutos in (10, 5):
@@ -33,10 +45,17 @@ async def test_lectura_persiste_confianza_y_version_del_modelo(client, token_tec
             headers=auth_header(token_tecnico),
         )
 
+    antes = datetime.now(tz=timezone.utc)
     response = client.post("/api/lecturas", json=_payload(), headers=auth_header(token_tecnico))
+    despues = datetime.now(tz=timezone.utc)
 
     assert response.status_code == 201
     body = response.json()
+    # HU-18 esc. 1: «timestamp de inferencia» — la hora en que corrió el
+    # modelo, no la de captura de la lectura.
+    inferido_en = await _inferido_en(db_session_factory, body["id"])
+    assert inferido_en is not None
+    assert antes <= _utc(inferido_en) <= despues
     assert body["nivel_riesgo"] == "normal"
     assert body["confianza_ia"] is not None
     assert 0.0 <= body["confianza_ia"] <= 1.0
@@ -46,7 +65,7 @@ async def test_lectura_persiste_confianza_y_version_del_modelo(client, token_tec
     assert body["motivo_no_inferencia"] is None
 
 
-async def test_lectura_sin_temperatura_interna_no_tiene_confianza_ni_alerta(client, token_tecnico):
+async def test_lectura_sin_temperatura_interna_no_tiene_confianza_ni_alerta(client, token_tecnico, db_session_factory):
     response = client.post(
         "/api/lecturas",
         json=_payload(
@@ -66,3 +85,5 @@ async def test_lectura_sin_temperatura_interna_no_tiene_confianza_ni_alerta(clie
     assert body["origen_clasificacion"] == "fallo_sensor"
     assert body["estado_inferencia"] == "omitida"
     assert body["motivo_no_inferencia"] == "sensor_interno_ausente"
+    # Sin inferencia no hay hora de inferencia (no se inventa una).
+    assert await _inferido_en(db_session_factory, body["id"]) is None

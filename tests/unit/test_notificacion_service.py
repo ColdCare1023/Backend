@@ -41,14 +41,9 @@ class _ServicioEspia(NotificacionService):
     def __init__(self, settings: Settings) -> None:
         super().__init__(settings)
         self.telegrams: list[tuple[str, str]] = []
-        self.sms: list[tuple[str, str]] = []
 
     async def _enviar_telegram(self, device_id, temp_texto, timestamp):
         self.telegrams.append((device_id, temp_texto))
-
-    async def _enviar_sms(self, device_id, texto, telefono_destino):
-        self.sms.append((device_id, texto))
-        return True
 
 
 # ── Armado del correo (HU-53 criterio 6) ─────────────────────────────────
@@ -115,7 +110,6 @@ async def test_sin_canales_opcionales_no_hace_nada():
     servicio = _ServicioEspia(_settings())
     await servicio.notificar_excursion_critica("ESP32-01", 14.2, "2026-07-25T10:00:00+00:00")
     assert servicio.telegrams == []
-    assert servicio.sms == []
 
 
 @pytest.mark.asyncio
@@ -143,55 +137,7 @@ async def test_pasado_el_cooldown_vuelve_a_avisar():
     assert len(servicio.telegrams) == 2
 
 
-@pytest.mark.asyncio
-async def test_sms_se_envia_al_responsable_registrado_del_dispositivo():
-    """HU-54: sin destinatario registrado no hay a quién enviar; este canal no
-    tiene equivalente global como el correo."""
-    servicio = _ServicioEspia(
-        _settings(sms_enabled=True, sms_account_sid="AC", sms_auth_token="tok", sms_from="+10000000000")
-    )
-    resultado = await servicio.notificar_excursion_critica(
-        "ESP32-01", 14.2, "2026-07-25T10:00:00+00:00", telefono_destino="+51999999999"
-    )
-    assert resultado == "enviado"
-    assert [(device, "14.2 °C" in texto) for device, texto in servicio.sms] == [("ESP32-01", True)]
-
-
-@pytest.mark.asyncio
-async def test_sms_no_se_envia_sin_telefono_del_responsable():
-    servicio = _ServicioEspia(
-        _settings(sms_enabled=True, sms_account_sid="AC", sms_auth_token="tok", sms_from="+10000000000")
-    )
-    resultado = await servicio.notificar_excursion_critica("ESP32-01", 14.2, "2026-07-25T10:00:00+00:00")
-    assert resultado == "sin_telefono"
-    assert servicio.sms == []
-
-
-@pytest.mark.asyncio
-async def test_sms_sin_datos_comparte_el_cooldown_con_la_excursion():
-    """HU-53/HU-54: un nodo que registra una excursión y luego deja de reportar
-    no manda dos SMS seguidos al responsable."""
-    servicio = _ServicioEspia(
-        _settings(sms_enabled=True, sms_account_sid="AC", sms_auth_token="tok", sms_from="+10000000000")
-    )
-    assert await servicio.notificar_excursion_critica(
-        "ESP32-01", 14.2, "2026-07-25T10:00:00+00:00", telefono_destino="+51999999999"
-    ) == "enviado"
-    assert await servicio.notificar_sin_datos("ESP32-01", "2026-07-25T10:01:00+00:00", "+51999999999") == "cooldown"
-    assert len(servicio.sms) == 1
-
-
-@pytest.mark.asyncio
-async def test_el_sms_de_la_excursion_no_verificada_lo_dice():
-    """HU-44: la lectura llegó durante una rotación por compromiso."""
-    servicio = _ServicioEspia(
-        _settings(sms_enabled=True, sms_account_sid="AC", sms_auth_token="tok", sms_from="+10000000000")
-    )
-    resultado = await servicio.notificar_excursion_critica(
-        "ESP32-01", 11.5, "2026-10-27T15:00:00+00:00", "+51999999999", origen_no_verificado=True
-    )
-    assert resultado == "enviado"
-    assert "ORIGEN NO VERIFICADO" in servicio.sms[0][1]
+# HU-53 (v3.3): el canal SMS se retiró; ver tests/integration/test_hu53_sms_retirado.py.
 
 
 def test_el_correo_sin_datos_dice_desde_cuando_calla_el_nodo():
@@ -209,7 +155,7 @@ def test_el_correo_sin_datos_dice_desde_cuando_calla_el_nodo():
     assert "Dispositivo: ESP32-01" in correo.cuerpo
     assert "25/07/2026 10:00:00 (hora de Perú)" in correo.cuerpo
     assert "Refrigerador 1" in correo.cuerpo
-    assert "/dispositivos?id=ESP32-01" in correo.cuerpo
+    assert "https://coldcare.example.org/alertas" in correo.cuerpo
 
 
 def test_los_correos_de_la_retencion_por_compromiso_dicen_que_hacer():
@@ -263,8 +209,3 @@ def test_produccion_rechaza_correo_habilitado_sin_credenciales():
 def test_produccion_rechaza_telegram_habilitado_sin_credenciales():
     with pytest.raises(ValueError, match="TELEGRAM_ENABLED requiere"):
         Settings(**_PRODUCCION, telegram_enabled=True)
-
-
-def test_produccion_rechaza_sms_habilitado_sin_credenciales():
-    with pytest.raises(ValueError, match="SMS_ENABLED requiere"):
-        Settings(**_PRODUCCION, sms_enabled=True)

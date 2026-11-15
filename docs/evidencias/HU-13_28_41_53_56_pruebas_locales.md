@@ -73,6 +73,8 @@ Correos recibidos: [`logs/2026-10-08_correos_sumidero.jsonl`](logs/2026-10-08_co
 | Verificación de la cadena del nodo | ✅ `integra: true`, 105 registros |
 | UI | ✅ La cronología muestra nombres, «Rectificada», «Rectifica la acción del…» y el motivo. Solo la versión vigente ofrece «Rectificar» ([captura](img/HU-28_cronologia_rectificacion.jpg)). |
 
+> Nota posterior (14/11/2026, H16): desde entonces la acción correctiva solo la registra el farmacéutico (el técnico recibe 403). Ver `docs/operacion/HU-21_HU-23_HU-27_alertas_criticas.md`. La tabla conserva lo que se observó en su momento.
+
 ## HU-41 · RBAC (contra el backend real)
 
 | Verificación | Resultado |
