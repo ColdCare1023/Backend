@@ -66,13 +66,40 @@ reproducibilidad, ejecutar dos veces con `--sin-registro` y comparar
 
 1. Activar el modo sombra: `IA_PREVENTIVO_MODO=sombra`,
    `IA_PREVENTIVO_VERSION=rf-preventivo-h30-termico-1.0.0` (o la variante `-puerta-` con MC-38).
-2. Exportar la telemetría real:
+2. Exportar la telemetría real con el exportador de corridas (P-1, ver `11_DATOS_DE_PRUEBA_Y_CORRIDAS.md`).
+   El periodo en sombra se declara como una corrida por dispositivo en un manifiesto:
+
+```csv
+corrida_id,device_id,inicio,fin,tipo,uso
+D01,ESP32_FARMACIA_01,2026-12-01T00:00:00Z,2026-12-29T00:00:00Z,S-N,prueba
+```
+
+```bash
+DATABASE_URL=postgresql+asyncpg://... python -m scripts.exportar_corridas \
+    --manifiesto experimento_d_manifiesto.csv --salida lecturas.csv --resumen lecturas_resumen.json
+```
+
+   El exportador abre la base en solo lectura y escribe `device_id`, `timestamp` (=
+   `COALESCE(timestamp_estimado, timestamp)`), `temperatura_interna`, `apertura_refrigerador`,
+   `time_quality`, `ds18b20_status`, `sensor_fault`, `corrida_id`, `temperatura_ambiental`,
+   `humedad_ambiental`, `boot_id`, `seq_no` y `origen_hora`. La consulta anterior solo traía las
+   cuatro primeras columnas y usaba la hora de llegada de las lecturas reconstruidas. Para una sola
+   corrida, la consulta equivalente en `psql` es:
 
 ```sql
-COPY (SELECT device_id, timestamp, temperatura_interna, apertura_refrigerador
+COPY (SELECT device_id,
+             COALESCE(timestamp_estimado, timestamp) AS timestamp,
+             temperatura_interna, apertura_refrigerador, time_quality,
+             CASE WHEN temperatura_interna IS NULL THEN 'SENSOR_FAULT' ELSE 'OK' END AS ds18b20_status,
+             payload->>'sensor_fault' AS sensor_fault,
+             'D01' AS corrida_id,
+             temperatura_ambiental, humedad_ambiental, boot_id, seq_no
       FROM thermal_readings
       WHERE origen = 'dispositivo' AND (payload->>'simulated') IS DISTINCT FROM 'true'
-      ORDER BY device_id, timestamp) TO STDOUT WITH CSV HEADER;
+        AND device_id = 'ESP32_FARMACIA_01'
+        AND COALESCE(timestamp_estimado, timestamp) >= '2026-12-01T00:00:00Z'
+        AND COALESCE(timestamp_estimado, timestamp) <  '2026-12-29T00:00:00Z'
+      ORDER BY 2, boot_id, seq_no) TO STDOUT WITH CSV HEADER;
 ```
 
 3. Evaluar:
@@ -88,6 +115,21 @@ python -m src.infrastructure.ai.prediccion_preventiva estado --version rf-preven
 ```
 
 Un modelo aprobado debe registrarse como versión nueva si cambia el artefacto.
+
+## Corridas de banco (HU-17/HU-18)
+
+Cada hoja de corrida se convierte en una fila del manifiesto (formato en
+`11_DATOS_DE_PRUEBA_Y_CORRIDAS.md`, sección 2). Luego se exporta del stack local y se entrena y evalúa
+con las corridas de prueba que da el resumen:
+
+```bash
+DATABASE_URL=postgresql+asyncpg://... python -m scripts.exportar_corridas \
+    --manifiesto hojas_corrida.csv --salida corridas.csv --resumen corridas_resumen.json
+python -m src.infrastructure.ai.prediccion_preventiva corridas --csv corridas.csv --prueba <resumen.prueba> --salida corridas.json
+```
+
+Las lecturas de prueba con valores exactos (P-13, `infra-local/scripts/publicador_prueba_mqtt.py`) usan
+un `device_id` de prueba y no entran en el manifiesto.
 
 ## Salidas
 

@@ -122,6 +122,38 @@ def test_coldcare_valido(tmp_path):
     assert lect["puerta_abierta"].tolist() == [0.0, 1.0]
 
 
+def test_coldcare_sensor_fault_del_sht31_no_borra_la_temperatura_interna(tmp_path):
+    """P-1: el exportador escribe `ds18b20_status` y `sensor_fault` (el del
+    contrato v1, que es DS18B20 **o** SHT31). Con el DS18B20 en OK, una falla
+    solo del SHT31 no puede convertir en hueco una temperatura interna válida."""
+    ruta = tmp_path / "cc.csv"
+    ruta.write_text(
+        "device_id,timestamp,temperatura_interna,ds18b20_status,sensor_fault\n"
+        "ESP32-01,2026-10-01T10:00:00Z,5.0,OK,true\n"           # solo el SHT31 en falla
+        "ESP32-01,2026-10-01T10:00:10Z,,SENSOR_FAULT,true\n"    # DS18B20 en falla
+        "ESP32-01,2026-10-01T10:00:20Z,5.2,,true\n",            # sin estado: decide sensor_fault
+        encoding="utf-8",
+    )
+    lect, informe = ingesta.importar_coldcare_csv(ruta)
+    assert lect["temperatura_interna"].iloc[0] == 5.0
+    assert np.isnan(lect["temperatura_interna"].iloc[1])
+    assert np.isnan(lect["temperatura_interna"].iloc[2])
+    assert informe.descartes["sensor_fault"] == 2
+
+
+def test_coldcare_sensor_fault_sin_columna_de_estado_sigue_marcando_falla(tmp_path):
+    ruta = tmp_path / "cc.csv"
+    ruta.write_text(
+        "device_id,timestamp,temperatura_interna,sensor_fault\n"
+        "ESP32-01,2026-10-01T10:00:00Z,5.0,true\nESP32-01,2026-10-01T10:00:10Z,5.1,false\n",
+        encoding="utf-8",
+    )
+    lect, informe = ingesta.importar_coldcare_csv(ruta)
+    assert np.isnan(lect["temperatura_interna"].iloc[0])
+    assert lect["temperatura_interna"].iloc[1] == 5.1
+    assert informe.descartes["sensor_fault"] == 1
+
+
 # ── Calidad ──────────────────────────────────────────────────────
 
 
