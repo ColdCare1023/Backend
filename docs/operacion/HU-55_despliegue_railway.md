@@ -9,26 +9,44 @@ despliegue y la evidencia se hacen en la cuenta de Railway del equipo.
 | Requisito | Dónde |
 |---|---|
 | Imagen con Python 3.12 y `postgresql-client` | `infra-local/backend/Dockerfile` |
-| `alembic upgrade head` antes de arrancar | `railway.json` → `preDeployCommand` (con Railpack: a mano en el panel) |
-| 1 réplica, healthcheck `/health` | `railway.json` (con Railpack: a mano en el panel) |
+| `alembic upgrade head` antes de arrancar | `railway.json` → `preDeployCommand` y el panel (*Pre-deploy Command*) |
+| 1 réplica, healthcheck `/health` | `railway.json` y el panel (*Replicas*, *Healthcheck Path*) |
 | 1 worker, `$PORT`, cabeceras del proxy (`--proxy-headers`, `--forwarded-allow-ips`) | `scripts/arrancar_api.py`, al que apuntan el `CMD` del Dockerfile, `railway.json`, `railpack.json` y el `Procfile` |
-| Sin suspensión por inactividad | `railway.json` → `sleepApplication: false` (con Railpack: *Serverless* desactivado en el panel) |
+| Sin suspensión por inactividad | `railway.json` → `sleepApplication: false` y el panel (*Serverless* desactivado) |
 | `DATABASE_URL` `postgres://` → `postgresql+asyncpg://` | `Settings._normalizar_database_url` |
 
 ## Builder: Dockerfile o Railpack
 
-El servicio de producción se construye con **Railpack**. Railpack no usa el
-`CMD` del Dockerfile y el servicio tampoco aplicó `railway.json`, así que el
-*pre-deploy*, el healthcheck, las réplicas y el apagado por inactividad se
-configuran en el panel (*Settings → Deploy*). El comando de arranque ya no
-depende del panel: Railpack lo toma de `RAILPACK_START_CMD`, luego de
-`railpack.json` y luego del `Procfile`, y los tres caminos del repositorio
-llevan `python -m scripts.arrancar_api`. Lo único que lo reemplaza es un
-*Custom Start Command* escrito en el panel: déjelo vacío o con ese mismo
-comando. `/health/detalle` → `arranque` muestra con qué comando arrancó el
-proceso (`{"lanzador": "scripts.arrancar_api", "workers": 1}`; `null` si fue
-otro). Para el respaldo programado (HU-29, `pg_dump`) se necesita la imagen
-del Dockerfile: Railpack no instala `postgresql-client`.
+Hasta el 15/11/2026 el panel decía Railpack, pero Railway aplicaba el
+`railway.json` de la raíz: el log de build muestra `load build definition from
+infra-local/backend/Dockerfile`, el *pre-deploy* corre `alembic upgrade head` y
+el proceso es uno solo (PID 1 `python -m scripts.arrancar_api`). Railway deja
+de leer config-as-code el **2026-12-01**. Desde esa fecha solo vale lo que diga
+el panel, así que el 15/11 se cargó en el panel del servicio Backend lo que fija
+`railway.json` (los cambios de builder, ruta, comando de arranque, timeout y
+reintentos quedaron preparados hasta pulsar *Deploy Changes*):
+
+| Panel (*Settings*) | Valor |
+|---|---|
+| Build → Builder | Dockerfile |
+| Build → Dockerfile Path | `infra-local/backend/Dockerfile` |
+| Deploy → Pre-deploy Command | `alembic upgrade head` |
+| Deploy → Custom Start Command | `python -m scripts.arrancar_api` |
+| Deploy → Healthcheck Path / Timeout | `/health` / 120 s |
+| Deploy → Serverless | desactivado |
+| Deploy → Restart Policy | On Failure, 5 reintentos |
+| Scale → Replicas | 1 |
+
+Los cambios del panel se aplican con *Deploy Changes*, que redespliega el
+servicio. Mientras exista `railway.json`, el resultado es el mismo. Después del
+corte, si el panel volviera a Railpack, el servicio solo recibiría el
+`startCommand` (de `RAILPACK_START_CMD`, `railpack.json` o el `Procfile`, que
+llevan el mismo comando) y perdería el resto. Railpack tampoco instala
+`postgresql-client`, que hace falta para `pg_dump` (HU-29).
+`/health/detalle` → `arranque` muestra con qué comando arrancó el proceso:
+`{"lanzador": "scripts.arrancar_api", "workers": 1}`, o `null` si fue otro.
+El cron de respaldo (`respaldo-postgres`) ya tiene en su panel `Dockerfile.respaldo`,
+`0 7 * * *` y restart Never (ver `RESPALDO_RAILWAY.md`).
 
 ## Variables del servicio (Railway → Variables)
 

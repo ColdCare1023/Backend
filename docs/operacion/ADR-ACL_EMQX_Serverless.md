@@ -44,7 +44,7 @@ solo el EMQX local de `infra-local`. En EMQX Cloud Serverless:
 
 ## Checklist de verificación en la instancia real (evidencia de HU-10)
 
-- [ ] Las reglas del script cargadas para cada nodo activo y la acción por defecto en deny.
+- [x] Las reglas del script cargadas para cada nodo activo y la acción por defecto en deny. Verificado en la consola de EMQX el 15/11/2026: 8 reglas (4 de `backend_service`, 4 de `ESP32_FARMACIA_01`) iguales a `scripts/reglas_acl_emqx`, y `#` Publish & Subscribe Deny para All Users con prioridad 1 (capturas `HU-10_C1_emqx_*.jpg` en `auditoria/evidencias_operacion/2026-11-15/`).
 - [ ] El nodo publica en su `farmacias/<id>/lecturas` y recibe su `ack` (captura del log del nodo).
 - [ ] Con las credenciales del nodo A, publicar en `farmacias/<B>/lecturas` es rechazado (captura del cliente MQTT o del log de EMQX).
 - [ ] Con las credenciales del nodo A, suscribirse a `farmacias/<B>/ack` es rechazado.
