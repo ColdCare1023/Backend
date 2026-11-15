@@ -162,6 +162,67 @@ async def test_la_reconexion_tambien_sobrevive_a_errores_no_mqtt(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_tras_una_sesion_que_conecto_la_espera_vuelve_a_1_s(monkeypatch):
+    """HU-12 esc. 3 / HU-55: tras una sesión que llegó a conectar, la espera de
+    reconexión vuelve a 1 s. Antes seguía duplicándose desde el último fallo:
+    tras varios cortes, una caída breve del broker dejaba la ingesta parada
+    hasta 60 s aunque el broker ya estuviera disponible."""
+    # 3 fallos sin conectar, 1 sesión que conecta y cae, 2 fallos más.
+    guion = [False, False, False, True, False, False]
+    esperas: list[float] = []
+
+    async def sesion(settings, manejador):
+        conecta = guion.pop(0)
+        if conecta:
+            mqtt_client.ESTADO_CONEXION.marcar(True)
+            mqtt_client.ESTADO_CONEXION.marcar(False)
+        raise aiomqtt.MqttError("broker inaccesible")
+
+    async def dormir(segundos):
+        esperas.append(segundos)
+        if not guion:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(mqtt_client, "_sesion_una_vez", sesion)
+    monkeypatch.setattr(mqtt_client.asyncio, "sleep", dormir)
+
+    async def manejador(mensaje):  # pragma: no cover
+        return None
+
+    with pytest.raises(asyncio.CancelledError):
+        await mqtt_client.consumir_con_reconexion(_settings(), manejador)
+
+    assert esperas == [1.0, 2.0, 4.0, 1.0, 2.0, 4.0]
+
+
+@pytest.mark.asyncio
+async def test_sin_conectar_la_espera_crece_hasta_el_tope(monkeypatch):
+    """La espera sigue creciendo (1, 2, 4… 60 s) mientras no se conecte nunca."""
+    intentos = {"n": 0}
+    esperas: list[float] = []
+
+    async def sesion(settings, manejador):
+        intentos["n"] += 1
+        raise aiomqtt.MqttError("broker inaccesible")
+
+    async def dormir(segundos):
+        esperas.append(segundos)
+        if len(esperas) >= 9:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(mqtt_client, "_sesion_una_vez", sesion)
+    monkeypatch.setattr(mqtt_client.asyncio, "sleep", dormir)
+
+    async def manejador(mensaje):  # pragma: no cover
+        return None
+
+    with pytest.raises(asyncio.CancelledError):
+        await mqtt_client.consumir_con_reconexion(_settings(), manejador)
+
+    assert esperas == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0, 60.0, 60.0]
+
+
+@pytest.mark.asyncio
 async def test_mqtt_session_cancela_la_tarea_al_salir(monkeypatch):
     """Al apagarse el backend no debe quedar una tarea consumidora huérfana
     reintentando conexiones contra el broker."""

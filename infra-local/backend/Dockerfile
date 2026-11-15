@@ -19,18 +19,18 @@ RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin app
 COPY . .
 USER app
 EXPOSE 8000
-# BE-008: las cuotas por IP usan la IP real del cliente solo si el proxy es de
-# confianza. Uvicorn lee FORWARDED_ALLOW_IPS (por defecto solo 127.0.0.1):
-# definirla con la red del proxy inverso, nunca "*" si el proxy no reemplaza
-# la cabecera X-Forwarded-For que envía el cliente.
 # BE-022: las migraciones son un paso aparte (servicio `migraciones` en
 # docker-compose; `preDeployCommand` en railway.json), no parte del arranque
 # de cada réplica.
-# HU-56: Railway asigna el puerto en $PORT (8000 en local). `exec` deja a
-# uvicorn como PID 1 para que reciba el SIGTERM del redespliegue, y un solo
-# worker por diseño: SSE, cola de notificaciones y consumidor MQTT con
-# client_id fijo viven en el proceso (README, «Topología»).
-# B-11: --forwarded-allow-ips explícito (FORWARDED_ALLOW_IPS, por defecto solo
-# 127.0.0.1). /health/detalle muestra la IP y el esquema que ve el backend para
-# comprobarlo en Railway (docs/operacion/HU-55_despliegue_railway.md).
-CMD ["sh", "-c", "exec uvicorn src.interface.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --proxy-headers --forwarded-allow-ips \"${FORWARDED_ALLOW_IPS:-127.0.0.1}\""]
+# HU-55/HU-12: el arranque vive en scripts/arrancar_api.py, el mismo que usan el
+# Procfile y railpack.json cuando Railway construye con Railpack (que no usa este
+# CMD; en producción tampoco se aplicó railway.json). Fija un solo worker (SSE, cola de notificaciones y
+# consumidor MQTT con client_id fijo viven en el proceso, README «Topología»),
+# el puerto de $PORT (8000 en local) y la confianza en el proxy:
+# --proxy-headers con FORWARDED_ALLOW_IPS (por defecto solo 127.0.0.1; definirla
+# con la red del proxy inverso, nunca "*" si el proxy no reemplaza la cabecera
+# X-Forwarded-For que envía el cliente). /health/detalle muestra el lanzador, la
+# IP y el esquema que ve el backend (docs/operacion/HU-55_despliegue_railway.md).
+# Con un solo worker uvicorn sirve en el mismo proceso python (PID 1), que
+# recibe el SIGTERM del redespliegue.
+CMD ["python", "-m", "scripts.arrancar_api"]

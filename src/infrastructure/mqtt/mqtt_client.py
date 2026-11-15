@@ -44,8 +44,13 @@ class EstadoConexionMQTT:
 
     conectado: bool = False
     desde: datetime | None = None
+    # Sesiones que llegaron a conectar desde el arranque. La reconexión lo usa
+    # para saber si el intento anterior conectó y debe volver a la espera inicial.
+    sesiones_establecidas: int = 0
 
     def marcar(self, conectado: bool) -> None:
+        if conectado and not self.conectado:
+            self.sesiones_establecidas += 1
         if conectado != self.conectado or self.desde is None:
             self.conectado = conectado
             self.desde = datetime.now(tz=timezone.utc)
@@ -202,22 +207,39 @@ async def consumir_con_reconexion(settings: Settings, manejador: MensajeHandler)
     silencio: el backend seguía respondiendo por HTTP mientras dejaba de
     recibir lecturas de los ESP32 indefinidamente (RF-05/RF-06). Es el peor
     modo de fallo posible aquí, porque no es visible desde fuera.
+
+    HU-12 esc. 3: la espera crece (1, 2, 4… 60 s) solo mientras los intentos
+    fallan sin conectar. Una sesión que llegó a conectar reinicia la espera a
+    1 s: si no, tras varios cortes una caída breve del broker dejaba la ingesta
+    parada hasta 60 s aunque el broker ya estuviera disponible.
     """
     espera = RECONEXION_ESPERA_INICIAL_SEGUNDOS
     while True:
+        sesiones_previas = ESTADO_CONEXION.sesiones_establecidas
         try:
             await _sesion_una_vez(settings, manejador)
+            espera = _espera_tras_sesion(espera, sesiones_previas)
             # El iterador terminó sin error: el broker cerró la sesión.
-            logger.warning("El flujo de mensajes MQTT terminó; se reintentará la conexión.")
+            logger.warning("El flujo de mensajes MQTT terminó; se reintentará la conexión en %.0f s.", espera)
         except asyncio.CancelledError:
             raise
         except aiomqtt.MqttError as exc:
+            espera = _espera_tras_sesion(espera, sesiones_previas)
             logger.warning("Conexión MQTT perdida (%s). Reintentando en %.0f s.", exc, espera)
         except Exception:
+            espera = _espera_tras_sesion(espera, sesiones_previas)
             logger.exception("Error inesperado en la sesión MQTT. Reintentando en %.0f s.", espera)
 
         await asyncio.sleep(espera)
         espera = min(espera * 2, RECONEXION_ESPERA_MAXIMA_SEGUNDOS)
+
+
+def _espera_tras_sesion(espera: float, sesiones_previas: int) -> float:
+    """Espera antes del próximo intento: la inicial si el intento que acaba de
+    terminar llegó a conectar; si no, la que tocaba según el backoff."""
+    if ESTADO_CONEXION.sesiones_establecidas > sesiones_previas:
+        return RECONEXION_ESPERA_INICIAL_SEGUNDOS
+    return espera
 
 
 @contextlib.asynccontextmanager

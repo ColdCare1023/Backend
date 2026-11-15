@@ -14,3 +14,28 @@ La reconexión era a intervalo fijo de 5 s (la evidencia anterior afirmaba backo
 1 → 2 → 4 … 30 s y vuelve a 1 s al reconectar (ColdCare1023/Frontend `sseClient.ts`, con prueba).
 Nota: con el proxy de desarrollo de Vite la caída del backend no llega al `EventSource`; la prueba se hizo
 con el frontend apuntando directo al backend, como en producción.
+
+## Tope de flujos SSE por cuenta (esc. 3, BE-019)
+
+Cada flujo SSE retiene una cola y una conexión durante horas, así que una
+cuenta puede tener abiertos a la vez como máximo `SSE_MAX_STREAMS_POR_USUARIO`
+flujos (pestañas o dispositivos con el dashboard; **3 por defecto**,
+configurable de 1 a 100 en las variables del servicio). El escenario 3 («más
+de una pestaña o dispositivo») se cumple hasta ese número.
+
+Pasado el tope:
+
+| Petición | Respuesta |
+|---|---|
+| `POST /api/auth/sse-ticket` (fetch del frontend) | `429`, `{"detail": "demasiados_flujos"}`, `Retry-After: 15` |
+| `GET /api/sse/lecturas?ticket=…` (EventSource) | el mismo `429` (solo si dos pestañas pidieron ticket a la vez) |
+
+El código va en el ticket porque `EventSource` no expone ni el estado ni el
+cuerpo de un error: antes el `429` solo llegaba al stream y la pestaña quedaba
+en «Reconectando…» sin explicación. El frontend debe mostrar «Demasiadas
+pestañas en tiempo real» al recibir `demasiados_flujos`. El cupo se libera al
+cerrar una pestaña (el backend lo detecta en la siguiente vuelta del flujo,
+como mucho 15 s).
+
+Pruebas: `tests/integration/test_hu32_tope_flujos_sse.py`,
+`tests/integration/test_be019_consumo_recursos.py`.

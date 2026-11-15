@@ -36,6 +36,8 @@ ACCIONES_POR_RESULTADO: dict[ResultadoAuditoria, frozenset[str]] = {
             "LECTURA_CONFLICTO",
             "MODELO_RECHAZADO",
             "ACTIVAR_VERSION_MODELO_IA_RECHAZADO",
+            # HU-44 esc. 3: la API del broker no ejecutó la operación (expulsión).
+            "BROKER_OPERACION_FALLIDA",
         }
     ),
     ResultadoAuditoria.DENEGADO: frozenset(

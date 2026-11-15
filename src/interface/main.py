@@ -1304,6 +1304,13 @@ async def _auditar_modelos_rechazados(settings) -> None:
         await session.commit()
 
 
+def _entero_o_none(valor: str | None) -> int | None:
+    try:
+        return int(valor) if valor else None
+    except ValueError:
+        return None
+
+
 def _estado_modelos_ia(settings, version_activa: str | None = None) -> dict:
     """HU-16: estado de los modelos de IA para /health/detalle. Nunca lanza:
     un modelo alterado se informa como no disponible con su motivo.
@@ -1601,6 +1608,13 @@ def create_app() -> FastAPI:
             "notificaciones": {
                 "worker_activo": despachador is not None and despachador.activo,
                 "cola_pendiente": despachador.pendientes if despachador is not None else 0,
+            },
+            # HU-55 / HU-12 esc. 4: con qué comando arrancó el proceso. Lo deja
+            # scripts/arrancar_api.py (1 worker, proxy de confianza); None si el
+            # panel de la plataforma arrancó uvicorn con otro comando.
+            "arranque": {
+                "lanzador": os.environ.get("COLDCARE_ARRANQUE") or None,
+                "workers": _entero_o_none(os.environ.get("COLDCARE_WORKERS")),
             },
             # B-11: lo que el backend ve detrás del proxy de la plataforma. Con
             # las cabeceras bien configuradas, `esquema` es https y `ip_cliente`
