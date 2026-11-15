@@ -24,8 +24,9 @@ corrida (plan de pruebas de IA, sección 3.2), sin cambiar el esquema:
 
 Obligatorias: `corrida_id`, `device_id`, `inicio`, `fin` (UTC explícita: `Z` o `+00:00`). La ventana es
 [inicio, fin). Dos corridas del mismo dispositivo no pueden solaparse. `uso` es opcional:
-`entrenamiento`, `prueba` o `excluida` (se omite, p. ej. S-B). El resumen da la lista de prueba para
-`prediccion_preventiva corridas --prueba`.
+`entrenamiento`, `validacion`, `prueba` o `excluida` (se omite, p. ej. S-B). El resumen da las listas de
+prueba y de validación para `prediccion_preventiva corridas --prueba … --validacion …` (P-3: las de
+validación eligen el umbral y no ajustan el modelo).
 
 Solo se exportan lecturas del nodo (`origen = 'dispositivo'`) sin `simulated`. La conexión es de solo
 lectura: PostgreSQL con `default_transaction_read_only` y `SET TRANSACTION READ ONLY`; SQLite abierto
@@ -64,7 +65,7 @@ COLUMNAS = (
 )
 OBLIGATORIAS_MANIFIESTO = ("corrida_id", "device_id", "inicio", "fin")
 OPCIONALES_MANIFIESTO = ("tipo", "uso", "temperatura_inicial", "mqtt_host", "responsable", "observaciones")
-USOS = ("entrenamiento", "prueba", "excluida")
+USOS = ("entrenamiento", "validacion", "prueba", "excluida")
 # Sin `#`: el pipeline arma la serie como `device_id#corrida_id` y la vuelve a partir por `#`.
 PATRON_CORRIDA = re.compile(r"^[A-Za-z0-9_.-]{1,50}$")
 HORA_CAPTURA = func.coalesce(T.timestamp_estimado, T.timestamp)
@@ -272,6 +273,7 @@ async def exportar(url: str, corridas: list[Corrida], salida: Path) -> dict:
     resumen["filas"] = sum(c["filas"] for c in resumen["corridas"])
     resumen["corridas_sin_lecturas"] = [c["corrida_id"] for c in resumen["corridas"] if c["filas"] == 0]
     resumen["prueba"] = ",".join(c["corrida_id"] for c in resumen["corridas"] if c["uso"] == "prueba")
+    resumen["validacion"] = ",".join(c["corrida_id"] for c in resumen["corridas"] if c["uso"] == "validacion")
     return resumen
 
 
