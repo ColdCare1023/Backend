@@ -164,6 +164,8 @@ def _corridas(parser: argparse.ArgumentParser, args) -> int:
         except RegistroRechazado as exc:
             print(f"No se registra el modelo: {exc}", file=sys.stderr)
             return 2
+        for advertencia in resumen["advertencias"]:
+            print(f"Advertencia: {advertencia}", file=sys.stderr)
         if args.salida:
             _escribir_json(args.salida, sin_privados({**resumen["_informe"], "registro": resumen}))
         _imprimir(sin_privados(resumen))

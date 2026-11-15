@@ -82,6 +82,42 @@ def test_una_version_existente_no_se_sobrescribe(csv, tmp_path, capsys):
     assert len(json.loads(antes["historial.json"])) == 1
 
 
+def test_una_version_que_figura_en_el_historial_no_se_reutiliza_aunque_falte_su_directorio(csv, tmp_path, capsys):
+    """Antes solo se miraba el directorio: sin él, la CLI registraba V otra
+    vez con otro hash y historial.json quedaba con dos `registrado` de V (la
+    base, que ya conoce V, la rechaza con el hash viejo)."""
+    import shutil
+
+    raiz = tmp_path / "registro"
+    assert _registrar(csv, raiz) == 0
+    capsys.readouterr()
+    shutil.rmtree(raiz / VERSION)
+    historial = (raiz / "historial.json").read_bytes()
+
+    assert _registrar(csv, raiz) == 2
+
+    error = capsys.readouterr().err
+    assert error.startswith("No se registra el modelo: ")
+    assert f"la versión {VERSION} ya existe en el registro: figura en historial.json" in error
+    assert (raiz / "historial.json").read_bytes() == historial
+    assert [e["evento"] for e in json.loads(historial)] == ["registrado"]
+    assert not (raiz / VERSION).exists()
+
+
+def test_un_historial_ilegible_no_deja_registrar(csv, tmp_path, capsys):
+    """Antes se escribían el artefacto y el manifiesto y la CLI terminaba con
+    una traza al anexar a un historial.json que no es JSON (versión a medias)."""
+    raiz = tmp_path / "registro"
+    raiz.mkdir()
+    (raiz / "historial.json").write_text("{no es json", encoding="utf-8")
+
+    assert _registrar(csv, raiz) == 2
+
+    error = capsys.readouterr().err
+    assert "No se pudo leer historial.json" in error and "no se puede comprobar que la versión" in error
+    assert sorted(p.name for p in raiz.iterdir()) == ["historial.json"]
+
+
 @pytest.mark.parametrize(
     ("version", "texto"),
     [
@@ -166,3 +202,19 @@ def test_en_el_informe_una_validacion_que_es_de_prueba_sale_con_codigo_2(csv, ca
     assert main(["corridas", "--csv", str(csv), "--prueba", "C4,C5", "--validacion", "C4"]) == 2
 
     assert "validación que no son de entrenamiento" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("argv", "texto"),
+    [
+        (["--prueba", "C9"], "Corridas de prueba inexistentes: ['C9']"),
+        (["--prueba", "C4,C5", "--validacion", "C9"], "Corridas de validación inexistentes: ['C9']"),
+    ],
+    ids=["prueba_inexistente", "validacion_inexistente"],
+)
+def test_en_el_informe_una_corrida_inexistente_sigue_saliendo_con_codigo_2(csv, capsys, argv, texto):
+    """Que la ablación con el SHT31 ya no detenga el informe no oculta los
+    errores del operador: una corrida que no está en el CSV sigue siendo código 2."""
+    assert main(["corridas", "--csv", str(csv), *argv]) == 2
+
+    assert texto in capsys.readouterr().err

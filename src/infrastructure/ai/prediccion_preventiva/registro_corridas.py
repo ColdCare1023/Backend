@@ -20,20 +20,34 @@ Se niega, con un mensaje en español y sin escribir nada, si:
 - el scikit-learn instalado no es el fijado en `requirements.txt` (P-6): el
   backend carga el artefacto con esa versión;
 - la versión no es válida, supera los 50 caracteres del registro de la base o
-  ya existe (el registro nunca sobrescribe);
+  ya existe (el registro nunca sobrescribe), también si solo queda su entrada
+  en `historial.json`;
 - las corridas no alcanzan para ajustar, elegir el umbral fuera de muestra y
-  evaluar con ambas clases (pocas corridas o etiquetas).
+  evaluar con ambas clases (pocas corridas o etiquetas);
+- el servicio de inferencia no puede servir el conjunto: cargado en sombra
+  desde un registro temporal, no clasifica una lectura de prueba con el mismo
+  vector que el entrenamiento (`comprobar_servicio`).
+
+Solo el conjunto que se registra debe poder evaluarse: la ablación con el
+SHT31 queda "no estimable" si las corridas no lo tienen. Sin separación
+medible entre ajuste y prueba (otro equipo) registra con una advertencia:
+POST /activar responderá 409 `faltan_particiones`.
 """
 
+import math
 import re
-from datetime import datetime, timezone
+import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import sklearn
 
-from src.infrastructure.ai.prediccion_preventiva import registro
+from src.domain.entities.lectura_termica import LecturaTermica
+from src.infrastructure.ai.prediccion_preventiva import calidad, registro
 from src.infrastructure.ai.prediccion_preventiva.configuracion import (
+    CALIDAD_OK,
     ESTADO_EXPERIMENTAL,
     ConfiguracionPreventiva,
 )
@@ -43,7 +57,13 @@ from src.infrastructure.ai.prediccion_preventiva.corridas import (
     sin_privados,
 )
 from src.infrastructure.ai.prediccion_preventiva.entrenamiento import SEMILLA
-from src.infrastructure.ai.prediccion_preventiva.features import CONJUNTO_TERMICO, CONJUNTOS, nombres_features
+from src.infrastructure.ai.prediccion_preventiva.features import (
+    CONJUNTO_TERMICO,
+    CONJUNTOS,
+    features_de_rejillas,
+    nombres_features,
+)
+from src.infrastructure.ai.prediccion_preventiva.ingesta import a_epoch_ns
 
 RAIZ_BACKEND = Path(__file__).resolve().parents[4]
 ARCHIVO_REQUISITOS = RAIZ_BACKEND / "requirements.txt"
@@ -53,6 +73,18 @@ PATRON_SKLEARN_FIJADO = re.compile(r"^scikit-learn==([0-9][0-9A-Za-z.]*)", re.MU
 LONGITUD_MAX_VERSION = 50
 LONGITUD_MAX_DATASET = 50
 FUENTE_CORRIDAS = "coldcare_corridas"
+
+# Paridad con el servicio (`comprobar_servicio`). El servicio guarda el vector
+# y la puntuación redondeados a 6 decimales (evidencia HU-47): la tolerancia es
+# ese redondeo más el ruido de coma flotante (1e-9).
+TOLERANCIA_PARIDAD = 0.5e-6 + 1e-9
+# Historial que recibe el servicio en la comprobación: holgado frente a la
+# ventana de 15 min más el hueco que corta un segmento.
+HISTORIAL_PARIDAD = timedelta(hours=1)
+# Lecturas de prueba que se revisan, de la más reciente hacia atrás, hasta dar
+# con una cuya ventana el extractor del entrenamiento pueda calcular.
+MAX_CANDIDATAS_PARIDAD = 200
+_EPOCA = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
 class RegistroRechazado(RuntimeError):
@@ -106,6 +138,15 @@ def exigir_version_nueva(version: str, raiz: Path) -> None:
             f"la versión {version} ya existe en el registro; el registro nunca sobrescribe una versión "
             "(use una versión nueva)"
         )
+    try:
+        anotada = registro.version_en_historial(version, raiz)
+    except registro.ErrorRegistro as exc:
+        raise RegistroRechazado(f"{exc}: no se puede comprobar que la versión {version} sea nueva") from None
+    if anotada:
+        raise RegistroRechazado(
+            f"la versión {version} ya existe en el registro: figura en historial.json aunque su directorio "
+            "no está; el registro nunca reutiliza una versión (use una versión nueva)"
+        )
 
 
 def _exigir_datos_suficientes(resultado: dict, conjunto: str) -> None:
@@ -134,6 +175,174 @@ def _exigir_compatible(modelo, nombres: list[str], config: ConfiguracionPreventi
         raise RegistroRechazado("las features del modelo no coinciden con las del extractor del servicio")
     if [int(c) for c in getattr(modelo, "classes_", [])] != [0, 1]:
         raise RegistroRechazado("el modelo no es el clasificador binario normal(0)/riesgo_preventivo(1)")
+
+
+# ── Paridad con el servicio de inferencia ────────────────────────
+
+
+def _opcional(valor) -> float | None:
+    """Valor del CSV como lo trae una LecturaTermica: None si falta o no es finito."""
+    if valor is None:
+        return None
+    numero = float(valor)
+    return numero if math.isfinite(numero) else None
+
+
+def _columna(df: pd.DataFrame, nombre: str) -> np.ndarray:
+    return df[nombre].to_numpy(dtype=float) if nombre in df.columns else np.full(len(df), np.nan)
+
+
+def _lecturas_para_servicio(df: pd.DataFrame, tiempos_us: np.ndarray) -> list[LecturaTermica]:
+    """Las lecturas del CSV como las recibe el servicio desde la telemetría
+    (nodo con hora sincronizada; la exportación ya excluye manuales y unsynced)."""
+    device_id = str(df["serie_id"].iloc[0]).split("#", 1)[0]
+    salida = []
+    for t_us, interna, puerta, ambiente, humedad in zip(
+        tiempos_us,
+        _columna(df, "temperatura_interna"),
+        _columna(df, "puerta_abierta"),
+        _columna(df, "temperatura_ambiental"),
+        _columna(df, "humedad_ambiental"),
+        strict=True,
+    ):
+        salida.append(LecturaTermica(
+            device_id=device_id,
+            timestamp=_EPOCA + timedelta(microseconds=int(t_us)),
+            temperatura_ambiental=_opcional(ambiente),
+            humedad_ambiental=_opcional(humedad),
+            temperatura_interna=_opcional(interna),
+            apertura_refrigerador=bool(puerta >= 0.5) if math.isfinite(puerta) else None,
+            estado_conectividad="online",
+            time_quality="synced",
+        ))
+    return salida
+
+
+def _vector_entrenamiento(
+    df: pd.DataFrame, tiempos_us: np.ndarray, config: ConfiguracionPreventiva, conjunto: str
+) -> np.ndarray | None:
+    """Vector del extractor del ENTRENAMIENTO (`calidad.preparar_rejillas` +
+    `features_de_rejillas`, como `corridas`) en la última lectura de `df`, o
+    None si en ese punto el entrenamiento tampoco lo calcula (ventana
+    incompleta): esa lectura no sirve para comparar."""
+    referencia = df.assign(timestamp=pd.Series(pd.to_datetime(tiempos_us, unit="us", utc=True), index=df.index))
+    try:
+        rejillas = calidad.preparar_rejillas(referencia, config)
+    except ValueError:
+        return None
+    x, ok = features_de_rejillas(rejillas, config, conjunto)
+    fila = np.flatnonzero(rejillas["g_ns"].to_numpy() == int(tiempos_us[-1]) * 1000)
+    return x[fila[0]] if fila.size == 1 and ok[fila[0]] else None
+
+
+def _comparar_con_servicio(prediccion, referencia: np.ndarray, modelo, nombres: list[str], lugar: str) -> dict:
+    """El servicio debe clasificar la lectura con el vector y la puntuación del
+    entrenamiento. Devuelve el detalle o lanza RegistroRechazado (sin el
+    prefijo del conjunto, que agrega quien llama)."""
+    if prediccion.estado != CALIDAD_OK or not prediccion.vector_features:
+        raise RegistroRechazado(
+            f"en {lugar} el extractor del entrenamiento calcula las {len(nombres)} features, pero el servicio de "
+            f"inferencia la deja sin clasificar ({prediccion.estado}: {prediccion.motivo}); el modelo registrado "
+            "nunca clasificaría una lectura en producción"
+        )
+    servido = np.array([prediccion.vector_features.get(n, np.nan) for n in nombres], dtype=float)
+    diferencias = np.abs(servido - referencia)
+    diferencias = np.where(np.isfinite(diferencias), diferencias, np.inf)
+    peor = int(np.argmax(diferencias))
+    if diferencias[peor] > TOLERANCIA_PARIDAD:
+        raise RegistroRechazado(
+            f"en {lugar} el servicio de inferencia calcula {nombres[peor]} = {servido[peor]!r} y el entrenamiento "
+            f"{float(referencia[peor])!r} (tolerancia {TOLERANCIA_PARIDAD:.1e})"
+        )
+    esperada = float(modelo.predict_proba(referencia.reshape(1, -1))[0, 1])
+    if prediccion.puntuacion is None or abs(prediccion.puntuacion - esperada) > TOLERANCIA_PARIDAD:
+        raise RegistroRechazado(
+            f"en {lugar} el servicio de inferencia puntúa {prediccion.puntuacion!r} y el modelo, con el vector del "
+            f"entrenamiento, {esperada!r}"
+        )
+    return {
+        "comprobada": True,
+        "estado_servicio": prediccion.estado,
+        "features": len(nombres),
+        "diferencia_max": float(diferencias.max()),
+        "tolerancia": TOLERANCIA_PARIDAD,
+    }
+
+
+def comprobar_servicio(
+    modelo,
+    manifiesto: dict,
+    lecturas: pd.DataFrame,
+    corridas_prueba: list[str],
+    config: ConfiguracionPreventiva,
+) -> dict:
+    """Paridad entrenamiento-servicio, ANTES de escribir en el registro.
+
+    Registra el modelo en un registro temporal, lo carga en sombra con el
+    servicio de inferencia y llama a `ServicioPrediccionPreventiva.predecir`
+    (el camino de la telemetría) con las lecturas del CSV de una corrida de
+    prueba como historial de LecturaTermica, hasta su lectura más reciente en
+    rango cuya ventana el extractor del entrenamiento sí calcula. El servicio
+    debe clasificarla (estado ok) con el vector y la puntuación del
+    entrenamiento. Si el servicio no recibe una señal que usa el conjunto (el
+    SHT31 de `termico_ambiente` mientras `predecir` no lo pase al extractor),
+    deja la lectura sin clasificar y no se registra nada.
+
+    La rejilla del servicio se ancla en la lectura y la del entrenamiento en
+    múltiplos del paso desde la época: para compararlas, las lecturas se
+    desplazan en bloque hasta que la elegida cae en un punto de la rejilla
+    (las features solo dependen de tiempos relativos)."""
+    from src.domain.value_objects.rango_termico import RANGO_TERMICO_BPA
+    from src.infrastructure.ai.prediccion_preventiva.servicio import MODO_SOMBRA, ServicioPrediccionPreventiva
+
+    conjunto, version, nombres = manifiesto["conjunto_features"], manifiesto["version"], manifiesto["features"]
+
+    def no_servible(detalle: str) -> RegistroRechazado:
+        return RegistroRechazado(f"el conjunto {conjunto} no se puede servir: {detalle}")
+
+    corrida = lecturas["serie_id"].astype(str).map(_corrida_de)
+    de_prueba = lecturas[corrida.isin(corridas_prueba)]
+    temperatura = de_prueba["temperatura_interna"]
+    en_rango = temperatura.notna() & temperatura.map(lambda t: math.isfinite(t) and RANGO_TERMICO_BPA.contiene(t))
+    candidatas = de_prueba[en_rango].sort_values("timestamp", ascending=False, kind="stable")
+    por_serie = {serie: df.sort_values("timestamp", kind="stable") for serie, df in de_prueba.groupby("serie_id")}
+    paso_us = config.paso_rejilla_s * 1_000_000
+
+    with tempfile.TemporaryDirectory(prefix="coldcare-paridad-") as directorio:
+        raiz_temporal = Path(directorio)
+        try:
+            registro.registrar(modelo, manifiesto, raiz_temporal)
+        except registro.ErrorRegistro as exc:
+            raise no_servible(f"no se pudo preparar la comprobación ({exc})") from None
+        sha256 = registro.leer_manifiesto(version, raiz_temporal)["artefacto"]["sha256"]
+        servicio = ServicioPrediccionPreventiva(MODO_SOMBRA, version, sha256, raiz=raiz_temporal)
+        if not servicio.disponible:
+            raise no_servible(
+                f"el servicio de inferencia no carga el modelo en sombra ({servicio.motivo_codigo()}: "
+                f"{servicio.motivo_rechazo()})"
+            )
+        for _, fila in candidatas.head(MAX_CANDIDATAS_PARIDAD).iterrows():
+            serie = por_serie[fila["serie_id"]]
+            instante = fila["timestamp"]
+            ventana = serie[(serie["timestamp"] <= instante) & (serie["timestamp"] > instante - HISTORIAL_PARIDAD)]
+            tiempos_us = a_epoch_ns(ventana["timestamp"]) // 1000
+            tiempos_us = tiempos_us + (-int(tiempos_us[-1])) % paso_us
+            referencia = _vector_entrenamiento(ventana, tiempos_us, config, conjunto)
+            if referencia is None:
+                continue
+            historial = _lecturas_para_servicio(ventana, tiempos_us)
+            prediccion = servicio.predecir(historial[-1], historial[:-1])
+            corrida_id = _corrida_de(str(fila["serie_id"]))
+            lugar = f"la lectura {instante.isoformat()} de la corrida de prueba {corrida_id}"
+            try:
+                detalle = _comparar_con_servicio(prediccion, referencia, modelo, nombres, lugar)
+            except RegistroRechazado as exc:
+                raise no_servible(str(exc)) from None
+            return {**detalle, "corrida": corrida_id, "lectura_utc": instante.isoformat()}
+    raise no_servible(
+        "ninguna lectura en rango de las corridas de prueba tiene una ventana que el extractor del entrenamiento "
+        "calcule, así que no se puede comparar el servicio con el entrenamiento"
+    )
 
 
 # ── Manifiesto ───────────────────────────────────────────────────
@@ -267,6 +476,22 @@ def cuerpo_registro_api(manifiesto: dict) -> dict:
     }
 
 
+def advertencias_registro(particiones: dict) -> list[str]:
+    """Lo que no impide registrar (la versión sirve en sombra) pero sí activar
+    después. Sin corridas de ajuste o validación del mismo equipo que las de
+    prueba no hay separación que medir: `cuerpo_registro_api` va sin
+    `separacion_min`, que POST /activar exige (CAMPOS_PARTICIONES)."""
+    advertencias = []
+    if particiones.get("separacion_min") is None:
+        advertencias.append(
+            "ninguna corrida de ajuste o de validación es del mismo equipo que las de prueba, así que no hay "
+            "separación medible (separacion_min): cuerpo_registro_api va sin ella y POST /activar responderá "
+            "409 faltan_particiones. Para poder activar, registre una versión nueva que ajuste con al menos una "
+            "corrida del equipo de prueba separada al menos H de las de prueba; no escriba una separación a mano"
+        )
+    return advertencias
+
+
 # ── Registro ─────────────────────────────────────────────────────
 
 
@@ -335,7 +560,12 @@ def registrar_desde_corridas(
         raise RegistroRechazado(f"no existe el CSV de corridas {ruta_csv.name}")
 
     try:
-        informe = ejecutar_pipeline_corridas(ruta_csv, corridas_prueba, config, corridas_validacion, (conjunto,))
+        # Solo el conjunto que se registra es obligatorio: la ablación con el
+        # SHT31 queda "no estimable" si sus corridas no lo tienen, sin impedir
+        # registrar un conjunto que no lo usa.
+        informe = ejecutar_pipeline_corridas(
+            ruta_csv, corridas_prueba, config, corridas_validacion, (conjunto,), obligatorios=(conjunto,)
+        )
     except (ValueError, OSError) as exc:
         raise RegistroRechazado(f"las corridas no se pueden usar: {exc}") from None
     resultado = informe["resultados"][conjunto]
@@ -347,6 +577,9 @@ def registrar_desde_corridas(
     # Propuesta para P-4: la versión del dataset es la huella del CSV exportado.
     datos["dataset_version"] = dataset_version or f"corridas-{datos['sha256'][:12]}"
     manifiesto = construir_manifiesto(version, conjunto, config, resultado, datos, sklearn_fijado)
+    # Antes de escribir: el servicio debe poder clasificar con este conjunto.
+    paridad = comprobar_servicio(modelo, manifiesto, informe["_lecturas"], resultado["particiones"]["prueba"], config)
+    advertencias = advertencias_registro(resultado["particiones"])
     try:
         destino = registro.registrar(modelo, manifiesto, raiz)
     except registro.ErrorRegistro as exc:
@@ -369,6 +602,8 @@ def registrar_desde_corridas(
         "datos": {k: escrito["datos"][k] for k in ("archivo", "sha256", "dataset_version", "desde_utc", "hasta_utc")},
         "criterios_aceptacion": escrito["criterios_aceptacion"],
         "verificacion": verificacion,
+        "paridad_servicio": paridad,
         "cuerpo_registro_api": cuerpo_registro_api(escrito),
+        "advertencias": advertencias,
         "_informe": informe,
     }

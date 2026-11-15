@@ -15,7 +15,9 @@ provocadas), y llegan como CSV exportado de `thermal_readings` con
    regla de pendiente (extrapolación de la tendencia reciente);
 6. reporta las métricas de los DOS juegos de criterios (F1 macro ≥ 0,85 y
    los criterios por incidente) para cada conjunto de features;
-7. repite todo con y sin el SHT31 (ablación) y reporta la diferencia.
+7. repite todo con y sin el SHT31 (ablación) y reporta la diferencia; si
+   las corridas no traen el SHT31, `termico_ambiente` queda "no estimable"
+   sin detener el informe ni el registro de otro conjunto.
 
 Uso: `python -m src.infrastructure.ai.prediccion_preventiva corridas --csv
 corridas.csv --prueba C3,C4 [--validacion C2]` (ver __main__.py). Con
@@ -250,6 +252,45 @@ def seleccionar_umbral(
     return SeleccionUmbral(division.metodo, eleccion["umbral"], indices, puntuaciones, detalle, modelo)
 
 
+def _corridas_de(series: pd.Series) -> set[str]:
+    """corrida_id de cada serie `device#corrida` (las series sin corrida no cuentan)."""
+    return set(series.astype(str).str.split("#", n=1).str[1].dropna().unique())
+
+
+def _exigir_corridas_existentes(
+    lecturas: pd.DataFrame, corridas_prueba: list[str], corridas_validacion: list[str] | None
+) -> None:
+    """Errores del operador, comunes a todos los conjuntos: una corrida de
+    prueba o de validación que no está en el CSV. Se comprueban sobre las
+    lecturas, no sobre las observaciones de un conjunto: una corrida sin el
+    SHT31 existe aunque `termico_ambiente` no tenga observaciones en ella."""
+    if "corrida_id" not in lecturas.columns:
+        return  # dividir_por_corrida explica que falta corrida_id
+    existentes = set(lecturas["corrida_id"].dropna().astype(str).unique())
+    for tipo, pedidas in (("prueba", corridas_prueba), ("validación", corridas_validacion or [])):
+        faltan = sorted(set(pedidas) - existentes)
+        if faltan:
+            raise ValueError(f"Corridas de {tipo} inexistentes: {faltan}")
+
+
+def _exigir_observaciones(rejillas: pd.DataFrame, tabla: pd.DataFrame, conjunto: str, pedidas: list[str]) -> None:
+    """Una corrida de prueba o de validación que existe pero no deja ninguna
+    observación válida para ESTE conjunto (p. ej. sin el SHT31 para
+    `termico_ambiente`). El mensaje no la llama inexistente."""
+    sin_observaciones = sorted(
+        (set(pedidas) & _corridas_de(rejillas["serie_id"])) - set(tabla["corrida_id"].dropna().unique())
+    )
+    if sin_observaciones:
+        exige = (
+            " (este conjunto exige temperatura y humedad ambiental válidas del SHT31 en la ventana)"
+            if conjunto == CONJUNTO_TERMICO_AMBIENTE
+            else ""
+        )
+        raise ValueError(
+            f"las corridas {sin_observaciones} no tienen observaciones válidas para el conjunto {conjunto}{exige}"
+        )
+
+
 def evaluar_conjunto(
     rejillas,
     episodios,
@@ -261,6 +302,7 @@ def evaluar_conjunto(
     etiquetadas = etiquetar(rejillas, episodios, config)
     obs = construir_observaciones(etiquetadas, config, conjunto)
     obs.tabla["corrida_id"] = obs.tabla["serie_id"].str.split("#", n=1).str[1]
+    _exigir_observaciones(rejillas, obs.tabla, conjunto, [*corridas_prueba, *(corridas_validacion or [])])
     particion = dividir_por_corrida(obs.tabla, corridas_prueba, config)
     division = dividir_ajuste_y_validacion(
         obs.tabla, particion.entrenamiento, particion.corridas_entrenamiento, corridas_validacion, config
@@ -348,16 +390,30 @@ def ejecutar_pipeline_corridas(
     config: ConfiguracionPreventiva | None = None,
     corridas_validacion: list[str] | None = None,
     conjuntos: tuple[str, ...] = CONJUNTOS_INFORME,
+    obligatorios: tuple[str, ...] = (CONJUNTO_TERMICO,),
 ) -> dict:
+    """Informe de corridas. Una partición imposible (ValueError) en un
+    conjunto de `obligatorios` detiene todo; en los demás el conjunto queda
+    "no estimable" con el motivo. Así la ablación con el SHT31 nunca impide
+    informar o registrar un conjunto que no lo usa (corridas sin SHT31 o un
+    CSV sin sus columnas). Por omisión es obligatorio `termico_minimo`, la
+    referencia de la ablación; al registrar, solo el conjunto que se registra."""
     config = config or ConfiguracionPreventiva()
     crudas, informe = ingesta.importar_coldcare_csv(ruta_csv)
     lecturas, limpieza = calidad.limpiar(crudas)
+    _exigir_corridas_existentes(lecturas, corridas_prueba, corridas_validacion)
     rejillas = calidad.preparar_rejillas(lecturas, config)
     episodios = eventos.agrupar_incidentes(eventos.detectar_episodios(rejillas, config), config)
-    resultados = {
-        conjunto: evaluar_conjunto(rejillas, episodios, config, conjunto, corridas_prueba, corridas_validacion)
-        for conjunto in dict.fromkeys((*CONJUNTOS_INFORME, *conjuntos))
-    }
+    resultados = {}
+    for conjunto in dict.fromkeys((*CONJUNTOS_INFORME, *conjuntos)):
+        try:
+            resultados[conjunto] = evaluar_conjunto(
+                rejillas, episodios, config, conjunto, corridas_prueba, corridas_validacion
+            )
+        except ValueError as exc:
+            if conjunto in obligatorios:
+                raise
+            resultados[conjunto] = {"conjunto": conjunto, "resultado": f"no estimable: {exc}"}
     sin, con = resultados[CONJUNTO_TERMICO], resultados[CONJUNTO_TERMICO_AMBIENTE]
     ablacion = None
     if sin.get("resultado") == con.get("resultado") == "evaluado":

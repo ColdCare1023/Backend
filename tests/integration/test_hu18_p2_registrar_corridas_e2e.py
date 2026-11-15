@@ -173,6 +173,9 @@ def test_registrar_escribe_artefacto_manifiesto_e_historial_coherentes(registrad
         "sha256_artefacto_coincide": True, "manifiesto_anotado_en_historial": True,
         "carga_en_sombra": True, "motivo_no_disponible_en_sombra": None,
     }
+    # Antes de escribir, el servicio clasificó una lectura de prueba con el
+    # vector del entrenamiento; prueba y ajuste comparten equipo: sin advertencias.
+    assert resumen["paridad_servicio"]["comprobada"] is True and resumen["advertencias"] == []
     cuerpo = resumen["cuerpo_registro_api"]
     assert cuerpo["model_hash"] == manifiesto["artefacto"]["sha256"]
     assert cuerpo["feature_schema_version"] == "termico_minimo" and cuerpo["horizonte_min"] == 30
