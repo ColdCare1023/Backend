@@ -1,3 +1,8 @@
+from datetime import datetime, timezone
+
+import pytest
+
+from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 from src.infrastructure.ai.features import FeaturesRiesgoTermico
 from src.infrastructure.ai.reglas_riesgo import clasificar_por_regla
@@ -53,3 +58,22 @@ def test_tendencia_termica_fuerte_dentro_de_rango_es_riesgo_preventivo():
     assert clasificar_por_regla(
         _features(temperatura_interna=5.0, tendencia_termica=2.0)
     ) == NivelRiesgo.RIESGO_PREVENTIVO
+
+
+@pytest.mark.parametrize("humedad", [99.0, 100.0, 0.0])
+def test_hu03_la_humedad_no_asigna_por_si_sola_una_clase_de_riesgo(humedad):
+    """HU-03 esc. 2: una HR válida es variable contextual y no asigna por sí
+    sola una clase de riesgo térmico (no hay umbral de HR como regla). Con la
+    temperatura interna en el centro del rango (5 °C) y la HR en 99 %, ni la
+    salvaguarda determinista ni la regla 2-8 °C cambian: NORMAL y sin
+    excursión confirmada."""
+    assert clasificar_por_regla(_features(temperatura_interna=5.0, humedad_ambiental=humedad)) == NivelRiesgo.NORMAL
+
+    lectura = LecturaTermica(
+        device_id="ESP32-HU03", timestamp=datetime(2026, 11, 15, 12, tzinfo=timezone.utc),
+        temperatura_ambiental=6.0, humedad_ambiental=humedad, temperatura_interna=5.0,
+        apertura_refrigerador=False, estado_conectividad="online",
+    )
+    assert lectura.es_lectura_valida() is True
+    assert lectura.es_excursion_confirmada() is False
+    assert lectura.calcular_riesgo_efectivo() == NivelRiesgo.NORMAL
