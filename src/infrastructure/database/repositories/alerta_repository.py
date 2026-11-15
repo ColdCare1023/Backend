@@ -8,7 +8,7 @@ from src.domain.entities.alerta_termica import AlertaTermica
 from src.domain.repositories.i_alerta_repository import IAlertaRepository
 from src.domain.value_objects.estado_alerta import EstadoAlerta
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
-from src.infrastructure.database.models import ThermalAlertModel
+from src.infrastructure.database.models import ThermalAlertModel, ThermalReadingModel
 
 
 def _to_entity(model: ThermalAlertModel) -> AlertaTermica:
@@ -198,20 +198,33 @@ class SQLAlchemyAlertaRepository(IAlertaRepository):
 
     @staticmethod
     def _filtros_periodo(device_id: str | None, desde: datetime | None, hasta: datetime | None) -> list:
+        """Filtros del periodo del reporte (HU-38/HU-51).
+
+        El periodo se ancla en el instante de CAPTURA de la lectura que abrió
+        el episodio (`thermal_readings.timestamp`), igual que el resto del
+        reporte. Filtrar por `created_at` de la alerta (hora de inserción en
+        la BD) desalinea el conteo cuando la ingesta llega con retraso
+        (buffer offline del ESP32, colas MQTT) y deja episodios fuera del
+        periodo al que pertenecen. Requiere el JOIN de `_con_lectura_inicial`.
+        """
         filtros = []
         if device_id:
             filtros.append(ThermalAlertModel.device_id == device_id)
         if desde is not None:
-            filtros.append(ThermalAlertModel.created_at >= desde)
+            filtros.append(ThermalReadingModel.timestamp >= desde)
         if hasta is not None:
-            filtros.append(ThermalAlertModel.created_at <= hasta)
+            filtros.append(ThermalReadingModel.timestamp <= hasta)
         return filtros
+
+    @staticmethod
+    def _con_lectura_inicial(stmt):
+        return stmt.join(ThermalReadingModel, ThermalReadingModel.id == ThermalAlertModel.lectura_inicial_id)
 
     async def contar_por_nivel(
         self, device_id: str | None, desde: datetime | None, hasta: datetime | None
     ) -> dict[str, int]:
         stmt = (
-            select(ThermalAlertModel.nivel_riesgo, func.count(ThermalAlertModel.id))
+            self._con_lectura_inicial(select(ThermalAlertModel.nivel_riesgo, func.count(ThermalAlertModel.id)))
             .where(*self._filtros_periodo(device_id, desde, hasta))
             .group_by(ThermalAlertModel.nivel_riesgo)
         )
@@ -226,9 +239,9 @@ class SQLAlchemyAlertaRepository(IAlertaRepository):
         limite: int = 10_000,
     ) -> list[AlertaTermica]:
         stmt = (
-            select(ThermalAlertModel)
+            self._con_lectura_inicial(select(ThermalAlertModel))
             .where(ThermalAlertModel.nivel_riesgo == nivel_riesgo, *self._filtros_periodo(device_id, desde, hasta))
-            .order_by(ThermalAlertModel.created_at.desc())
+            .order_by(ThermalReadingModel.timestamp.desc())
             .limit(limite)
         )
         return [_to_entity(m) for m in (await self._session.execute(stmt)).scalars().all()]

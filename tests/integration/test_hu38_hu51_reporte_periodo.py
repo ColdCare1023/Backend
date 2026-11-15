@@ -136,6 +136,22 @@ async def test_el_resumen_cubre_todo_el_periodo_aunque_el_detalle_se_recorte(
     assert est["episodios_criticos"] == len(criticas) >= 1
 
 
+async def test_episodios_se_cuentan_por_instante_de_captura_no_de_insercion(
+    client, token_tecnico, token_farmaceutico, db_session_factory
+):
+    """Ingesta tardía (buffer offline, cola MQTT): la alerta se inserta AHORA
+    pero el episodio ocurrió hace una hora. Cuenta en el periodo de la captura
+    y no en el de la inserción."""
+    for i, temperatura in enumerate([5.0, 9.5, 10.0, 5.0]):
+        _ingestar(client, token_tecnico, temperatura, minutos_atras=60 - i * 5)
+
+    periodo_de_captura = await _reporte(db_session_factory, AHORA - timedelta(hours=2), AHORA - timedelta(minutes=30))
+    assert periodo_de_captura["estadisticas"]["episodios_criticos"] >= 1
+
+    periodo_de_insercion = await _reporte(db_session_factory, AHORA - timedelta(minutes=20), AHORA + timedelta(hours=1))
+    assert periodo_de_insercion["estadisticas"]["episodios_criticos"] == 0
+
+
 async def test_ninguna_excursion_critica_se_omite_si_las_alertas_se_recortan(
     client, token_tecnico, token_farmaceutico, db_session_factory, monkeypatch
 ):
