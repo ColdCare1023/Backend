@@ -32,22 +32,35 @@ El entrenamiento es **offline** (CLI). No hay rutas HTTP para entrenar ni subir 
    `riesgo_efectivo = excursion_critica` y la alerta salen del flujo existente.
 3. Modelo no cargado, alterado o incompatible → `MODELO_NO_DISPONIBLE` (en modo activo se conserva
    la clasificación legada: la ingesta nunca se detiene).
-4. Reloj no sincronizado o ventana de 15 min con menos de 80 % de cobertura → `HISTORIAL_INSUFICIENTE`.
-5. Features (el mismo extractor del entrenamiento) → puntuación → clase según el umbral del manifiesto.
+4. Reloj no sincronizado, ventana de 15 min con menos de 80 % de cobertura o, si el conjunto usa el
+   SHT31 (`termico_ambiente`), sin temperatura ambiental o humedad en t → `HISTORIAL_INSUFICIENTE`,
+   con el motivo `reloj_no_sincronizado`, `ventana_15min_sin_cobertura_suficiente` o
+   `ventana_15min_sin_contexto_ambiental` (ver `02_PREPROCESSING_AND_FEATURES.md` §4).
+5. Features (el mismo extractor, la misma rejilla y la misma segmentación del entrenamiento; la
+   puerta y el SHT31 solo si el conjunto los usa) → puntuación → clase según el umbral del manifiesto.
    Cualquier excepción → `FALLO_INFERENCIA`.
 
 `SIN_DATOS` (ausencia de telemetría) lo sigue calculando el estado operativo del dispositivo
 (`dispositivos_router`): sin lectura no hay inferencia. Lecturas manuales y simuladas (dispositivos
-demo) **no se predicen**. El historial se lee con `listar_recientes_por_device(limite=120)` (cubre
-15 min incluso con el intervalo mínimo de 10 s del ESP32).
+demo) **no se predicen**. El historial se lee por intervalo de tiempo, no por número de filas:
+`listar_recientes_por_device(desde=t − alcance_historial_s, hasta=t, limite=limite_historial_preventivo(alcance))`.
+Con la configuración por defecto, `alcance_historial_s` = 1170 s (15 puntos de rejilla de 60 s, más
+`hueco_max_s` 180 s para la segmentación, más 90 s de agregación) y el tope de seguridad es 468 filas
+(2 × 1170 s / 5 s, el intervalo mínimo que admite el backend). El alcance sale del manifiesto cargado,
+así que entrenamiento e inferencia ven la misma ventana a cualquier intervalo de captura (ronda 3,
+`tests/unit/test_hu17_historial_por_alcance.py`).
 
 ## 4. Contratos preservados
 
 - Respuestas de lecturas, SSE y alertas: sin cambios de forma. En modo activo los campos existentes
   (`nivel_riesgo`, `origen_clasificacion`, `estado_inferencia`, `motivo_no_inferencia`,
   `modelo_version`, `vector_features_ia`) se rellenan con los valores ya admitidos por el frontend.
-  `confianza_ia` y `probabilidades_ia` quedan en `null` porque la puntuación **no está calibrada**:
-  no se presenta como probabilidad.
+  `probabilidades_ia` guarda la puntuación de **ambas** clases que devuelve `predict_proba`
+  (`riesgo_preventivo` = p, `normal` = 1 − p) y `confianza_ia` la de la clase elegida
+  (`predecir_riesgo_preventivo.py`). Mientras el manifiesto no declare la puntuación calibrada, el
+  payload lleva `puntuacion_calibrada: false` y la API `probabilidades_calibradas: false`: se
+  presentan como puntuaciones del modelo, no como probabilidades (decisión P-5 pendiente, ver
+  `08_LIMITATIONS_AND_NEXT_STEPS.md`).
 - Cadena SHA-256: el payload de `LECTURA_TERMICA` mantiene sus mismas claves. Las predicciones viven
   en su propia tabla de solo anexado (con trigger), con el SHA-256 del artefacto y la versión del
   modelo en cada fila.
@@ -67,5 +80,6 @@ demo) **no se predicen**. El historial se lee con `listar_recientes_por_device(l
   solo artefactos propios con hash verificado.
 - Rollback: cambiar `IA_PREVENTIVO_VERSION` y `IA_PREVENTIVO_SHA256` a una versión anterior (el
   registro nunca sobrescribe). Poner `IA_PREVENTIVO_MODO=desactivado` vuelve al flujo legado.
-- Rendimiento: una inferencia = remuestrear ≤ 120 lecturas + `predict_proba` de una fila con
-  `n_jobs=1`. El modelo se carga una sola vez por proceso.
+- Rendimiento: una inferencia = limpiar y remuestrear las lecturas de los 1170 s anteriores a t
+  (`features.alcance_historial_s`; ~117 a 10 s, ~234 a 5 s, con un tope defensivo de 468 filas) +
+  `predict_proba` de una fila con `n_jobs=1`. El modelo se carga una sola vez por proceso.

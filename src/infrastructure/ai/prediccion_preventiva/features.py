@@ -9,19 +9,23 @@ en una ventana:
   ventanas deslizantes de la rejilla (relleno NaN antes del inicio del
   segmento: una ventana nunca cruza un corte).
 - Producción: `features_en_instante` remuestrea el historial crudo de
-  lecturas anclando la rejilla en el instante de la lectura actual y llama
-  a la misma función con una sola fila.
+  lecturas anclando la rejilla en el instante de la lectura actual, le aplica
+  la MISMA segmentación (`calidad.segmentar`) y llama a la misma función con
+  una sola fila.
 
 Las ventanas se definen en minutos y se convierten a puntos de rejilla, así
 que no dependen de la frecuencia de muestreo de la fuente (5 s, 60 s, 30 s).
 
 Variables deliberadamente EXCLUIDAS (ver docs/ml/02_PREPROCESSING_AND_FEATURES.md):
-humedad (interior en Hohenheim, exterior en ColdCare: no es la misma
-magnitud), hora del día (memorizaría el horario del protocolo), identidad
-del sensor, del archivo o del dataset.
+humedad en `termico_minimo` y `termico_puerta` (interior en Hohenheim,
+exterior en ColdCare: no es la misma magnitud; solo `termico_ambiente`, que
+se entrena con corridas de ColdCare, usa la del SHT31), hora del día
+(memorizaría el horario del protocolo), identidad del sensor, del archivo o
+del dataset.
 """
 
 import warnings
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -31,6 +35,7 @@ from src.infrastructure.ai.prediccion_preventiva.calidad import (
     TEMPERATURA_MAX_FISICA_C,
     TEMPERATURA_MIN_FISICA_C,
     remuestrear,
+    segmentar,
 )
 from src.infrastructure.ai.prediccion_preventiva.configuracion import (
     CALIDAD_HISTORIAL_INSUFICIENTE,
@@ -45,6 +50,29 @@ CONJUNTO_TERMICO_PUERTA = "termico_puerta"
 # medir si el segundo sensor aporta capacidad preventiva.
 CONJUNTO_TERMICO_AMBIENTE = "termico_ambiente"
 CONJUNTOS = (CONJUNTO_TERMICO, CONJUNTO_TERMICO_PUERTA, CONJUNTO_TERMICO_AMBIENTE)
+
+# Señales crudas, además de la temperatura interna, que necesita cada conjunto.
+# Producción solo calcula los conjuntos de esta tabla (servicio.py rechaza el
+# resto): un conjunto nuevo del entrenamiento no se sirve hasta declararlo aquí
+# y cubrirlo con la prueba de paridad.
+CANAL_PUERTA = "puerta"
+CANAL_AMBIENTE = "ambiente"
+CANAL_HUMEDAD = "humedad"
+CANALES_POR_CONJUNTO: dict[str, tuple[str, ...]] = {
+    CONJUNTO_TERMICO: (),
+    CONJUNTO_TERMICO_PUERTA: (CANAL_PUERTA,),
+    CONJUNTO_TERMICO_AMBIENTE: (CANAL_AMBIENTE, CANAL_HUMEDAD),
+}
+# Columna de la rejilla (calidad.COLUMNAS_CONTEXTO) de cada canal del SHT31.
+_COLUMNA_CONTEXTO = {CANAL_AMBIENTE: "temp_ambiental", CANAL_HUMEDAD: "humedad"}
+
+# Motivos estables de HISTORIAL_INSUFICIENTE (`motivo` de la predicción y
+# `motivo_no_inferencia` de la lectura en modo activo).
+MOTIVO_SIN_COBERTURA = "ventana_15min_sin_cobertura_suficiente"
+# HU-17: la temperatura interna alcanza, pero el conjunto necesita el SHT31 y
+# no hay temperatura ambiental o humedad válidas en el punto actual.
+MOTIVO_SIN_CONTEXTO_AMBIENTAL = "ventana_15min_sin_contexto_ambiental"
+_MOTIVO_SIN_CONTEXTO = {CONJUNTO_TERMICO_AMBIENTE: MOTIVO_SIN_CONTEXTO_AMBIENTAL}
 
 # Margen para "cerca del límite": el mismo 1 °C que usa la regla legada
 # `reglas_riesgo.MARGEN_PREVENTIVO_C`.
@@ -97,6 +125,23 @@ def calcular_matriz(
     filas con historial suficiente. Las filas no ok NO deben predecirse.
     `ambiente` y `humedad` (ventanas del SHT31) solo los usa
     CONJUNTO_TERMICO_AMBIENTE; sin ellos esas filas quedan no ok."""
+    x, ok_termico, ok_contexto = _calcular_matriz(temperaturas, puertas, config, conjunto, ambiente, humedad)
+    return x, ok_termico & ok_contexto
+
+
+def _calcular_matriz(
+    temperaturas: np.ndarray,
+    puertas: np.ndarray | None,
+    config: ConfiguracionPreventiva,
+    conjunto: str,
+    ambiente: np.ndarray | None,
+    humedad: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(X, ok_termico, ok_contexto). ok_termico: la temperatura interna cumple
+    las reglas de cobertura y sus features son finitas. ok_contexto: la señal
+    adicional del conjunto (puerta o SHT31) está en el punto actual y sus
+    features son finitas. `calcular_matriz` exige ambas; separarlas solo sirve
+    para informar el motivo cuando no se predice."""
     k = config.puntos_ventana
     if temperaturas.ndim != 2 or temperaturas.shape[1] != k:
         raise ValueError(f"Se esperaban ventanas de {k} puntos, llegaron {temperaturas.shape}")
@@ -142,22 +187,26 @@ def calcular_matriz(
             cerca.sum(axis=1) / n_validos,
             fuera.sum(axis=1) / n_validos,
         ]
+        n_termicas = len(columnas)
+        ok_contexto = np.ones(temperaturas.shape[0], dtype=bool)
         if conjunto == CONJUNTO_TERMICO_PUERTA:
             if puertas is None:
                 puertas = np.full_like(temperaturas, np.nan)
-            ok &= np.isfinite(puertas[:, -1])
+            ok_contexto &= np.isfinite(puertas[:, -1])
             columnas += [puertas[:, -1], np.nanmean(puertas, axis=1)]
         if conjunto == CONJUNTO_TERMICO_AMBIENTE:
             if ambiente is None:
                 ambiente = np.full_like(temperaturas, np.nan)
             if humedad is None:
                 humedad = np.full_like(temperaturas, np.nan)
-            ok &= np.isfinite(ambiente[:, -1]) & np.isfinite(humedad[:, -1])
+            ok_contexto &= np.isfinite(ambiente[:, -1]) & np.isfinite(humedad[:, -1])
             columnas += [ambiente[:, -1], humedad[:, -1], actual - ambiente[:, -1], np.nanmean(ambiente, axis=1)]
 
     x = np.column_stack(columnas).astype(float)
-    ok &= np.isfinite(x).all(axis=1)
-    return x, ok
+    finitas = np.isfinite(x)
+    ok &= finitas[:, :n_termicas].all(axis=1)
+    ok_contexto &= finitas[:, n_termicas:].all(axis=1)
+    return x, ok, ok_contexto
 
 
 def matriz_ventanas(valores: np.ndarray, k: int) -> np.ndarray:
@@ -189,23 +238,82 @@ def features_de_rejillas(
     return x, ok
 
 
-def features_en_instante(
+def puntos_previos_rejilla(config: ConfiguracionPreventiva) -> int:
+    """Puntos de rejilla ANTES de t que usa `evaluar_en_instante`: los de la
+    ventana más larga más los `hueco_max_s` previos que necesita la
+    segmentación para medir un hueco que toque la ventana (15 + 3 por defecto)."""
+    return config.puntos_ventana - 1 + config.hueco_max_s // config.paso_rejilla_s
+
+
+def alcance_historial_s(config: ConfiguracionPreventiva) -> int:
+    """Segundos antes de t cuyas lecturas pueden cambiar el vector de t: la
+    rejilla de `evaluar_en_instante` empieza `puntos_previos_rejilla` pasos
+    antes de t y su primer punto promedia los `agregacion_s` anteriores.
+    15 min + 180 s + 90 s = 1170 s con la configuración por defecto. Una
+    lectura más antigua no cambia nada; una que falte dentro de este alcance
+    sí (HU-17: el servicio pide el historial por tiempo, no por cantidad)."""
+    return puntos_previos_rejilla(config) * config.paso_rejilla_s + config.agregacion_s
+
+
+class EvaluacionInstante(NamedTuple):
+    """Resultado de `evaluar_en_instante`: vector (None si no se predice),
+    calidad (CALIDAD_OK / CALIDAD_HISTORIAL_INSUFICIENTE) y, sin vector, el
+    motivo estable (MOTIVO_*)."""
+
+    vector: np.ndarray | None
+    calidad: str
+    motivo: str | None
+
+
+def _ventana_del_segmento(rejilla: pd.DataFrame, config: ConfiguracionPreventiva) -> np.ndarray:
+    """Máscara de los últimos `puntos_ventana` puntos que pertenecen al
+    segmento de t en el ENTRENAMIENTO. `calidad.segmentar` corta la serie donde
+    hay más de `hueco_max_s` sin temperatura interna y quita esos puntos; las
+    ventanas de entrenamiento se rellenan con NaN antes del inicio del segmento
+    (`matriz_ventanas`). Aquí se aplica la misma función a la rejilla anclada en
+    t, que empieza `hueco_max_s` antes de la ventana para poder medir el hueco
+    que la toca. Sin esto, la puerta o el SHT31 de un punto sin temperatura
+    interna (DS18B20 en falla) de antes del corte entrarían en la ventana."""
+    k = config.puntos_ventana
+    g = rejilla["g_ns"].to_numpy()
+    segmentos = segmentar(rejilla, config)
+    if segmentos.empty or int(segmentos["g_ns"].iloc[-1]) != int(g[-1]):
+        # Sin temperatura interna en t no hay segmento: la fila no es ok.
+        return np.zeros(k, dtype=bool)
+    del_ultimo = segmentos["segmento"].to_numpy() == segmentos["segmento"].iloc[-1]
+    inicio = int(segmentos["g_ns"].to_numpy()[del_ultimo][0])
+    return g[-k:] >= inicio
+
+
+def evaluar_en_instante(
     ts_ns: np.ndarray,
     temperaturas: np.ndarray,
     puertas: np.ndarray | None,
     t_eval_ns: int,
     config: ConfiguracionPreventiva,
     conjunto: str = CONJUNTO_TERMICO,
-) -> tuple[np.ndarray | None, str]:
+    ambiente: np.ndarray | None = None,
+    humedad: np.ndarray | None = None,
+) -> EvaluacionInstante:
     """Vector de features en el instante t_eval a partir de lecturas crudas
-    (cualquier frecuencia). Devuelve (vector, calidad). Con historial
-    insuficiente devuelve (None, HISTORIAL_INSUFICIENTE): nunca rellena."""
+    (cualquier frecuencia), con la rejilla, la media causal y la segmentación
+    del entrenamiento (`calidad.preparar_rejillas`). Las lecturas sin
+    temperatura interna válida (NaN) se admiten: no aportan temperatura, pero
+    su puerta y su SHT31 cuentan, como en el entrenamiento. `ambiente` y
+    `humedad` son la temperatura ambiental y la humedad del SHT31 de cada
+    lectura (NaN donde no hay). Con historial insuficiente devuelve vector
+    None y el motivo: nunca rellena."""
     paso_ns = config.paso_rejilla_s * 1_000_000_000
     k = config.puntos_ventana
     temperaturas = np.asarray(temperaturas, dtype=float).copy()
     temperaturas[(temperaturas < TEMPERATURA_MIN_FISICA_C) | (temperaturas > TEMPERATURA_MAX_FISICA_C)] = np.nan
     ts_ns = np.asarray(ts_ns, dtype=np.int64)
     pasado = ts_ns <= t_eval_ns
+    extras = {
+        _COLUMNA_CONTEXTO[canal]: np.asarray(valores, dtype=float)[pasado]
+        for canal, valores in ((CANAL_AMBIENTE, ambiente), (CANAL_HUMEDAD, humedad))
+        if valores is not None
+    }
     rejilla = remuestrear(
         ts_ns[pasado],
         temperaturas[pasado],
@@ -213,12 +321,45 @@ def features_en_instante(
         config.paso_rejilla_s,
         config.agregacion_s,
         ancla_ns=t_eval_ns,
-        desde_ns=t_eval_ns - (k - 1) * paso_ns,
+        desde_ns=t_eval_ns - puntos_previos_rejilla(config) * paso_ns,
         hasta_ns=t_eval_ns,
+        extras=extras,
     )
-    x, ok = calcular_matriz(
-        rejilla["temperatura"].to_numpy()[None, :], rejilla["puerta"].to_numpy()[None, :], config, conjunto
+    en_segmento = _ventana_del_segmento(rejilla, config)
+
+    def _ventana(columna: str) -> np.ndarray | None:
+        if columna not in rejilla.columns:
+            return None
+        return np.where(en_segmento, rejilla[columna].to_numpy()[-k:], np.nan)[None, :]
+
+    x, ok_termico, ok_contexto = _calcular_matriz(
+        _ventana("temperatura"),
+        _ventana("puerta"),
+        config,
+        conjunto,
+        _ventana(_COLUMNA_CONTEXTO[CANAL_AMBIENTE]),
+        _ventana(_COLUMNA_CONTEXTO[CANAL_HUMEDAD]),
     )
-    if not ok[0]:
-        return None, CALIDAD_HISTORIAL_INSUFICIENTE
-    return x[0], CALIDAD_OK
+    if not ok_termico[0]:
+        return EvaluacionInstante(None, CALIDAD_HISTORIAL_INSUFICIENTE, MOTIVO_SIN_COBERTURA)
+    if not ok_contexto[0]:
+        return EvaluacionInstante(
+            None, CALIDAD_HISTORIAL_INSUFICIENTE, _MOTIVO_SIN_CONTEXTO.get(conjunto, MOTIVO_SIN_COBERTURA)
+        )
+    return EvaluacionInstante(x[0], CALIDAD_OK, None)
+
+
+def features_en_instante(
+    ts_ns: np.ndarray,
+    temperaturas: np.ndarray,
+    puertas: np.ndarray | None,
+    t_eval_ns: int,
+    config: ConfiguracionPreventiva,
+    conjunto: str = CONJUNTO_TERMICO,
+    ambiente: np.ndarray | None = None,
+    humedad: np.ndarray | None = None,
+) -> tuple[np.ndarray | None, str]:
+    """(vector, calidad) de `evaluar_en_instante`. Con historial insuficiente
+    devuelve (None, HISTORIAL_INSUFICIENTE): nunca rellena."""
+    vector, calidad, _ = evaluar_en_instante(ts_ns, temperaturas, puertas, t_eval_ns, config, conjunto, ambiente, humedad)
+    return vector, calidad

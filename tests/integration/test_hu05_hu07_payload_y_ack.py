@@ -305,6 +305,42 @@ async def test_reenvio_identico_no_es_conflicto(entorno):
     assert cliente.publicados[1][1]["status"] == "duplicate"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reintento", ["mismo_instante_otro_formato", "captured_at_distinto"])
+async def test_reenvio_con_captured_at_reserializado_no_es_conflicto(entorno, reintento):
+    """HU-11 esc. 2 y 3: «mismo payload» es misma identidad y mismos valores
+    (docs/evidencias/HU-11_evidencia.md). El firmware vuelve a serializar
+    `captured_at` al reintentar; con boot_id+seq_no, `captured_at` no entra ni
+    en la identidad ni en la comparación: el reintento es un duplicado."""
+    from sqlalchemy import select
+
+    from src.infrastructure.database.models import AuditLogModel, ThermalReadingModel
+
+    cliente = _ClienteEspia()
+    original = _AHORA - timedelta(hours=1)
+    reenviado = {
+        "mismo_instante_otro_formato": original.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+        "captured_at_distinto": (original + timedelta(seconds=1)).isoformat(),
+    }[reintento]
+    primero = _payload(reading_id="e", timestamp=original.isoformat(), boot_id=8, seq_no=4)
+    segundo = _payload(reading_id="e", timestamp=reenviado, boot_id=8, seq_no=4)
+
+    await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, primero), _BroadcasterMudo(), cliente)
+    await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, segundo), _BroadcasterMudo(), cliente)
+
+    assert [publicado[1]["estado"] for publicado in cliente.publicados] == ["commit_confirmado", "duplicado"]
+    async with entorno() as session:
+        filas = (await session.execute(select(ThermalReadingModel).where(
+            ThermalReadingModel.device_id == DEVICE_ID, ThermalReadingModel.boot_id == 8,
+            ThermalReadingModel.seq_no == 4,
+        ))).scalars().all()
+        conflictos = (await session.execute(
+            select(AuditLogModel).where(AuditLogModel.accion == "LECTURA_CONFLICTO")
+        )).scalars().all()
+    assert len(filas) == 1
+    assert conflictos == []
+
+
 # ── HU-15: rechazo por esquema ────────────────────────────────────────────
 
 

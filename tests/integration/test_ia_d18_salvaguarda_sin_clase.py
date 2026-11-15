@@ -27,13 +27,17 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+import numpy as np
 import pytest
+import sklearn
+from sklearn.ensemble import RandomForestClassifier
 from sqlalchemy import select
 
 from src.application.use_cases.generar_alerta import CIERRE_NORMALIZACION, AvisoExcursion
 from src.domain.entities.prediccion_preventiva import PrediccionPreventiva
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 from src.infrastructure.ai import random_forest_service as rf
+from src.infrastructure.ai.prediccion_preventiva import registro
 from src.infrastructure.ai.prediccion_preventiva.configuracion import (
     CALIDAD_EXCURSION_EN_CURSO,
     CALIDAD_FALLO_INFERENCIA,
@@ -41,8 +45,16 @@ from src.infrastructure.ai.prediccion_preventiva.configuracion import (
     CALIDAD_MODELO_NO_DISPONIBLE,
     CALIDAD_OK,
     CALIDAD_SENSOR_FAULT,
+    ESTADO_APROBADO,
+    ESTADO_VALIDADO_OFFLINE,
+    ConfiguracionPreventiva,
 )
-from src.infrastructure.ai.prediccion_preventiva.servicio import MODO_ACTIVO, MODO_DESACTIVADO
+from src.infrastructure.ai.prediccion_preventiva.features import CONJUNTO_TERMICO_AMBIENTE, nombres_features
+from src.infrastructure.ai.prediccion_preventiva.servicio import (
+    MODO_ACTIVO,
+    MODO_DESACTIVADO,
+    ServicioPrediccionPreventiva,
+)
 from src.infrastructure.config import get_settings
 from src.infrastructure.database.models import TraceabilityRecordModel
 from src.infrastructure.database.repositories.device_repository import SQLAlchemyDeviceRepository
@@ -52,6 +64,7 @@ from tests.conftest import auth_header
 
 DEVICE_ID = "FARM-IAD18-01"
 TOPIC = f"farmacias/{DEVICE_ID}/lecturas"
+CONFIG_PREVENTIVA = ConfiguracionPreventiva()
 
 
 class _Mensaje:
@@ -115,6 +128,10 @@ class _ServicioPreventivo:
     def habilitado(self) -> bool:
         return self.modo != MODO_DESACTIVADO
 
+    def alcance_historial(self) -> timedelta:
+        """Historial que pide el caso de uso (el del extractor por defecto)."""
+        return timedelta(seconds=1170)
+
     def _resultado(self, lectura, estado: str, motivo: str | None, clase: NivelRiesgo | None = None):
         return PrediccionPreventiva(
             device_id=lectura.device_id, timestamp_inferencia=lectura.timestamp, modo=self.modo,
@@ -166,7 +183,12 @@ _SEQ = iter(range(1, 100_000))
 
 
 async def _mqtt(
-    notificaciones: _Notificaciones, instante: datetime, temperatura: float | None, time_quality: str = "synced"
+    notificaciones: _Notificaciones,
+    instante: datetime,
+    temperatura: float | None,
+    time_quality: str = "synced",
+    ambiente: float | None = 22.0,
+    humedad: float | None = 55.0,
 ) -> None:
     datos = {
         "device_id": DEVICE_ID,
@@ -174,8 +196,8 @@ async def _mqtt(
         "schema_version": 1,
         "reading_id": f"iad18-{next(_SEQ)}",
         "temperatura_interna": temperatura,
-        "temperatura_ambiental": 22.0,
-        "humedad_ambiental": 55.0,
+        "temperatura_ambiental": ambiente,
+        "humedad_ambiental": humedad,
         "apertura_refrigerador": False,
         "estado_conectividad": "online",
         "time_quality": time_quality,
@@ -328,6 +350,78 @@ async def test_toda_omision_de_clase_deja_que_la_regla_decida_y_la_excursion_nue
     assert resultado.en_rango.riesgo_efectivo == NivelRiesgo.NORMAL
     assert resultado.en_rango.estado_riesgo() == "sin_clasificacion_ia"
     _afirmar_alerta_nueva(resultado)
+
+
+def _registrar_modelo_ambiente_aprobado(raiz) -> tuple[str, str]:
+    """Modelo `termico_ambiente` aprobado con la CLI de registro. Solo varía
+    `temp_actual` al entrenar, así que a 5 °C siempre da «normal» (no abre
+    alertas preventivas que ensucien la secuencia)."""
+    version = "rf-hu17-ambiente-1.0.0"
+    nombres = nombres_features(CONFIG_PREVENTIVA, CONJUNTO_TERMICO_AMBIENTE)
+    x = np.zeros((40, len(nombres)))
+    x[:20, 0], x[20:, 0] = np.linspace(0, 10, 20), np.linspace(90, 100, 20)
+    modelo = RandomForestClassifier(n_estimators=5, random_state=0).fit(x, np.repeat([0, 1], 20))
+    registro.registrar(modelo, {
+        "version": version, "estado": "EXPERIMENTAL", "conjunto_features": CONJUNTO_TERMICO_AMBIENTE,
+        "features": nombres, "configuracion": CONFIG_PREVENTIVA.como_dict(), "umbral_decision": 0.5,
+        "puntuacion_calibrada": False, "versiones": {"scikit_learn": sklearn.__version__},
+    }, raiz)
+    registro.cambiar_estado(version, ESTADO_VALIDADO_OFFLINE, "prueba", "qa", None, raiz)
+    evidencia = raiz / "exp_d.json"
+    evidencia.write_text("{}", encoding="utf-8")
+    registro.cambiar_estado(version, ESTADO_APROBADO, "prueba", "qa", evidencia, raiz)
+    return version, registro.leer_manifiesto(version, raiz)["artefacto"]["sha256"]
+
+
+async def test_hu17_sin_sht31_el_modelo_con_contexto_ambiental_omite_y_decide_la_regla(
+    client, token_farmaceutico, db_session_factory, ingesta, tmp_path
+):
+    """HU-17 esc. 1 + IA-D18, con el servicio preventivo REAL y un modelo
+    `termico_ambiente` aprobado y activo (P0-4, arreglo A):
+
+    - con el SHT31 el modelo clasifica (antes toda lectura quedaba omitida con
+      `ventana_15min_sin_cobertura_suficiente`);
+    - si el SHT31 deja de enviar dato, la lectura en rango queda omitida con
+      `ventana_15min_sin_contexto_ambiental` y la regla 2-8 °C la deja normal;
+    - la excursión siguiente es crítica y abre una alerta PENDIENTE con su aviso.
+    """
+    version, sha = _registrar_modelo_ambiente_aprobado(tmp_path)
+    servicio = ServicioPrediccionPreventiva(MODO_ACTIVO, version, sha, raiz=tmp_path, version_activa=(version, sha))
+    assert servicio.disponible, servicio.motivo_rechazo()
+    ingesta(servicio)
+    async with db_session_factory() as session:
+        await SQLAlchemyDeviceRepository(session).obtener_o_crear(DEVICE_ID)
+        await session.commit()
+    notificaciones = _Notificaciones()
+    inicio = datetime.now(tz=timezone.utc).replace(microsecond=0) - timedelta(minutes=22)
+
+    for minuto in range(18):  # 18 min a 5 °C con el SHT31: cubre la ventana de 15 min
+        await _mqtt(notificaciones, inicio + timedelta(minutes=minuto), 5.0)
+    for minuto in (18, 19, 20):  # el SHT31 deja de enviar dato
+        await _mqtt(notificaciones, inicio + timedelta(minutes=minuto), 5.0, ambiente=None, humedad=None)
+    await _mqtt(notificaciones, inicio + timedelta(minutes=21), 8.5, ambiente=None, humedad=None)
+
+    lecturas = await _lecturas(db_session_factory)
+    assert len(lecturas) == 22
+    con_sht31 = lecturas[17]
+    assert (con_sht31.estado_inferencia, con_sht31.origen_clasificacion) == ("completada", rf.ORIGEN_MODELO)
+    assert con_sht31.nivel_riesgo == NivelRiesgo.NORMAL
+    assert con_sht31.modelo_version == version
+    assert con_sht31.vector_features_ia["humedad_actual"] == 55.0
+    # La primera sin SHT31 aún tiene, en sus últimos 90 s, la lectura anterior con SHT31.
+    assert lecturas[18].estado_inferencia == "completada"
+    for sin_sht31 in lecturas[19:21]:
+        assert sin_sht31.estado_inferencia == "omitida"
+        assert sin_sht31.motivo_no_inferencia == "ventana_15min_sin_contexto_ambiental"
+        assert sin_sht31.origen_clasificacion == rf.ORIGEN_DATO_INSUFICIENTE
+        assert sin_sht31.nivel_riesgo is None
+        assert sin_sht31.riesgo_efectivo == NivelRiesgo.NORMAL  # IA-D18: decide la regla 2-8 °C
+        assert sin_sht31.estado_riesgo() == "sin_clasificacion_ia"
+    excursion = lecturas[21]
+    assert excursion.riesgo_efectivo == NivelRiesgo.EXCURSION_CRITICA
+    [alerta] = _alertas(client, token_farmaceutico, estado="pendiente")
+    assert alerta["nivel_riesgo"] == NivelRiesgo.EXCURSION_CRITICA.value
+    assert [str(a.alerta_id) for a in notificaciones.avisos if isinstance(a, AvisoExcursion)] == [alerta["id"]]
 
 
 async def test_legado_activo_con_modelo_rechazado_503_tambien_cae_en_la_regla(

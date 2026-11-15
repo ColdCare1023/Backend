@@ -33,12 +33,20 @@ class ILecturaRepository(ABC):
 
     @abstractmethod
     async def listar_recientes_por_device(
-        self, device_id: str, limite: int, solo_dispositivo: bool = True, hasta: datetime | None = None
+        self,
+        device_id: str,
+        limite: int,
+        solo_dispositivo: bool = True,
+        hasta: datetime | None = None,
+        desde: datetime | None = None,
     ) -> list[LecturaTermica]:
         """Las `limite` lecturas más recientes por captura (orden descendente).
         Con `hasta`, solo las capturadas ANTES de ese instante (timestamp <
         hasta): HU-17, las features de la lectura t no pueden ver lecturas
-        posteriores, que sí existen cuando el nodo reenvía su buffer."""
+        posteriores, que sí existen cuando el nodo reenvía su buffer. Con
+        `desde`, solo las capturadas en ese instante o después (timestamp >=
+        desde): el modelo preventivo pide su historial por alcance temporal,
+        no por cantidad, para que la cadencia del nodo no lo recorte."""
         ...
 
     @abstractmethod

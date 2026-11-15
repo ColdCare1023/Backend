@@ -139,7 +139,7 @@ services:
     volumes:
       - ./certs/ca.crt:/certs/ca.crt:ro
 
-  # HU-56: mismo Dockerfile y mismos validadores que Railway (ENVIRONMENT=production),
+  # HU-55: mismo Dockerfile y mismos validadores que Railway (ENVIRONMENT=production),
   # contra el PostgreSQL local. DATABASE_URL va con el esquema `postgresql://` que
   # entrega Railway para ejercitar la normalización a asyncpg. Sin MQTT: aquí solo
   # se comprueba que la configuración de producción arranca y responde.

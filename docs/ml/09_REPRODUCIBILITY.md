@@ -2,10 +2,15 @@
 
 ## Entorno
 
-- Python 3.12 (CI) · scikit-learn 1.9.1 · numpy 2.5.4 · pandas 3.0.6 · scipy 1.18.1 · joblib 1.6.0 ·
+- Python 3.12 (CI) · scikit-learn 1.9.0 · numpy 2.5.4 · pandas 3.0.6 · scipy 1.18.1 · joblib 1.6.0 ·
   matplotlib 3.11.2 (solo offline).
 - `requirements-ml.txt`: lockfile con hashes del entorno de entrenamiento (= `requirements-dev.txt` +
   matplotlib). Los lockfiles de producción y de CI **no cambiaron**.
+- scikit-learn queda fijado en `requirements.txt` (hoy 1.9.0) y el backend carga los artefactos con esa
+  versión. Los artefactos `rf-preventivo-h30-*-1.0.0` de los datasets externos se generaron con 1.9.1
+  (`versiones.scikit_learn` de su manifiesto): sirven para reproducir los experimentos A–C, no para
+  activarse (P-6). `corridas --registrar` no registra si el scikit-learn instalado no es exactamente
+  el de `requirements.txt`.
 - Semilla: 42 (RF, búsqueda y bootstrap). La inferencia del artefacto usa `n_jobs=1`, por lo que sus
   puntuaciones son idénticas bit a bit entre ejecuciones.
 
@@ -124,16 +129,68 @@ Un modelo aprobado debe registrarse como versión nueva si cambia el artefacto.
 
 Cada hoja de corrida se convierte en una fila del manifiesto (formato en
 `11_DATOS_DE_PRUEBA_Y_CORRIDAS.md`, sección 2). Luego se exporta del stack local y se entrena y evalúa
-con las corridas de prueba que da el resumen:
+con las corridas de prueba y de validación que da el resumen:
 
 ```bash
 DATABASE_URL=postgresql+asyncpg://... python -m scripts.exportar_corridas \
     --manifiesto hojas_corrida.csv --salida corridas.csv --resumen corridas_resumen.json
-python -m src.infrastructure.ai.prediccion_preventiva corridas --csv corridas.csv --prueba <resumen.prueba> --salida corridas.json
+python -m src.infrastructure.ai.prediccion_preventiva corridas --csv corridas.csv --prueba <resumen.prueba> \
+    --validacion <resumen.validacion> --salida corridas.json
 ```
 
 Las lecturas de prueba con valores exactos (P-13, `infra-local/scripts/publicador_prueba_mqtt.py`) usan
 un `device_id` de prueba y no entran en el manifiesto.
+
+### Umbral de decisión (P-3)
+
+El umbral es el de F1 máximo sobre puntuaciones fuera de la muestra de entrenamiento, separadas por
+corrida (`corridas.seleccionar_umbral`):
+
+| Método (`metodo_umbral`) | Cuándo | De dónde salen las puntuaciones | Modelo que se evalúa y registra |
+|---|---|---|---|
+| `particion_validacion` | Con `--validacion` (hojas con `uso=validacion`) | Las corridas de validación, puntuadas por un modelo ajustado sin ellas | Ese mismo modelo, ajustado solo con las corridas de ajuste |
+| `dejar_una_corrida_fuera` | Sin `--validacion`: respaldo con pocas corridas | Cada corrida de entrenamiento, puntuada por un modelo ajustado sin ella | Uno ajustado después con todas las corridas de entrenamiento |
+
+En los dos casos una corrida de ajuste a menos de H de la corrida que se puntúa (mismo equipo) queda
+fuera de ese ajuste, como frente a la prueba. Con menos de 2 corridas de ajuste, o sin puntuaciones
+fuera de muestra con ambas clases, el conjunto queda "no estimable" (antes se usaba 0,5). La partición
+de validación es preferible cuando, al separarla, quedan al menos 2 corridas de ajuste con excursión y
+la validación tiene al menos una.
+
+### Registrar el modelo (P-2)
+
+```bash
+python -m src.infrastructure.ai.prediccion_preventiva corridas --csv corridas.csv --prueba <resumen.prueba> \
+    --validacion <resumen.validacion> --horizonte 30 --registrar --version rf-corridas-h30-termico-1.0.0 \
+    --conjunto termico_minimo --salida corridas.json
+python -m src.infrastructure.ai.prediccion_preventiva verificar --version rf-corridas-h30-termico-1.0.0
+```
+
+Registra el modelo evaluado, sin reentrenarlo, en `src/infrastructure/ai/models/preventivo/<V>/` como
+`EXPERIMENTAL`, y anota el artefacto y el manifiesto en `historial.json`. La reproducibilidad queda en
+el manifiesto:
+
+- `datos`: nombre, SHA-256 y tamaño del CSV exportado, `dataset_version`, filas leídas y válidas,
+  descartes, rango de fechas y cada corrida con su rol (`entrenamiento`, `validacion`, `prueba` o
+  `descartada`), su rango y sus lecturas;
+- `particiones` y `seleccion_umbral`: las corridas de cada partición, el método del umbral, sus
+  pliegues y la separación mínima;
+- `configuracion`, `hiperparametros`, `semilla` (42), `versiones` (Python, scikit-learn, numpy,
+  pandas, scipy, joblib) y `requisitos.scikit_learn_fijado`.
+
+Con el mismo CSV, las mismas corridas y el mismo entorno, el artefacto (mismo SHA-256) y el umbral
+salen iguales: semilla fija y `n_jobs=1` en el ajuste y en la inferencia. Cambian `entrenado_en` y, por eso, el SHA-256 del
+manifiesto; el registro nunca sobrescribe, así que la segunda ejecución va con otra versión o con
+`--directorio-registro <directorio temporal>`. Solo el conjunto que se registra tiene que poder
+evaluarse: sin el SHT31 en las corridas (o sin sus columnas) la ablación queda "no estimable" y
+`termico_minimo` se registra igual. Antes de escribir, la CLI comprueba la paridad con el servicio de
+inferencia (`paridad_servicio`): cargado en sombra, el servicio clasifica una lectura de prueba del CSV
+con el vector y la puntuación del entrenamiento; si no, no registra. Con HU-17 integrado (ronda 3)
+el servicio recibe el SHT31 y `termico_ambiente` pasa esta comprobación como los otros conjuntos.
+Las negativas (scikit-learn distinto del fijado, versión existente o anotada en `historial.json`,
+pocas corridas o etiquetas, conjunto que no se puede servir) y
+los pasos siguientes (sombra, Experimento D, aprobación, registro en la base y `/activar`) están en
+`docs/operacion/IA_PREVENTIVA_ACTIVACION.md`, pasos 3 a 9.
 
 ## Salidas
 

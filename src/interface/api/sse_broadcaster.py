@@ -18,7 +18,12 @@ class SSEBroadcaster:
 
     async def publicar(self, evento: dict, tipo: str = "lectura") -> None:
         """Publica evento SSE tipado. `tipo` permite alertas, recuperación y
-        estados IA sin obligar al cliente a inferirlos desde texto."""
+        estados IA sin obligar al cliente a inferirlos desde texto.
+
+        HU-19 esc. 2: sin clientes conectados el despacho se omite (ni siquiera
+        se serializa); el dato ya quedó en PostgreSQL para consultas históricas."""
+        if not self._subscribers:
+            return
         mensaje = json.dumps(evento, default=str, ensure_ascii=False)
         mensaje = f"event: {tipo}\ndata: {mensaje}"
         for queue in list(self._subscribers):

@@ -138,6 +138,25 @@ def sha256_manifiesto_en_historial(version: str, raiz: Path = RAIZ_REGISTRO) -> 
     return None
 
 
+def version_en_historial(version: str, raiz: Path = RAIZ_REGISTRO) -> bool:
+    """True si `historial.json` tiene alguna entrada de `version`, aunque su
+    directorio ya no exista. Una versión anotada no se vuelve a registrar: la
+    bitácora quedaría con dos `registrado` de hashes distintos y la base, que
+    ya conoce la versión, la rechazaría con el hash viejo. Sin bitácora es
+    False; una bitácora que no se puede leer es ErrorRegistro (no se puede
+    afirmar que la versión es nueva)."""
+    ruta = raiz / ARCHIVO_HISTORIAL
+    if not ruta.exists():
+        return False
+    try:
+        historial = json.loads(ruta.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise ErrorRegistro(f"No se pudo leer {ARCHIVO_HISTORIAL}") from None
+    if not isinstance(historial, list):
+        raise ErrorRegistro(f"{ARCHIVO_HISTORIAL} no es una lista de entradas")
+    return any(isinstance(entrada, dict) and entrada.get("version") == version for entrada in historial)
+
+
 def cargar_verificado(version: str, raiz: Path = RAIZ_REGISTRO, sha256_esperado: str | None = None):
     """(modelo, manifiesto) solo si el SHA-256 del archivo coincide con el
     manifiesto y, si se fijó, con el hash aprobado en la configuración del

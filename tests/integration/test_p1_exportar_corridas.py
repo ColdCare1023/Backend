@@ -288,6 +288,23 @@ def test_main_escribe_csv_y_resumen_y_no_sobrescribe(base_sqlite, manifiesto, tm
     assert exp.main([*argv, "--sobrescribir"]) == 0
 
 
+def test_uso_validacion_da_la_lista_para_corridas_validacion(base_sqlite, tmp_path, capsys):
+    """P-3 (ronda 3): una hoja con `uso=validacion` se exporta y el resumen trae
+    la lista para `corridas --validacion`, como `prueba` para `--prueba`."""
+    _, url = base_sqlite
+    hojas = tmp_path / "hojas_validacion.csv"
+    hojas.write_text(MANIFIESTO.replace(",S-C,entrenamiento,", ",S-C,validacion,"), encoding="utf-8")
+    salida, resumen = tmp_path / "corridas.csv", tmp_path / "resumen.json"
+
+    assert exp.main(["--manifiesto", str(hojas), "--salida", str(salida), "--resumen", str(resumen),
+                     "--database-url", url]) == 0
+
+    datos = json.loads(resumen.read_text(encoding="utf-8"))
+    assert (datos["validacion"], datos["prueba"]) == ("C01", "C02")
+    assert {f["corrida_id"] for f in _filas(salida)} == {"C01", "C02"}
+    capsys.readouterr()
+
+
 def test_main_sin_base_no_exporta(manifiesto, tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     salida = tmp_path / "corridas.csv"

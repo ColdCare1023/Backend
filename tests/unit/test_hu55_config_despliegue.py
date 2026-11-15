@@ -63,3 +63,17 @@ def test_smtp_enabled_sigue_siendo_sinonimo_del_correo():
     assert settings.correo_habilitado
     with pytest.raises(ValueError, match="remitente"):
         Settings(**_produccion(smtp_enabled=True, frontend_url="https://coldcare.vercel.app"))
+
+
+def test_hu56_ya_no_aparece_en_el_codigo_ni_en_el_readme():
+    """HU-56 no existe en la línea base v3.3: era el nombre antiguo de HU-55.
+    Solo queda en las evidencias anteriores y en la tabla de equivalencias
+    (docs/EQUIVALENCIA_HU_v3.3.md)."""
+    from pathlib import Path
+
+    raiz = Path(__file__).resolve().parents[2]
+    archivos = [*sorted((raiz / "src").rglob("*.py")), raiz / "README.md", raiz / ".dockerignore",
+                raiz / "infra-local" / "docker-compose.yml"]
+    con_alias = [str(ruta.relative_to(raiz)) for ruta in archivos if "HU-56" in ruta.read_text(encoding="utf-8")]
+    assert con_alias == []
+    assert "## Despliegue en Railway (HU-55)" in (raiz / "README.md").read_text(encoding="utf-8")

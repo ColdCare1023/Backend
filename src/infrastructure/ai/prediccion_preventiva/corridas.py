@@ -9,19 +9,26 @@ provocadas), y llegan como CSV exportado de `thermal_readings` con
 2. excluye ventanas incompletas, lecturas con SENSOR_FAULT y lecturas con
    time_quality = unsynced, y CUENTA cada exclusión;
 3. divide por corrida, con separación ≥ H entre entrenamiento y prueba;
-4. compara el Random Forest con dos baselines: DummyClassifier(prior) y la
+4. elige el umbral de decisión con puntuaciones FUERA de la muestra de
+   entrenamiento, separadas por corrida (P-3, ver `seleccionar_umbral`);
+5. compara el Random Forest con dos baselines: DummyClassifier(prior) y la
    regla de pendiente (extrapolación de la tendencia reciente);
-5. reporta las métricas de los DOS juegos de criterios (F1 macro ≥ 0,85 y
+6. reporta las métricas de los DOS juegos de criterios (F1 macro ≥ 0,85 y
    los criterios por incidente) para cada conjunto de features;
-6. repite todo con y sin el SHT31 (ablación) y reporta la diferencia.
+7. repite todo con y sin el SHT31 (ablación) y reporta la diferencia; si
+   las corridas no traen el SHT31, `termico_ambiente` queda "no estimable"
+   sin detener el informe ni el registro de otro conjunto.
 
-Uso: `python -m src.infrastructure.ai.prediccion_preventiva corridas <csv>
---prueba C3,C4` (ver __main__.py).
+Uso: `python -m src.infrastructure.ai.prediccion_preventiva corridas --csv
+corridas.csv --prueba C3,C4 [--validacion C2]` (ver __main__.py). Con
+`--registrar --version V` además registra el modelo (registro_corridas.py).
 """
 
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from sklearn.metrics import average_precision_score
 
 from src.application.use_cases.gestionar_modelo_ia import evaluar_criterios_modelo
@@ -48,6 +55,42 @@ from src.infrastructure.ai.prediccion_preventiva.particion import dividir_por_co
 # sobreajusta la validación.
 PARAMETROS_RF = {"max_depth": 8, "min_samples_leaf": 10, "max_features": "sqrt", "class_weight": "balanced_subsample"}
 HORIZONTE_PENDIENTE_MIN = 10
+CONJUNTOS_INFORME = (CONJUNTO_TERMICO, CONJUNTO_TERMICO_AMBIENTE)
+
+# P-3: de dónde salen las puntuaciones con las que se elige el umbral. Nunca
+# de filas con las que se ajustó el modelo que las puntúa.
+METODO_UMBRAL_PARTICION = "particion_validacion"
+METODO_UMBRAL_DEJAR_UNA_FUERA = "dejar_una_corrida_fuera"
+DESCRIPCION_METODO_UMBRAL = {
+    METODO_UMBRAL_PARTICION: (
+        "F1 máximo en las predicciones de las corridas de validación, separadas por corrida (≥ H) "
+        "de las de ajuste y de las de prueba; el modelo registrado se ajustó solo con las de ajuste"
+    ),
+    METODO_UMBRAL_DEJAR_UNA_FUERA: (
+        "F1 máximo en predicciones fuera de corrida (dejar una corrida fuera): cada corrida de "
+        "entrenamiento la puntúa un modelo ajustado sin ella; el modelo registrado se ajusta después "
+        "con todas las corridas de entrenamiento"
+    ),
+}
+# Corridas mínimas para ajustar el modelo: con una sola no hay forma de elegir
+# el umbral fuera de muestra (dejar una fuera no tendría con qué entrenar).
+MIN_CORRIDAS_AJUSTE = 2
+
+
+def sin_privados(datos):
+    """Copia apta para JSON: sin claves `_privadas` (modelo, tablas) y con los
+    tipos de numpy/pandas convertidos."""
+    if isinstance(datos, dict):
+        return {k: sin_privados(v) for k, v in datos.items() if not str(k).startswith("_")}
+    if isinstance(datos, list | tuple):
+        return [sin_privados(v) for v in datos]
+    if isinstance(datos, np.floating | np.integer | np.bool_):
+        return datos.item()
+    if isinstance(datos, np.ndarray):
+        return datos.tolist()
+    if isinstance(datos, pd.Timestamp):
+        return datos.isoformat()
+    return datos
 
 
 def _metricas_planas(observacion: dict, evento: dict, ap_rf: float | None, ap_base: float | None) -> dict:
@@ -72,28 +115,239 @@ def _ap(y: np.ndarray, puntuacion: np.ndarray) -> float | None:
     return float(average_precision_score(y, puntuacion)) if 0 < y.sum() < y.size else None
 
 
-def evaluar_conjunto(rejillas, episodios, config: ConfiguracionPreventiva, conjunto: str, corridas_prueba: list[str]):
+def _ajustar(x: np.ndarray, y: np.ndarray):
+    return crear_modelo(PARAMETROS_RF, SEMILLA, n_jobs=1).fit(x, y)
+
+
+def _ambas_clases(y: np.ndarray) -> bool:
+    return len(set(np.asarray(y).tolist())) == 2
+
+
+@dataclass(frozen=True, slots=True)
+class DivisionAjuste:
+    """Cómo se reparten las corridas de entrenamiento (las que no son de prueba)
+    entre ajustar el modelo y elegir el umbral (P-3). Índices posicionales en
+    la tabla de observaciones."""
+
+    metodo: str
+    ajuste: np.ndarray
+    corridas_ajuste: list[str]
+    corridas_validacion: list[str]
+    validacion: np.ndarray = field(default_factory=lambda: np.array([], dtype=int))
+    corridas_descartadas: dict[str, str] = field(default_factory=dict)
+    separacion_validacion_min: float | None = None
+
+
+def dividir_ajuste_y_validacion(
+    tabla: pd.DataFrame,
+    entrenamiento: np.ndarray,
+    corridas_entrenamiento: list[str],
+    corridas_validacion: list[str] | None,
+    config: ConfiguracionPreventiva,
+) -> DivisionAjuste:
+    """P-3. Con `corridas_validacion`, esas corridas salen del ajuste y solo
+    eligen el umbral (las de ajuste a menos de H de una de validación también se
+    descartan, como en la partición de prueba). Sin ellas (pocas corridas), el
+    umbral se elige dejando una corrida fuera sobre las de entrenamiento."""
+    if not corridas_validacion:
+        return DivisionAjuste(
+            metodo=METODO_UMBRAL_DEJAR_UNA_FUERA,
+            ajuste=entrenamiento,
+            corridas_ajuste=list(corridas_entrenamiento),
+            corridas_validacion=list(corridas_entrenamiento),
+            validacion=entrenamiento,
+        )
+    validacion = sorted(set(corridas_validacion))
+    ajenas = [c for c in validacion if c not in corridas_entrenamiento]
+    if ajenas:
+        raise ValueError(
+            f"Corridas de validación que no son de entrenamiento (inexistentes, de prueba o descartadas "
+            f"por estar a menos de H de una de prueba): {ajenas}"
+        )
+    sub = tabla.iloc[entrenamiento].reset_index(drop=True)
+    division = dividir_por_corrida(sub, validacion, config)
+    return DivisionAjuste(
+        metodo=METODO_UMBRAL_PARTICION,
+        ajuste=entrenamiento[division.entrenamiento],
+        corridas_ajuste=division.corridas_entrenamiento,
+        corridas_validacion=division.corridas_prueba,
+        validacion=entrenamiento[division.prueba],
+        corridas_descartadas={
+            corrida: motivo.replace("corrida de prueba", "corrida de validación")
+            for corrida, motivo in division.corridas_descartadas.items()
+        },
+        separacion_validacion_min=division.separacion_min,
+    )
+
+
+@dataclass(slots=True)
+class SeleccionUmbral:
+    """Resultado de P-3. `indices` son las filas cuyas puntuaciones eligieron el
+    umbral; `modelo` es el ajustado con las corridas de ajuste (el que se
+    evalúa en prueba y se registra)."""
+
+    metodo: str
+    umbral: float | None
+    indices: np.ndarray
+    puntuaciones: np.ndarray
+    detalle: dict
+    modelo: object = None
+
+    def como_dict(self) -> dict:
+        return {"metodo": self.metodo, "umbral": self.umbral, "origen": DESCRIPCION_METODO_UMBRAL[self.metodo], **self.detalle}
+
+
+def seleccionar_umbral(
+    x: np.ndarray, y: np.ndarray, tabla: pd.DataFrame, division: DivisionAjuste, config: ConfiguracionPreventiva
+) -> SeleccionUmbral:
+    """P-3: el umbral sale del F1 máximo sobre puntuaciones de filas que el
+    modelo que las puntúa NO vio al ajustarse, separadas por corrida.
+
+    - Partición de validación: un modelo con las corridas de ajuste puntúa las
+      de validación; ese mismo modelo es el que se registra.
+    - Dejar una corrida fuera (pocas corridas): por cada corrida de ajuste, un
+      modelo sin ella (ni las que quedan a menos de H) la puntúa. El modelo que
+      se registra se ajusta después con todas las corridas de ajuste."""
+    ajuste = division.ajuste
+    if division.metodo == METODO_UMBRAL_PARTICION:
+        modelo = _ajustar(x[ajuste], y[ajuste])
+        indices = division.validacion
+        puntuaciones = modelo.predict_proba(x[indices])[:, 1] if indices.size else np.array([])
+        pliegues = None
+    else:
+        sub = tabla.iloc[ajuste].reset_index(drop=True)
+        oof = np.full(ajuste.size, np.nan)
+        pliegues = []
+        for corrida in division.corridas_ajuste:
+            pliegue = dividir_por_corrida(sub, [corrida], config)
+            tr, va = pliegue.entrenamiento, pliegue.prueba
+            info = {
+                "corrida_validada": corrida,
+                "corridas_ajuste": pliegue.corridas_entrenamiento,
+                "observaciones": int(va.size),
+                "positivas": int(y[ajuste[va]].sum()),
+            }
+            if va.size == 0 or tr.size == 0 or not _ambas_clases(y[ajuste[tr]]):
+                pliegues.append({**info, "puntuada": False, "motivo": "el resto de las corridas no tiene ambas clases"})
+                continue
+            modelo_pliegue = _ajustar(x[ajuste[tr]], y[ajuste[tr]])
+            oof[va] = modelo_pliegue.predict_proba(x[ajuste[va]])[:, 1]
+            pliegues.append({**info, "puntuada": True})
+        puntuadas = np.isfinite(oof)
+        indices, puntuaciones = ajuste[puntuadas], oof[puntuadas]
+        modelo = _ajustar(x[ajuste], y[ajuste])
+    eleccion = (
+        elegir_umbral_f1(y[indices], puntuaciones)
+        if indices.size
+        else {"umbral": None, "f1": None, "motivo": "ninguna corrida pudo puntuarse fuera de muestra"}
+    )
+    detalle = {
+        "corridas_validacion": division.corridas_validacion,
+        "observaciones": int(indices.size),
+        "positivas": int(y[indices].sum()) if indices.size else 0,
+        **{k: v for k, v in eleccion.items() if k != "umbral"},
+    }
+    if pliegues is not None:
+        detalle["pliegues"] = pliegues
+    return SeleccionUmbral(division.metodo, eleccion["umbral"], indices, puntuaciones, detalle, modelo)
+
+
+def _corridas_de(series: pd.Series) -> set[str]:
+    """corrida_id de cada serie `device#corrida` (las series sin corrida no cuentan)."""
+    return set(series.astype(str).str.split("#", n=1).str[1].dropna().unique())
+
+
+def _exigir_corridas_existentes(
+    lecturas: pd.DataFrame, corridas_prueba: list[str], corridas_validacion: list[str] | None
+) -> None:
+    """Errores del operador, comunes a todos los conjuntos: una corrida de
+    prueba o de validación que no está en el CSV. Se comprueban sobre las
+    lecturas, no sobre las observaciones de un conjunto: una corrida sin el
+    SHT31 existe aunque `termico_ambiente` no tenga observaciones en ella."""
+    if "corrida_id" not in lecturas.columns:
+        return  # dividir_por_corrida explica que falta corrida_id
+    existentes = set(lecturas["corrida_id"].dropna().astype(str).unique())
+    for tipo, pedidas in (("prueba", corridas_prueba), ("validación", corridas_validacion or [])):
+        faltan = sorted(set(pedidas) - existentes)
+        if faltan:
+            raise ValueError(f"Corridas de {tipo} inexistentes: {faltan}")
+
+
+def _exigir_observaciones(rejillas: pd.DataFrame, tabla: pd.DataFrame, conjunto: str, pedidas: list[str]) -> None:
+    """Una corrida de prueba o de validación que existe pero no deja ninguna
+    observación válida para ESTE conjunto (p. ej. sin el SHT31 para
+    `termico_ambiente`). El mensaje no la llama inexistente."""
+    sin_observaciones = sorted(
+        (set(pedidas) & _corridas_de(rejillas["serie_id"])) - set(tabla["corrida_id"].dropna().unique())
+    )
+    if sin_observaciones:
+        exige = (
+            " (este conjunto exige temperatura y humedad ambiental válidas del SHT31 en la ventana)"
+            if conjunto == CONJUNTO_TERMICO_AMBIENTE
+            else ""
+        )
+        raise ValueError(
+            f"las corridas {sin_observaciones} no tienen observaciones válidas para el conjunto {conjunto}{exige}"
+        )
+
+
+def evaluar_conjunto(
+    rejillas,
+    episodios,
+    config: ConfiguracionPreventiva,
+    conjunto: str,
+    corridas_prueba: list[str],
+    corridas_validacion: list[str] | None = None,
+):
     etiquetadas = etiquetar(rejillas, episodios, config)
     obs = construir_observaciones(etiquetadas, config, conjunto)
     obs.tabla["corrida_id"] = obs.tabla["serie_id"].str.split("#", n=1).str[1]
+    _exigir_observaciones(rejillas, obs.tabla, conjunto, [*corridas_prueba, *(corridas_validacion or [])])
     particion = dividir_por_corrida(obs.tabla, corridas_prueba, config)
+    division = dividir_ajuste_y_validacion(
+        obs.tabla, particion.entrenamiento, particion.corridas_entrenamiento, corridas_validacion, config
+    )
+    entrenamiento, prueba = division.ajuste, particion.prueba
+    y = obs.y
+    particiones = {
+        **particion.como_dict(),
+        # Corridas con las que se ajusta el modelo que se evalúa (y se registra).
+        "entrenamiento": division.corridas_ajuste,
+        "validacion": division.corridas_validacion,
+        "metodo_umbral": division.metodo,
+        "descartadas": {**particion.corridas_descartadas, **division.corridas_descartadas},
+        "separacion_validacion_min": division.separacion_validacion_min,
+        "observaciones_entrenamiento": int(entrenamiento.size),
+        "observaciones_validacion": int(division.validacion.size),
+    }
     base = {
         "conjunto": conjunto,
         "observaciones": len(obs.tabla),
         "observaciones_excluidas": obs.excluidas,
-        "particiones": particion.como_dict(),
+        "particiones": particiones,
     }
-    entrenamiento, prueba = particion.entrenamiento, particion.prueba
-    y = obs.y
-    if entrenamiento.size == 0 or prueba.size == 0 or len(set(y[entrenamiento])) < 2:
+    if entrenamiento.size == 0 or prueba.size == 0 or not _ambas_clases(y[entrenamiento]):
         return {**base, "resultado": "no estimable: entrenamiento sin ambas clases o partición vacía"}
+    if len(division.corridas_ajuste) < MIN_CORRIDAS_AJUSTE:
+        return {
+            **base,
+            "resultado": f"no estimable: hacen falta al menos {MIN_CORRIDAS_AJUSTE} corridas de ajuste "
+            f"para elegir el umbral fuera de muestra (hay {len(division.corridas_ajuste)})",
+        }
 
-    modelo = crear_modelo(PARAMETROS_RF, SEMILLA, n_jobs=1).fit(obs.x[entrenamiento], y[entrenamiento])
-    # El umbral se elige sobre entrenamiento (sin mirar prueba): con pocas
-    # corridas no queda una validación independiente que valga la pena.
-    umbral = elegir_umbral_f1(y[entrenamiento], modelo.predict_proba(obs.x[entrenamiento])[:, 1])["umbral"] or 0.5
+    seleccion = seleccionar_umbral(obs.x, y, obs.tabla, division, config)
+    base["seleccion_umbral"] = seleccion.como_dict()
+    if seleccion.umbral is None:
+        return {
+            **base,
+            "resultado": "no estimable: sin umbral fuera de muestra ("
+            + str(seleccion.detalle.get("motivo") or "validación sin ambas clases") + ")",
+        }
+    modelo, umbral = seleccion.modelo, seleccion.umbral
     pendiente = puntuacion_tendencia(obs, HORIZONTE_PENDIENTE_MIN, config)
-    umbral_pendiente = elegir_umbral_f1(y[entrenamiento], pendiente[entrenamiento])["umbral"]
+    # La regla de pendiente no se ajusta: su umbral sale de las MISMAS filas
+    # que el del Random Forest.
+    umbral_pendiente = elegir_umbral_f1(y[seleccion.indices], pendiente[seleccion.indices])["umbral"]
     puntuaciones = {
         "random_forest": (modelo.predict_proba(obs.x[prueba])[:, 1], umbral, True),
         "dummy_prior": (baseline_prior(y[entrenamiento], prueba.size), 0.5, True),
@@ -120,23 +374,46 @@ def evaluar_conjunto(rejillas, episodios, config: ConfiguracionPreventiva, conju
         **base,
         "resultado": "evaluado",
         "prueba": resultados,
+        "positivas_entrenamiento": int(y[entrenamiento].sum()),
+        "positivas_prueba": int(y[prueba].sum()),
         "metricas_registro": metricas,
         "criterios": evaluar_criterios_modelo(metricas),
+        # Privados (no van al JSON): el modelo evaluado es el que se registra.
+        "_modelo": modelo,
+        "_nombres": obs.nombres,
     }
 
 
 def ejecutar_pipeline_corridas(
-    ruta_csv: Path, corridas_prueba: list[str], config: ConfiguracionPreventiva | None = None
+    ruta_csv: Path,
+    corridas_prueba: list[str],
+    config: ConfiguracionPreventiva | None = None,
+    corridas_validacion: list[str] | None = None,
+    conjuntos: tuple[str, ...] = CONJUNTOS_INFORME,
+    obligatorios: tuple[str, ...] = (CONJUNTO_TERMICO,),
 ) -> dict:
+    """Informe de corridas. Una partición imposible (ValueError) en un
+    conjunto de `obligatorios` detiene todo; en los demás el conjunto queda
+    "no estimable" con el motivo. Así la ablación con el SHT31 nunca impide
+    informar o registrar un conjunto que no lo usa (corridas sin SHT31 o un
+    CSV sin sus columnas). Por omisión es obligatorio `termico_minimo`, la
+    referencia de la ablación; al registrar, solo el conjunto que se registra."""
     config = config or ConfiguracionPreventiva()
     crudas, informe = ingesta.importar_coldcare_csv(ruta_csv)
     lecturas, limpieza = calidad.limpiar(crudas)
+    _exigir_corridas_existentes(lecturas, corridas_prueba, corridas_validacion)
     rejillas = calidad.preparar_rejillas(lecturas, config)
     episodios = eventos.agrupar_incidentes(eventos.detectar_episodios(rejillas, config), config)
-    resultados = {
-        conjunto: evaluar_conjunto(rejillas, episodios, config, conjunto, corridas_prueba)
-        for conjunto in (CONJUNTO_TERMICO, CONJUNTO_TERMICO_AMBIENTE)
-    }
+    resultados = {}
+    for conjunto in dict.fromkeys((*CONJUNTOS_INFORME, *conjuntos)):
+        try:
+            resultados[conjunto] = evaluar_conjunto(
+                rejillas, episodios, config, conjunto, corridas_prueba, corridas_validacion
+            )
+        except ValueError as exc:
+            if conjunto in obligatorios:
+                raise
+            resultados[conjunto] = {"conjunto": conjunto, "resultado": f"no estimable: {exc}"}
     sin, con = resultados[CONJUNTO_TERMICO], resultados[CONJUNTO_TERMICO_AMBIENTE]
     ablacion = None
     if sin.get("resultado") == con.get("resultado") == "evaluado":
@@ -158,4 +435,6 @@ def ejecutar_pipeline_corridas(
         "resultados": resultados,
         # Con SHT31 menos sin SHT31: positivo en F1/sensibilidad/AP = aporta.
         "ablacion_sht31": ablacion,
+        # Privado: lecturas ya limpias (procedencia por corrida al registrar).
+        "_lecturas": lecturas,
     }
