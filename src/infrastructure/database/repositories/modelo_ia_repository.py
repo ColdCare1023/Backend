@@ -5,7 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.entities.version_modelo_ia import VersionModeloIA
 from src.domain.repositories.i_modelo_ia_repository import IModeloIARepository
-from src.infrastructure.database.models import ModeloIAVersionModel
+from src.infrastructure.database.models import ModeloIAVersionModel, TraceabilityRecordModel
+
+# HU-46 esc. 4: cada activación deja este evento encadenado (gestionar_modelo_ia)
+# en la cadena del sistema (no tiene dispositivo; registrar_hash_encadenado).
+EVENTO_VERSION_ACTIVADA = "MODELO_IA_VERSION_ACTIVADA"
+CADENA_SISTEMA = "SISTEMA"
 
 
 def _to_entity(model: ModeloIAVersionModel) -> VersionModeloIA:
@@ -74,8 +79,14 @@ class SQLAlchemyModeloIARepository(IModeloIARepository):
         stmt = select(ModeloIAVersionModel).where(ModeloIAVersionModel.version == version)
         result = await self._session.execute(stmt)
         model = result.scalar_one()
+        # Reactivar la versión que ya está activa no reinicia su periodo: las
+        # lecturas clasificadas desde su activación siguen cruzando con ella.
+        if not (model.activa and model.activada_en is not None):
+            model.activada_en = cuando
         model.activa = True
-        model.activada_en = cuando
+        # Una versión que vuelve a activarse abre un periodo nuevo; los
+        # anteriores quedan en los eventos encadenados de activación.
+        model.desactivada_en = None
         await self._session.flush()
         await self._session.refresh(model)
         return _to_entity(model)
@@ -86,6 +97,28 @@ class SQLAlchemyModeloIARepository(IModeloIARepository):
         return [_to_entity(m) for m in result.scalars().all()]
 
     async def obtener_version_activa_en(self, momento: datetime) -> VersionModeloIA | None:
+        """HU-47 esc. 2: versión activa en `momento`. La fuente es la historia
+        de solo anexado de activaciones (eventos MODELO_IA_VERSION_ACTIVADA de
+        la cadena), que conserva todos los periodos aunque una versión se
+        reactive; las columnas activada_en/desactivada_en solo guardan el
+        último y se usan si no hay eventos (registros anteriores a la cadena)."""
+        evento = (
+            await self._session.execute(
+                select(TraceabilityRecordModel.payload)
+                .where(
+                    # chain_id está indexado: no se recorren los eslabones de lecturas.
+                    TraceabilityRecordModel.chain_id == CADENA_SISTEMA,
+                    TraceabilityRecordModel.tipo_evento == EVENTO_VERSION_ACTIVADA,
+                    TraceabilityRecordModel.timestamp <= momento,
+                )
+                .order_by(TraceabilityRecordModel.timestamp.desc(), TraceabilityRecordModel.chain_seq.desc())
+                .limit(1)
+            )
+        ).scalars().first()
+        if isinstance(evento, dict) and evento.get("version_nueva"):
+            version = await self.obtener_por_version(str(evento["version_nueva"]))
+            if version is not None:
+                return version
         stmt = select(ModeloIAVersionModel).where(
             ModeloIAVersionModel.activada_en.is_not(None),
             ModeloIAVersionModel.activada_en <= momento,

@@ -1,0 +1,34 @@
+# HU-29: imagen del servicio cron de respaldo (docs/operacion/RESPALDO_RAILWAY.md).
+#
+# No es la imagen de la API: solo ejecuta `scripts.respaldo_postgres` y sale
+# (Railway salta la ejecución siguiente si la anterior sigue viva).
+#
+# pg_dump debe ser de la MISMA versión mayor que el servidor PostgreSQL o más
+# nueva: un cliente más antiguo se niega a volcar. PG_MAJOR fija el cliente
+# (repositorio oficial apt.postgresql.org); por omisión 17. Si el servidor de
+# Railway es de otra versión (`SHOW server_version;`), construir con
+# `--build-arg PG_MAJOR=<versión>` (en Railway: variable PG_MAJOR del servicio).
+# El script comprueba la compatibilidad antes de volcar y, si no la hay, falla
+# con RESPALDO_FALLIDO y un motivo claro.
+#
+# BE-022: misma imagen base fijada por digest que la API (python:3.12-slim).
+ARG PG_MAJOR=17
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+ARG PG_MAJOR
+WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 RESPALDO_DESTINO=/respaldos
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates postgresql-common \
+    && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y \
+    && apt-get install -y --no-install-recommends "postgresql-client-${PG_MAJOR}" \
+    && rm -rf /var/lib/apt/lists/* \
+    && pg_dump --version
+# BE-021: requirements.txt es el lockfile (versiones exactas + hashes).
+COPY requirements.txt .
+RUN pip install --no-cache-dir --require-hashes -r requirements.txt
+RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin app
+COPY . .
+# Railway monta los volúmenes como root: el arranque (root) solo prepara la
+# carpeta del volumen y el respaldo corre como `app` (setpriv, de util-linux).
+# Así no hace falta RAILWAY_RUN_UID=0 ni ejecutar pg_dump como root.
+CMD ["sh", "-c", "mkdir -p \"$RESPALDO_DESTINO\" && chown app:app \"$RESPALDO_DESTINO\" && exec setpriv --reuid=app --regid=app --init-groups python -m scripts.respaldo_postgres --destino \"$RESPALDO_DESTINO\""]

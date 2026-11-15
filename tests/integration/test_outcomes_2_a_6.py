@@ -167,6 +167,9 @@ async def test_un_modelo_rechazado_se_audita_al_arrancar(db_session_factory, mon
         def motivo_rechazo(self):
             return "Checksum SHA-256 inválido para el artefacto del modelo"
 
+        def motivo_codigo(self):
+            return "checksum_invalido"
+
     monkeypatch.setattr(main, "_session_factory", db_session_factory)
     monkeypatch.setattr(main, "get_random_forest_service", lambda: _Servicio())
 
@@ -175,6 +178,8 @@ async def test_un_modelo_rechazado_se_audita_al_arrancar(db_session_factory, mon
     filas = [f for f in await _todos(db_session_factory, AuditLogModel) if f.accion == "MODELO_RECHAZADO"]
     assert len(filas) == 1
     assert "Checksum" in json.dumps(filas[0].detalle)
+    # P1-7: el código estable del motivo también queda en la bitácora.
+    assert filas[0].detalle["motivo_codigo"] == "checksum_invalido"
 
 
 async def test_un_modelo_sano_no_deja_fila(db_session_factory, monkeypatch):

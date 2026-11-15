@@ -7,6 +7,9 @@ Precedencia (docs/ml/06_BACKEND_INTEGRATION.md), evaluada por lectura:
    clasificador preventivo no se ejecuta; la alerta crítica la genera el
    flujo existente sin depender de este servicio.
 3. Modelo cargado, verificado y compatible → si no, MODELO_NO_DISPONIBLE.
+   En modo activo, además, la versión y el SHA-256 configurados deben ser los
+   de la versión ACTIVA del registro de la base (HU-16/HU-46): el modelo
+   preventivo se gobierna desde ese registro, no solo por variables de entorno.
 4. Historial suficiente (ventana de 15 min con cobertura ≥ 80 %, reloj
    sincronizado) → si no, HISTORIAL_INSUFICIENTE.
 5. Features con el MISMO extractor del entrenamiento e inferencia.
@@ -20,6 +23,7 @@ import math
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
+from typing import NamedTuple
 
 import numpy as np
 import sklearn
@@ -57,6 +61,36 @@ ESTADOS_ADMITIDOS = {
 }
 TIEMPO_NO_SINCRONIZADO = "unsynced"
 
+# Código estable de por qué el modelo preventivo no está disponible
+# (/health/detalle y GET /api/ia/preventivo), junto al texto del motivo.
+CODIGO_MODO_DESACTIVADO = "modo_desactivado"
+CODIGO_VERSION_NO_CONFIGURADA = "version_no_configurada"
+CODIGO_SHA256_NO_CONFIGURADO = "sha256_no_configurado"
+CODIGO_SIN_VERSION_ACTIVA = "sin_version_activa_registrada"
+CODIGO_VERSION_NO_ES_LA_ACTIVA = "version_distinta_de_la_activa"
+CODIGO_HASH_NO_ES_EL_REGISTRADO = "hash_distinto_del_registrado"
+CODIGO_ARTEFACTO_NO_VERIFICADO = "artefacto_no_verificado"
+CODIGO_ESTADO_NO_ADMITIDO = "estado_no_admitido"
+CODIGO_INCOMPATIBLE = "incompatible"
+CODIGO_ERROR_CARGA = "error_de_carga"
+
+# Textos de motivo de activación (HU-46): el mismo del modelo legado cuando
+# el artefacto desplegado no es el registrado.
+MOTIVO_ARTEFACTO_DISTINTO = "el artefacto desplegado no coincide con el hash registrado"
+
+
+class VersionActivaRegistrada(NamedTuple):
+    """Versión activa del registro de la base (ai_model_versions)."""
+
+    version: str
+    model_hash: str
+
+
+class _NoDisponible(RuntimeError):
+    def __init__(self, codigo: str, mensaje: str) -> None:
+        super().__init__(mensaje)
+        self.codigo = codigo
+
 
 _EPOCA = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
@@ -79,6 +113,7 @@ class ServicioPrediccionPreventiva:
         version: str | None,
         sha256_esperado: str | None = None,
         raiz: Path = registro.RAIZ_REGISTRO,
+        version_activa: VersionActivaRegistrada | tuple[str, str] | None = None,
     ) -> None:
         if modo not in MODOS:
             raise ValueError(f"Modo preventivo desconocido: {modo!r}")
@@ -90,8 +125,75 @@ class ServicioPrediccionPreventiva:
         self._manifiesto: dict | None = None
         self._config = None
         self._motivo_no_disponible: str | None = None
+        self._codigo_no_disponible: str | None = None
         self._intentado = False
         self._lock = Lock()
+        # HU-46: versión activa del registro de la base. Sin ella (None), el
+        # modo activo no carga ningún modelo: la aprobación no es solo el
+        # manifiesto y las variables de entorno.
+        self._version_activa = VersionActivaRegistrada(*version_activa) if version_activa else None
+
+    @property
+    def version_configurada(self) -> str | None:
+        return self._version
+
+    @property
+    def version_activa_registrada(self) -> VersionActivaRegistrada | None:
+        return self._version_activa
+
+    def fijar_version_activa(self, version_activa: VersionActivaRegistrada | tuple[str, str] | None) -> None:
+        """HU-46/HU-16: fija la versión activa del registro (al arrancar y tras
+        cada activación) y fuerza a reverificar el artefacto antes de volver a
+        deserializarlo."""
+        with self._lock:
+            self._version_activa = VersionActivaRegistrada(*version_activa) if version_activa else None
+            self._modelo = None
+            self._manifiesto = None
+            self._config = None
+            self._motivo_no_disponible = None
+            self._codigo_no_disponible = None
+            self._intentado = False
+
+    def _ruta_artefacto(self, version: str) -> Path | None:
+        try:
+            ruta = registro.directorio_version(version, self._raiz) / registro.ARCHIVO_MODELO
+        except registro.ErrorRegistro:
+            return None
+        return ruta if ruta.exists() else None
+
+    def hash_artefacto(self, version: str | None = None) -> str | None:
+        """SHA-256 del archivo desplegado de `version` (por omisión, la de
+        IA_PREVENTIVO_VERSION), o None si no existe."""
+        objetivo = version or self._version
+        ruta = self._ruta_artefacto(objetivo) if objetivo else None
+        return registro.sha256_archivo(ruta) if ruta is not None else None
+
+    def motivos_activacion(self, version: str, model_hash: str) -> list[str]:
+        """HU-16 esc. 4 / HU-46: qué impide activar `version` como la que
+        clasifica con IA_PREVENTIVO_MODO=activo. Se valida el artefacto que
+        realmente se cargará (el de IA_PREVENTIVO_VERSION), no el legado."""
+        motivos = []
+        if self._version is None:
+            motivos.append("IA_PREVENTIVO_VERSION no está configurada")
+        elif version != self._version:
+            motivos.append(f"la versión no es la desplegada en IA_PREVENTIVO_VERSION ({self._version})")
+        if self._sha256 is None:
+            motivos.append("IA_PREVENTIVO_SHA256 no está configurada")
+        elif model_hash != self._sha256:
+            motivos.append("IA_PREVENTIVO_SHA256 no coincide con el hash registrado")
+        if self.hash_artefacto(version) != model_hash:
+            motivos.append(MOTIVO_ARTEFACTO_DISTINTO)
+        else:
+            try:
+                manifiesto = registro.leer_manifiesto(version, self._raiz)
+            except (registro.ErrorRegistro, ValueError):
+                motivos.append("el manifiesto del modelo preventivo no se pudo leer")
+            else:
+                if manifiesto.get("estado") not in ESTADOS_ADMITIDOS[MODO_ACTIVO]:
+                    motivos.append(
+                        f"el manifiesto está en estado {manifiesto.get('estado')}; activar exige {ESTADO_APROBADO}"
+                    )
+        return motivos
 
     @property
     def habilitado(self) -> bool:
@@ -108,28 +210,67 @@ class ServicioPrediccionPreventiva:
                 self._modelo, self._manifiesto, self._config = self._cargar_y_validar()
             except Exception as exc:  # nunca propagar: la telemetría no depende del modelo
                 self._motivo_no_disponible = str(exc)[:200]
+                self._codigo_no_disponible = (
+                    exc.codigo if isinstance(exc, _NoDisponible)
+                    else CODIGO_ARTEFACTO_NO_VERIFICADO if isinstance(exc, registro.ErrorRegistro)
+                    else CODIGO_ERROR_CARGA
+                )
                 logger.warning("Modelo preventivo no disponible (%s): %s", self.modo, self._motivo_no_disponible)
+
+    def _exigir_version_activa_registrada(self) -> None:
+        """HU-46 esc. 3 / HU-16 esc. 1: en modo activo solo se carga la versión
+        ACTIVA y aprobada del registro de la base, y solo si IA_PREVENTIVO_VERSION
+        e IA_PREVENTIVO_SHA256 son exactamente los suyos. Se comprueba ANTES de
+        leer el artefacto."""
+        if self._sha256 is None:
+            raise _NoDisponible(CODIGO_SHA256_NO_CONFIGURADO, "IA_PREVENTIVO_SHA256 no está configurada")
+        activa = self._version_activa
+        if activa is None:
+            raise _NoDisponible(
+                CODIGO_SIN_VERSION_ACTIVA,
+                "No hay una versión activa en el registro de modelos de la base; el modo activo no carga "
+                "ningún modelo preventivo",
+            )
+        if activa.version != self._version:
+            raise _NoDisponible(
+                CODIGO_VERSION_NO_ES_LA_ACTIVA,
+                f"IA_PREVENTIVO_VERSION={self._version} no es la versión activa registrada ({activa.version})",
+            )
+        if activa.model_hash != self._sha256:
+            raise _NoDisponible(
+                CODIGO_HASH_NO_ES_EL_REGISTRADO,
+                "IA_PREVENTIVO_SHA256 no coincide con el hash de la versión activa registrada",
+            )
 
     def _cargar_y_validar(self):
         if not self.habilitado:
-            raise RuntimeError("modo_desactivado")
+            raise _NoDisponible(CODIGO_MODO_DESACTIVADO, "modo_desactivado")
         if self._version is None:
-            raise RuntimeError("IA_PREVENTIVO_VERSION no está configurada")
+            raise _NoDisponible(CODIGO_VERSION_NO_CONFIGURADA, "IA_PREVENTIVO_VERSION no está configurada")
+        if self.modo == MODO_ACTIVO:
+            self._exigir_version_activa_registrada()
         modelo, manifiesto = registro.cargar_verificado(self._version, self._raiz, self._sha256)
+        if manifiesto.get("version") != self._version:
+            raise _NoDisponible(CODIGO_ARTEFACTO_NO_VERIFICADO, "El manifiesto declara otra versión")
         if manifiesto["estado"] not in ESTADOS_ADMITIDOS[self.modo]:
-            raise RuntimeError(
+            raise _NoDisponible(
+                CODIGO_ESTADO_NO_ADMITIDO,
                 f"La versión {self._version} está en estado {manifiesto['estado']}; el modo {self.modo} "
-                f"exige {sorted(ESTADOS_ADMITIDOS[self.modo])}"
+                f"exige {sorted(ESTADOS_ADMITIDOS[self.modo])}",
             )
         entrenado_con = manifiesto["versiones"]["scikit_learn"]
         if _version_menor(entrenado_con) != _version_menor(sklearn.__version__):
-            raise RuntimeError(f"Modelo entrenado con scikit-learn {entrenado_con}; instalado {sklearn.__version__}")
+            raise _NoDisponible(
+                CODIGO_INCOMPATIBLE, f"Modelo entrenado con scikit-learn {entrenado_con}; instalado {sklearn.__version__}"
+            )
         config = configuracion_desde_manifiesto(manifiesto)
         esperadas = nombres_features(config, manifiesto["conjunto_features"])
         if manifiesto["features"] != esperadas or getattr(modelo, "n_features_in_", None) != len(esperadas):
-            raise RuntimeError("Las features del modelo no coinciden con las del extractor")
+            raise _NoDisponible(CODIGO_INCOMPATIBLE, "Las features del modelo no coinciden con las del extractor")
         if [int(c) for c in getattr(modelo, "classes_", [])] != [0, 1]:
-            raise RuntimeError("El modelo no es el clasificador binario normal(0)/riesgo_preventivo(1)")
+            raise _NoDisponible(
+                CODIGO_INCOMPATIBLE, "El modelo no es el clasificador binario normal(0)/riesgo_preventivo(1)"
+            )
         return modelo, manifiesto, config
 
     def motivo_rechazo(self) -> str | None:
@@ -140,6 +281,25 @@ class ServicioPrediccionPreventiva:
         self._cargar()
         return None if self._modelo is not None else self._motivo_no_disponible
 
+    def motivo_codigo(self) -> str | None:
+        """Código estable del motivo (CODIGO_*), o None si el modelo cargó."""
+        if not self.habilitado:
+            return CODIGO_MODO_DESACTIVADO
+        self._cargar()
+        return None if self._modelo is not None else self._codigo_no_disponible
+
+    def es_version_activa_registrada(self) -> bool:
+        """True si el modelo cargado es la versión activa y aprobada del
+        registro de la base (en modo activo, la única que puede cargar)."""
+        self._cargar()
+        activa = self._version_activa
+        return (
+            self._modelo is not None
+            and activa is not None
+            and activa.version == self._version
+            and activa.model_hash == (self._manifiesto or {}).get("artefacto", {}).get("sha256")
+        )
+
     @property
     def disponible(self) -> bool:
         self._cargar()
@@ -148,12 +308,24 @@ class ServicioPrediccionPreventiva:
     def estado(self) -> dict:
         """Resumen para el endpoint de evidencia (sin rutas ni secretos)."""
         self._cargar()
+        activa = self._version_activa
+        registro_bd = {
+            # HU-46: con qué versión del registro de la base se contrastó.
+            "version_activa_registrada": activa.version if activa else None,
+            "es_version_activa_registrada": self.es_version_activa_registrada(),
+        }
         if self._modelo is None:
-            return {"modo": self.modo, "disponible": False, "version": self._version, "motivo": self._motivo_no_disponible}
+            return {
+                "modo": self.modo, "disponible": False, "version": self._version,
+                "motivo": self._motivo_no_disponible,
+                "motivo_codigo": self.motivo_codigo(), **registro_bd,
+            }
         m = self._manifiesto
         return {
             "modo": self.modo,
             "disponible": True,
+            "motivo_codigo": None,
+            **registro_bd,
             "version": m["version"],
             "estado_modelo": m["estado"],
             "motivo_estado": m.get("motivo_estado"),
@@ -236,7 +408,8 @@ _instancia: ServicioPrediccionPreventiva | None = None
 
 def obtener_servicio_preventivo(modo: str, version: str | None, sha256: str | None) -> ServicioPrediccionPreventiva:
     """Una instancia por proceso (el modelo se carga una sola vez). Si la
-    configuración cambia, se recrea."""
+    configuración cambia, se recrea; la versión activa del registro se le
+    vuelve a fijar al arrancar y en cada activación (ai/gobierno.py)."""
     global _instancia
     clave = (modo, version or None, sha256 or None)
     if _instancia is None or (_instancia.modo, _instancia._version, _instancia._sha256) != clave:
