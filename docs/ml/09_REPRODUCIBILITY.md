@@ -185,9 +185,10 @@ manifiesto; el registro nunca sobrescribe, así que la segunda ejecución va con
 evaluarse: sin el SHT31 en las corridas (o sin sus columnas) la ablación queda "no estimable" y
 `termico_minimo` se registra igual. Antes de escribir, la CLI comprueba la paridad con el servicio de
 inferencia (`paridad_servicio`): cargado en sombra, el servicio clasifica una lectura de prueba del CSV
-con el vector y la puntuación del entrenamiento; si no (hoy, `termico_ambiente` mientras el servicio
-no reciba el SHT31, HU-17), no registra. Las negativas (scikit-learn distinto del fijado, versión
-existente o anotada en `historial.json`, pocas corridas o etiquetas, conjunto que no se puede servir) y
+con el vector y la puntuación del entrenamiento; si no, no registra. Con HU-17 integrado (ronda 3)
+el servicio recibe el SHT31 y `termico_ambiente` pasa esta comprobación como los otros conjuntos.
+Las negativas (scikit-learn distinto del fijado, versión existente o anotada en `historial.json`,
+pocas corridas o etiquetas, conjunto que no se puede servir) y
 los pasos siguientes (sombra, Experimento D, aprobación, registro en la base y `/activar`) están en
 `docs/operacion/IA_PREVENTIVA_ACTIVACION.md`, pasos 3 a 9.
 

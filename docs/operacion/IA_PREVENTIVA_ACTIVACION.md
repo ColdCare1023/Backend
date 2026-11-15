@@ -202,12 +202,15 @@ aceptan `listar`, `verificar` y `estado`.
 `dataset_version` es por defecto `corridas-<12 primeros hex del SHA-256 del CSV>`, una propuesta para
 P-4 que se cambia con `--dataset-version`.
 
-`--conjunto termico_ambiente` (SHT31) depende de que el servicio reciba el SHT31 (HU-17, P0-4).
-Mientras `predecir` no le pase la temperatura y la humedad ambiental al extractor, la comprobación de
-paridad lo rechaza (`el conjunto termico_ambiente no se puede servir: … HISTORIAL_INSUFICIENTE …`),
-porque el modelo nunca clasificaría. Con HU-17 integrado se registra, y en producción una lectura cuya
-ventana de 15 min no tenga temperatura y humedad ambiental válidas queda sin clasificación con el
-motivo `ventana_15min_sin_contexto_ambiental`. `termico_minimo` no depende del SHT31.
+`--conjunto termico_ambiente` (SHT31) se registra igual que los otros conjuntos: el servicio recibe
+el SHT31 (HU-17, P0-4) y la comprobación de paridad clasifica una lectura de prueba con las 32
+features del entrenamiento. En sombra o en activo, una lectura cuya ventana de 15 min no tenga
+temperatura y humedad ambiental válidas queda sin clasificación con el motivo
+`ventana_15min_sin_contexto_ambiental`, y la regla 2-8 °C decide (D18). Si el servicio dejara de
+recibir el SHT31, la misma comprobación lo rechazaría (`el conjunto termico_ambiente no se puede
+servir: … HISTORIAL_INSUFICIENTE …`), porque el modelo nunca clasificaría. `termico_minimo` no depende
+del SHT31. `tests/integration/test_r3_termico_ambiente_cli_a_sombra_e2e.py` recorre el camino completo:
+registro con la CLI, carga en sombra con la ingesta MQTT real y `/activar` con 200.
 
 **Advertencia, sin negativa.** Si ninguna corrida de ajuste o de validación es del mismo equipo que
 las de prueba, no hay separación que medir: `cuerpo_registro_api` va sin `particiones.separacion_min`

@@ -284,9 +284,9 @@ def comprobar_servicio(
     prueba como historial de LecturaTermica, hasta su lectura más reciente en
     rango cuya ventana el extractor del entrenamiento sí calcula. El servicio
     debe clasificarla (estado ok) con el vector y la puntuación del
-    entrenamiento. Si el servicio no recibe una señal que usa el conjunto (el
-    SHT31 de `termico_ambiente` mientras `predecir` no lo pase al extractor),
-    deja la lectura sin clasificar y no se registra nada.
+    entrenamiento. Si el servicio no recibe una señal que usa el conjunto
+    (como pasaba con el SHT31 de `termico_ambiente` antes de HU-17), deja la
+    lectura sin clasificar y no se registra nada.
 
     La rejilla del servicio se ancla en la lectura y la del entrenamiento en
     múltiplos del paso desde la época: para compararlas, las lecturas se

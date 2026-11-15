@@ -116,6 +116,10 @@ Pruebas:
   SHT31 y de la puerta), más el caso dirigido de 9 s con una falla corta del DS18B20 y los duplicados
   exactos y en conflicto. `tests/integration/test_hu17_historial_por_alcance_bd.py` repite el caso de
   5 s contra la base (filtro `desde` de `listar_recientes_por_device`).
+- `tests/integration/test_r3_termico_ambiente_cli_a_sombra_e2e.py` une esta paridad con el registro
+  desde corridas (HU-18 P-2): un modelo `termico_ambiente` registrado con `corridas --registrar` es
+  servible, carga en sombra, clasifica por la ingesta MQTT real con el SHT31 y, sin él, queda omitido
+  con `ventana_15min_sin_contexto_ambiental`; aprobado, `/activar` responde 200.
 
 **Excepciones conocidas.** La paridad no cubre (a) una lectura cuya propia hora repite la de otra:
 el historial es estrictamente anterior a t, así que el servicio no ve a su gemela, y el
