@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.repositories.i_incidente_repository import (
@@ -80,11 +80,18 @@ class SQLAlchemyIncidenteRepository(IIncidenteRepository):
         return [_to_entity(m) for m in (await self._session.execute(stmt)).scalars().all()]
 
     async def listar_pendientes_de_notificar(self, desde: datetime, max_intentos: int) -> list[IncidenteOperativo]:
+        """HU-54: mismo criterio que las alertas (HU-53). El SIN_DATOS se abre con
+        `abierto_en = último reporte + umbral`, que puede quedar horas atrás si
+        el vigilante lo detecta tarde (backend caído); `created_at` es cuándo se
+        registró de verdad y es lo que decide si el aviso sigue siendo útil."""
         stmt = select(IncidenteOperativoModel).where(
             IncidenteOperativoModel.resuelto_en.is_(None),
             IncidenteOperativoModel.notificado_en.is_(None),
             IncidenteOperativoModel.notificacion_intentos < max_intentos,
-            IncidenteOperativoModel.abierto_en >= desde,
+            or_(
+                IncidenteOperativoModel.created_at >= desde,
+                IncidenteOperativoModel.abierto_en >= desde,
+            ),
         )
         return [_to_entity(m) for m in (await self._session.execute(stmt)).scalars().all()]
 

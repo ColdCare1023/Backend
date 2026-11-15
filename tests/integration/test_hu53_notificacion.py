@@ -10,13 +10,14 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.infrastructure.config import Settings
 from src.infrastructure.database.models import AuditLogModel, ThermalAlertModel
 from src.infrastructure.database.repositories.device_repository import SQLAlchemyDeviceRepository
-from src.infrastructure.notifications.despachador import DespachadorNotificaciones
+from src.infrastructure.notifications import despachador as modulo_despachador
+from src.infrastructure.notifications.despachador import ACCION_NO_ENVIADA, DespachadorNotificaciones
 from src.infrastructure.notifications.transporte_email import ErrorEnvioCorreo
 from src.interface import main
 
@@ -287,3 +288,82 @@ async def test_sin_destinatario_queda_auditado(entorno):
     await main._procesar_lectura_mqtt(_lectura(12.0), _BroadcasterMudo(), None, despachador)
     assert await _procesar_cola(despachador) == ["sin_destinatario"]
     assert len(await _acciones(entorno, "NOTIFICACION_SIN_DESTINATARIO")) == 1
+
+
+# ── Incidente del 14/11/2026: aviso crítico 8 h 35 min sin enviar ─────────
+
+
+@pytest.mark.asyncio
+async def test_sin_transporte_el_aviso_queda_auditado_y_pendiente(entorno, monkeypatch):
+    """El despliegue sin correo descartaba el aviso sin ninguna fila
+    NOTIFICACION_*. Ahora queda NOTIFICACION_NO_ENVIADA (resultado fallido) y
+    un warning, y la alerta sigue sin `notificada_en` ni intentos consumidos:
+    el arranque con el correo habilitado la recupera y la envía."""
+    avisos_log: list[str] = []
+    monkeypatch.setattr(
+        modulo_despachador.logger, "warning", lambda mensaje, *a, **k: avisos_log.append(mensaje % a)
+    )
+    sin_correo = _despachador(entorno, None, email_enabled=False)
+    assert sin_correo._transporte is None
+
+    await main._procesar_lectura_mqtt(_lectura(12.0), _BroadcasterMudo(), None, sin_correo)
+    assert await _procesar_cola(sin_correo) == ["deshabilitado"]
+
+    no_enviados = await _acciones(entorno, ACCION_NO_ENVIADA)
+    assert len(no_enviados) == 1
+    assert no_enviados[0]["motivo"] == "transporte_deshabilitado"
+    assert no_enviados[0]["device_id"] == DEVICE_ID
+    assert no_enviados[0]["transporte"] is None
+    async with entorno() as session:
+        fila = (await session.execute(select(AuditLogModel).where(AuditLogModel.accion == ACCION_NO_ENVIADA))).scalar_one()
+    assert fila.resultado == "fallido"
+    assert any(DEVICE_ID in m and "NO enviado" in m for m in avisos_log)
+    alerta = await _alerta(entorno)
+    assert alerta.notificada_en is None
+    assert alerta.notificacion_intentos == 0
+    assert await _acciones(entorno, "NOTIFICACION_ENVIADA") == []
+
+    transporte = _TransporteEspia()
+    habilitado = _despachador(entorno, transporte)
+    assert await habilitado.recuperar_pendientes() == 1
+    assert await _procesar_cola(habilitado) == ["enviado"]
+    assert (await _alerta(entorno)).notificada_en is not None
+
+
+async def _fijar_created_at(factory, cuando: datetime) -> None:
+    async with factory() as session:
+        await session.execute(update(ThermalAlertModel).values(created_at=cuando))
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_episodio_del_buffer_que_acaba_de_llegar_se_recupera_al_arrancar(entorno):
+    """La lectura que abrió la alerta se capturó hace 3 h (buffer del nodo) y
+    llegó hace 10 min. `ultima_actualizacion` es la hora de captura; el barrido
+    la descartaba por antigua aunque el episodio acababa de llegar."""
+    perdido = _despachador(entorno, _TransporteEspia())
+    await main._procesar_lectura_mqtt(_lectura(12.0, minutos_atras=180), _BroadcasterMudo(), None, perdido)
+    # El proceso muere con el aviso en la cola en memoria.
+    ahora = datetime.now(tz=timezone.utc)
+    await _fijar_created_at(entorno, ahora - timedelta(minutes=10))
+    alerta = await _alerta(entorno)
+    assert alerta.episodio_abierto == 1 and alerta.notificada_en is None
+    assert alerta.ultima_actualizacion.replace(tzinfo=timezone.utc) < ahora - timedelta(hours=2)
+
+    transporte = _TransporteEspia()
+    reiniciado = _despachador(entorno, transporte)
+    assert await reiniciado.recuperar_pendientes() == 1
+    assert await _procesar_cola(reiniciado) == ["enviado"]
+    assert len(transporte.enviados) == 1
+
+
+@pytest.mark.asyncio
+async def test_episodio_que_llego_y_se_capturo_hace_horas_no_se_recupera(entorno):
+    """La ventana se respeta: un episodio que llegó hace 3 h y cuya última
+    lectura también es de hace 3 h ya no es un aviso útil al arrancar."""
+    perdido = _despachador(entorno, _TransporteEspia())
+    await main._procesar_lectura_mqtt(_lectura(12.0, minutos_atras=180), _BroadcasterMudo(), None, perdido)
+    await _fijar_created_at(entorno, datetime.now(tz=timezone.utc) - timedelta(hours=3))
+
+    reiniciado = _despachador(entorno, _TransporteEspia())
+    assert await reiniciado.recuperar_pendientes() == 0

@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from src.infrastructure.config import Settings, get_settings
 from src.infrastructure.database.models import (
@@ -14,7 +14,7 @@ from src.infrastructure.database.models import (
     IncidenteOperativoModel,
     ThermalReadingModel,
 )
-from src.infrastructure.notifications.despachador import DespachadorNotificaciones
+from src.infrastructure.notifications.despachador import ACCION_NO_ENVIADA, DespachadorNotificaciones
 from src.interface import main
 from src.interface.tareas import VigilanteSinDatos
 from tests.conftest import auth_header
@@ -177,3 +177,76 @@ async def test_el_estado_operativo_usa_el_intervalo_y_el_incidente_persistente(
     incidente = estado["incidencias_operativas"][0]
     historial = client.get(f"/api/dispositivos/incidentes?device_id={DEVICE_ID}", headers=auth_header(token_tecnico))
     assert historial.status_code == 200 and historial.json()[0]["id"] == incidente["id"]
+
+
+# ── Incidente del 14/11/2026: mismos huecos que el aviso de excursión ─────
+
+
+def _despachador_real(db_session_factory, transporte=None, **extra) -> DespachadorNotificaciones:
+    base = {"environment": "test", "email_enabled": True, "email_from": "avisos@coldcare.pe",
+            "email_destino_respaldo": "qf@coldcare.pe"}
+    base.update(extra)
+    return DespachadorNotificaciones(Settings(**base), db_session_factory, transporte=transporte)
+
+
+async def _nodo_callado(db_session_factory, horas: float) -> datetime:
+    """Nodo cuyo último reporte es de hace `horas`: el vigilante lo detecta
+    tarde y abre el SIN_DATOS con `abierto_en` = último reporte + umbral."""
+    ahora = datetime.now(tz=timezone.utc)
+    hace = ahora - timedelta(hours=horas)
+    async with db_session_factory() as session:
+        session.add(DeviceModel(id=DEVICE_ID, activo=True, intervalo_reporte_segundos=10))
+        await session.flush()
+        session.add(ThermalReadingModel(
+            device_id=DEVICE_ID, timestamp=hace, received_at=hace,
+            temperatura_interna=5.0, temperatura_ambiental=21.0, humedad_ambiental=50.0, origen="dispositivo",
+        ))
+        await session.commit()
+    return ahora
+
+
+async def test_sin_transporte_el_aviso_sin_datos_queda_auditado_y_pendiente(db_session_factory, nodo):
+    despachador_falso = _Despachador()
+    await _vigilante(db_session_factory, _Broadcaster(), despachador_falso).ejecutar_una_vez(nodo)
+    sin_correo = _despachador_real(db_session_factory, email_enabled=False)
+    assert sin_correo._transporte is None
+
+    assert (await sin_correo.procesar(despachador_falso.avisos[0])).estado == "deshabilitado"
+
+    async with db_session_factory() as session:
+        filas = (await session.execute(
+            select(AuditLogModel).where(AuditLogModel.accion == ACCION_NO_ENVIADA)
+        )).scalars().all()
+    assert len(filas) == 1
+    assert filas[0].detalle["motivo"] == "transporte_deshabilitado"
+    assert filas[0].detalle["incidente_id"] == str(despachador_falso.avisos[0].incidente_id)
+    assert filas[0].resultado == "fallido"
+    incidente = (await _incidentes(db_session_factory))[0]
+    assert incidente.notificado_en is None
+    assert incidente.notificacion_intentos == 0
+
+
+async def test_sin_datos_detectado_tarde_se_recupera_al_arrancar(db_session_factory):
+    """`abierto_en` queda ~3 h atrás (último reporte + umbral), pero el
+    incidente se registró ahora: el barrido debe recogerlo."""
+    ahora = await _nodo_callado(db_session_factory, horas=3)
+    await _vigilante(db_session_factory, _Broadcaster(), _Despachador()).ejecutar_una_vez(ahora)
+    incidente = (await _incidentes(db_session_factory))[0]
+    assert incidente.abierto_en.replace(tzinfo=timezone.utc) < ahora - timedelta(hours=2)
+
+    transporte = _TransporteEspia()
+    reiniciado = _despachador_real(db_session_factory, transporte)
+    assert await reiniciado.recuperar_pendientes() == 1
+    aviso = reiniciado._cola.get_nowait()
+    assert (await reiniciado.procesar(aviso)).estado == "enviado"
+    assert transporte.enviados[0].asunto == f"Sin datos de {DEVICE_ID}"
+
+
+async def test_sin_datos_registrado_hace_horas_no_se_recupera(db_session_factory):
+    ahora = await _nodo_callado(db_session_factory, horas=3)
+    await _vigilante(db_session_factory, _Broadcaster(), _Despachador()).ejecutar_una_vez(ahora)
+    async with db_session_factory() as session:
+        await session.execute(update(IncidenteOperativoModel).values(created_at=ahora - timedelta(hours=3)))
+        await session.commit()
+
+    assert await _despachador_real(db_session_factory, _TransporteEspia()).recuperar_pendientes() == 0
