@@ -36,8 +36,12 @@ sirve para el cron: su `CMD` levanta uvicorn y en producción exige todos los se
 
 - `coincide: true` en el informe `.restauracion.json`.
 - `archivo_integro: true` (el respaldo no cambió desde que se generó).
-- Captura del log del cron con un `RESPALDO_FALLIDO` provocado (por ejemplo,
-  `DATABASE_URL` con una contraseña errónea) para el Escenario 3.
+- Escenario 3 provocado con la base accesible (`PG_MAJOR` anterior al servidor,
+  [RESPALDO_RAILWAY.md § Escenario 3](RESPALDO_RAILWAY.md#escenario-3-fallo-provocado)): captura del
+  `CRITICAL RESPALDO FALLIDO` del cron, la fila `RESPALDO_FALLIDO`, el
+  `CRITICAL ALERTA OPERATIVA…` en el log del servicio Backend y `/health/detalle` →
+  `respaldos.estado = "fallido"`. Una contraseña errónea no sirve: no puede escribir
+  `RESPALDO_FALLIDO`.
 
 ## Pendiente de ejecutar en el entorno desplegado
 

@@ -48,7 +48,7 @@ MensajeHandler = Callable[[aiomqtt.Client, aiomqtt.Message], Awaitable[None]]
 
 @dataclass
 class EstadoConexionMQTT:
-    """HU-56: estado observable de la ingesta para `/health/detalle`. La tarea
+    """HU-55: estado observable de la ingesta para `/health/detalle`. La tarea
     consumidora puede estar viva y aun así desconectada (reintentando), que es
     justo lo que un operador necesita distinguir."""
 

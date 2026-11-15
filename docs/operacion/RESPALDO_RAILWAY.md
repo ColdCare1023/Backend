@@ -18,13 +18,20 @@ nada de esto se crea desde el código. Las evidencias que hay que archivar está
    entra también su contenido: payload, hora y `chain_seq`). Las tablas se recorren por clave, no con OFFSET.
    El volcado y la huella describen el mismo instante aunque el nodo siga publicando.
 5. Escribe `coldcare_<UTC>.dump` y `coldcare_<UTC>.manifiesto.json` y deja `RESPALDO_COMPLETADO`
-   en `audit_logs`.
+   en `audit_logs`. Mientras trabaja, el volcado y el manifiesto se llaman `….parcial` y solo toman
+   su nombre final cuando ambos están completos. Si ya existe un respaldo con la misma marca (dos
+   ejecuciones en el mismo segundo), no lo sobrescribe: esa ejecución falla con
+   `… ya existe: otro respaldo usó la misma marca`.
 6. Si `RESPALDO_RETENER=N` (N > 0), borra los respaldos más antiguos que los N más recientes. Solo
    lo hace después de un respaldo correcto.
 
-Cuando falla (escenario 3), registra el log `CRITICAL RESPALDO FALLIDO`, intenta dejar
-`RESPALDO_FALLIDO` en `audit_logs` y termina con código de salida 2. Railway marca esa ejecución
-como fallida.
+Cuando falla (escenario 3), registra el log `CRITICAL RESPALDO FALLIDO`, borra los `.parcial` que
+esa ejecución dejara a medias (nunca un respaldo terminado, aunque tenga la misma marca), intenta
+dejar `RESPALDO_FALLIDO` en `audit_logs` y termina con código de salida 2. Railway marca esa
+ejecución como fallida. Un volcado cortado, por ejemplo por falta de espacio, ya no queda en el
+volumen ni cuenta para `RESPALDO_RETENER`. Si el proceso muere sin pasar por ese manejo (SIGKILL),
+queda un `coldcare_<UTC>.dump.parcial`: no cuenta para `RESPALDO_RETENER` ni se confunde con un
+respaldo, y se puede borrar a mano desde el volumen.
 
 El backend (servicio de la API) también lo detecta: cada `RESPALDO_VIGILANCIA_PERIODO_SEGUNDOS`
 (3600 por defecto) lee el último resultado en `audit_logs` y, si el último respaldo falló, deja en
@@ -44,8 +51,11 @@ carpeta del volumen, que Railway monta como root.
 
 1. Abre el servicio **Postgres** del proyecto y ve a la pestaña **Backups**.
 2. Activa **Daily** (cada 24 h, se conserva 6 días). Para cubrir más tiempo, añade **Weekly**
-   (cada 7 días, se conserva alrededor de 1 mes) y **Monthly** (cada 30 días, se conserva alrededor
-   de 3 meses). La retención la fija Railway según el plan.
+   (cada 7 días, se conserva 27 días) y **Monthly** (cada 30 días, se conserva 89 días). Esa
+   retención la fija Railway para cada programa (documentación de Volumes → Backups; la guía de
+   Postgres la redondea a «1 mes» y «3 meses») y es la que se anota como retención efectiva. Si el
+   plan no muestra la pestaña **Backups**, déjalo escrito en la evidencia: el respaldo queda cubierto
+   por el cron del punto 2.
 3. Captura la pestaña con los programas activos y la fecha del último respaldo.
 
 Este respaldo es una copia del volumen. Sirve para recuperar errores de datos, pero no deja una
@@ -97,14 +107,38 @@ diario de los puntos siguientes.
 
 ### Escenario 3 (fallo provocado)
 
-1. Cambia de forma temporal `DATABASE_URL` del cron a una contraseña errónea.
-2. Adelanta la programación unos minutos. La granularidad mínima es de 5 minutos.
-3. Espera la ejecución y captura dos cosas: el log `CRITICAL RESPALDO FALLIDO` y el aviso de
-   ejecución fallida.
-4. Restaura `DATABASE_URL` y `0 7 * * *`.
+El criterio pide la alerta crítica **en el log del backend**. El vigilante de la API solo lee
+`audit_logs`, así que el cron tiene que poder escribir allí `RESPALDO_FALLIDO`. Por eso el fallo se
+provoca con la base **accesible**: un `pg_dump` de una versión mayor anterior a la del servidor.
 
-Con la base inaccesible, `RESPALDO_FALLIDO` no se puede escribir en `audit_logs`. El log crítico y
-el código 2 siguen siendo la alerta.
+Antes de empezar, define en el servicio de la API `RESPALDO_MAX_ANTIGUEDAD_HORAS=26` y deja
+`RESPALDO_VIGILANCIA_PERIODO_SEGUNDOS` en 3600 (por defecto) o en un valor menor para esperar menos.
+
+1. En el cron, cambia de forma temporal `PG_MAJOR` a una versión **anterior** a la del servidor
+   (paso 2.1; por ejemplo `15` si el servidor es 17) y redespliega. La imagen se construye con
+   `postgresql-client-15`. Una versión posterior no sirve: `pg_dump` sí vuelca servidores más
+   antiguos y el respaldo saldría bien.
+2. Adelanta la programación unos minutos. La granularidad mínima es de 5 minutos.
+3. En la ejecución, `verificar_cliente_compatible` rechaza el cliente antes de volcar. Captura:
+   - el log del cron:
+     `<hora> CRITICAL respaldo RESPALDO FALLIDO: pg_dump 15 es anterior al servidor PostgreSQL 17: construya Dockerfile.respaldo con PG_MAJOR=17`;
+   - el aviso de Railway de ejecución fallida (código de salida 2);
+   - en Auditoría, la fila `RESPALDO_FALLIDO` con resultado «fallido».
+4. En el log del servicio **Backend**, como mucho un `RESPALDO_VIGILANCIA_PERIODO_SEGUNDOS` después
+   (3600 s por defecto), aparece una sola vez el mensaje crítico del logger `interface.tareas`
+   `ALERTA OPERATIVA: el último respaldo programado de PostgreSQL falló (<hora>) y no hay uno correcto posterior. Revise el servicio cron de respaldo (HU-29).`
+   Captura esa línea y, con un token de administrador, `/health/detalle` →
+   `respaldos.estado = "fallido"`.
+5. Restaura `PG_MAJOR` y `0 7 * * *` y redespliega. Tras la siguiente ejecución correcta
+   (`RESPALDO_COMPLETADO`), la siguiente pasada del vigilante deja `respaldos.estado = null`.
+
+Por qué no se usa una contraseña errónea en `DATABASE_URL`: con la base inaccesible el cron no puede
+escribir `RESPALDO_FALLIDO` (deja `RESPALDO FALLIDO y no se pudo registrar en audit_logs.`), así que
+la alerta solo queda en el log del cron y en el aviso de Railway. El vigilante de la API no ve
+ningún fallo nuevo. Con `RESPALDO_MAX_ANTIGUEDAD_HORAS=26` lo detecta recién cuando pasan 26 h sin
+`RESPALDO_COMPLETADO`, como `respaldos.estado = "vencido"`; con 0 (por defecto) no lo detecta nunca.
+La prueba `test_un_fallo_del_cron_llega_al_log_del_backend` reproduce este escenario con la base
+accesible.
 
 ## 3. Simulacro de restauración (escenario 2)
 
@@ -140,11 +174,15 @@ genera un respaldo local con el mismo código. Después se siguen los pasos 2 a 
 
 - `tests/integration/test_hu29_snapshot_postgres.py`: usa PostgreSQL, `pg_dump` y `pg_restore`
   reales (pgserver o `TEST_POSTGRES_URL`). Inserta filas entre el volcado y la huella y comprueba
-  que la restauración da `coincide=true`. Con el código anterior daba `coincide=false`.
+  que la restauración da `coincide=true`. Con el código anterior daba `coincide=false`. También
+  ejecuta el cron (`main`) contra esa base: un fallo de almacenamiento deja `RESPALDO_FALLIDO` y el
+  vigilante de la API escribe la alerta crítica (`test_un_fallo_del_cron_llega_al_log_del_backend`),
+  y un `.dump` cortado se borra y no cuenta para la retención.
 - `tests/integration/test_hu29_respaldo_restauracion.py`: comprueba la huella, las 9 tablas, el contenido de los eslabones, la
   paginación por clave, los manifiestos antiguos y el fallo crítico.
 - `tests/unit/test_hu29_servicio_cron_respaldo.py`: comprueba `Dockerfile.respaldo`,
-  `railway.respaldo.json` y la retención.
+  `railway.respaldo.json`, la retención y que esta guía mantenga la retención de Railway y el fallo
+  provocado con la base accesible.
 
 ## Pendiente (no se puede hacer desde el código)
 

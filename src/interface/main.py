@@ -1621,7 +1621,7 @@ def create_app() -> FastAPI:
         session: DbSessionDep,
         _admin=Depends(require_roles(Rol.ADMINISTRADOR)),
     ) -> dict:
-        """HU-56: estado de las dependencias para el operador (solo administrador)."""
+        """HU-55: estado de las dependencias para el operador (solo administrador)."""
         try:
             await session.execute(text("SELECT 1"))
             db = "ok"

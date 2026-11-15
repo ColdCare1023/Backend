@@ -81,6 +81,33 @@ def test_sin_retencion_no_se_borra_nada(tmp_path):
     assert len(list(tmp_path.iterdir())) == 3
 
 
+def test_descartar_incompletos_solo_borra_lo_que_quedo_a_medias(tmp_path):
+    """Un respaldo correcto y una ejecución fallida con la misma marca (mismo
+    segundo): solo se borran los `.parcial` de la fallida, nunca el `.dump` y
+    el manifiesto terminados."""
+    marca = "20261115T071801Z"
+    terminados = {f"coldcare_{marca}.dump", f"coldcare_{marca}.manifiesto.json"}
+    for nombre in terminados | {f"{nombre}.parcial" for nombre in terminados}:
+        (tmp_path / nombre).write_text("x", encoding="utf-8")
+
+    descartados = respaldo_postgres.descartar_incompletos(tmp_path, marca)
+
+    assert sorted(descartados) == sorted(f"{nombre}.parcial" for nombre in terminados)
+    assert {p.name for p in tmp_path.iterdir()} == terminados
+
+
+def test_la_retencion_no_cuenta_un_parcial_de_una_ejecucion_interrumpida(tmp_path):
+    """Un proceso muerto a mitad del pg_dump (SIGKILL) no pasa por el manejo
+    del fallo y deja su `.dump.parcial`: la poda no lo cuenta ni lo toma por
+    un respaldo, así que no borra uno bueno a cambio."""
+    for marca in ("20261111T070000Z", "20261112T070000Z"):
+        _crear(tmp_path, marca)
+    (tmp_path / "coldcare_20261113T070000Z.dump.parcial").write_bytes(b"PGDMP")
+
+    assert respaldo_postgres.podar_respaldos(tmp_path, retener=2) == []
+    assert len(list(tmp_path.glob("coldcare_*.dump"))) == 2
+
+
 def test_un_respaldo_fallido_no_poda(monkeypatch, tmp_path):
     for marca in ("20261110T070000Z", "20261111T070000Z"):
         _crear(tmp_path, marca)
@@ -91,3 +118,72 @@ def test_un_respaldo_fallido_no_poda(monkeypatch, tmp_path):
 
     assert codigo == respaldo_postgres.CODIGO_FALLO
     assert len(list(tmp_path.glob("*.dump"))) == 2
+
+
+# ── Documentación operativa (P2 y P0-2 de la revalidación) ──────────────────
+
+
+def _seccion(texto: str, titulo: str) -> str:
+    """Cuerpo de la sección `titulo` (hasta el siguiente encabezado)."""
+    inicio = texto.index(titulo) + len(titulo)
+    siguiente = re.search(r"^#{1,6} ", texto[inicio:], flags=re.MULTILINE)
+    return texto[inicio: inicio + siguiente.start()] if siguiente else texto[inicio:]
+
+
+def test_la_verificacion_de_restauracion_documenta_las_9_tablas():
+    from scripts import verificar_restauracion
+    from src.infrastructure.respaldo.huellas import TABLAS_EVIDENCIA
+
+    documentacion = verificar_restauracion.__doc__
+    assert len(TABLAS_EVIDENCIA) == 9
+    assert "9 tablas" in documentacion
+    assert [tabla for tabla in TABLAS_EVIDENCIA if tabla not in documentacion] == []
+
+
+def test_la_guia_de_railway_da_la_retencion_efectiva_de_los_backups_nativos():
+    """HU-29 esc. 1 pide documentar la retención efectiva: Railway conserva
+    los backups Daily 6 días, los Weekly 27 y los Monthly 89."""
+    guia = (RAIZ / "docs/operacion/RESPALDO_RAILWAY.md").read_text(encoding="utf-8")
+    seccion = _seccion(guia, "## 1. Respaldo nativo de Railway (escenario 1)")
+    for programa, dias in (("Daily", 6), ("Weekly", 27), ("Monthly", 89)):
+        assert re.search(rf"\*\*{programa}\*\*[^.]*\b{dias} días", seccion), programa
+    assert "~1 mes" not in seccion and "alrededor de" not in seccion
+
+
+def test_el_fallo_provocado_de_la_guia_llega_al_log_del_backend():
+    """HU-29 esc. 3 («alerta operativa crítica en el log del backend»): con
+    una contraseña errónea el cron no puede escribir RESPALDO_FALLIDO y el
+    vigilante de la API no ve nada. La guía provoca el fallo con la base
+    accesible: un PG_MAJOR anterior al del servidor, que
+    `verificar_cliente_compatible` rechaza antes de volcar."""
+    guia = (RAIZ / "docs/operacion/RESPALDO_RAILWAY.md").read_text(encoding="utf-8")
+    escenario = _seccion(guia, "### Escenario 3 (fallo provocado)")
+    assert "PG_MAJOR" in escenario
+    assert "RESPALDO_FALLIDO" in escenario
+    assert "RESPALDO_MAX_ANTIGUEDAD_HORAS=26" in escenario
+    assert 'respaldos.estado = "fallido"' in escenario
+    # El texto que se busca en el log del backend es el que escribe el vigilante.
+    assert "ALERTA OPERATIVA: el último respaldo programado de PostgreSQL falló" in escenario
+    assert "ALERTA OPERATIVA: el último respaldo programado de PostgreSQL falló" in (
+        RAIZ / "src/interface/tareas.py"
+    ).read_text(encoding="utf-8")
+    # El procedimiento ya no es la contraseña errónea (solo se menciona para
+    # explicar por qué no sirve).
+    assert not re.search(r"^1\. .*contraseña errónea", escenario, flags=re.MULTILINE)
+
+
+def test_el_criterio_de_aceptacion_de_hu29_pide_el_fallo_que_llega_al_backend():
+    """El criterio verificable de HU-29 pedía provocar el Escenario 3 con una
+    contraseña errónea y capturar solo el log del cron. Con la base
+    inaccesible no hay RESPALDO_FALLIDO y el log del backend no alerta; el
+    criterio es la alerta en el log del backend (RESPALDO_RAILWAY.md)."""
+    guia = (RAIZ / "docs/operacion/HU-29_respaldo_y_restauracion.md").read_text(encoding="utf-8")
+    criterio = _seccion(guia, "## Criterio de aceptación verificable")
+    assert "PG_MAJOR" in criterio
+    assert "ALERTA OPERATIVA" in criterio
+    assert "RESPALDO_FALLIDO" in criterio
+    assert 'respaldos.estado = "fallido"' in criterio
+    # La contraseña errónea solo puede aparecer para decir que no sirve.
+    for linea in re.split(r"\n(?=- )", criterio):
+        if "contraseña errónea" in linea:
+            assert "no sirve" in linea, linea
