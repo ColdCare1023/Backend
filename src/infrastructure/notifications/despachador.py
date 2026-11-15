@@ -2,8 +2,11 @@
 
 HU-54: el mismo despachador entrega el aviso de un incidente SIN_DATOS
 (`AvisoSinDatos`), con las mismas garantías: después del COMMIT, una vez por
-incidente (`notificado_en`), reintentos auditados y SMS solo en el primer
-intento, con el cooldown por dispositivo compartido con las excursiones.
+incidente (`notificado_en`) y reintentos auditados.
+
+HU-53 (v3.3): el SMS se retiró del alcance; el aviso externo es solo por
+correo. El único canal opcional que queda es Telegram (desactivado por
+defecto), sin auditoría propia.
 
 Flujo (D2 de la especificación):
 
@@ -217,7 +220,7 @@ class DespachadorNotificaciones:
                 SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
             )
             primer_intento = alerta.notificacion_intentos == 0
-            # Telegram y SMS son para la excursión real; el aviso preventivo va solo por correo.
+            # Telegram es para la excursión real; el aviso preventivo va solo por correo.
             if primer_intento and not aviso.es_preventivo:
                 await self._avisar_por_canales_opcionales(aviso, dispositivo, auditoria)
 
@@ -378,65 +381,35 @@ class DespachadorNotificaciones:
             device_id=aviso.device_id,
         )
 
-    async def _auditar_sms(
-        self, auditoria: AuditarAccionCriticaUseCase, aviso: AvisoExcursion | AvisoSinDatos, resultado: str | None,
-        telefono: str | None,
-    ) -> None:
-        """HU-53: el SMS deja la misma huella que el correo; sin confirmación del
-        proveedor no figura como enviado."""
-        if resultado is None:
-            return
-        accion = {"enviado": "NOTIFICACION_ENVIADA", "fallido": "NOTIFICACION_FALLIDA"}.get(
-            resultado, "NOTIFICACION_OMITIDA"
-        )
-        extra = {"resultado": resultado}
-        if telefono:
-            extra["destinatario"] = f"***{telefono[-3:]}"
-        await self._auditar(auditoria, accion, aviso, extra, canal="sms")
-
     async def _avisar_sin_datos_por_canales_opcionales(
         self, aviso: AvisoSinDatos, dispositivo: dict, auditoria: AuditarAccionCriticaUseCase
     ) -> None:
-        telefono = dispositivo.get("responsable_telefono")
-        try:
-            if aviso.tipo == "excursion_no_verificada":
-                # HU-44: se trata como excursión crítica también por SMS.
-                detalle = aviso.detalle or {}
-                resultado = await self._canales_opcionales.notificar_excursion_critica(
-                    device_id=aviso.device_id,
-                    temperatura=detalle.get("temperatura_interna"),
-                    timestamp=detalle.get("captured_at") or aviso.abierto_en.isoformat(),
-                    telefono_destino=telefono,
-                    origen_no_verificado=True,
-                )
-            elif aviso.tipo in ("monitoreo_suspendido", "sensor_fault", "colision_clave"):
-                return  # solo correo: no es una excursión ni un silencio del nodo
-            else:
-                resultado = await self._canales_opcionales.notificar_sin_datos(
-                    device_id=aviso.device_id,
-                    ultimo_reporte=aviso.ultimo_reporte_en.isoformat() if aviso.ultimo_reporte_en else None,
-                    telefono_destino=telefono,
-                )
-        except Exception:  # pragma: no cover - los canales ya tragan sus fallos
-            logger.exception("Fallo en canales opcionales (SIN_DATOS) para %s", aviso.device_id)
+        """Solo la excursión de origen no verificado (HU-44) se trata como
+        excursión crítica en Telegram; el resto de incidentes va solo por correo."""
+        if aviso.tipo != "excursion_no_verificada":
             return
-        await self._auditar_sms(auditoria, aviso, resultado, telefono)
+        detalle = aviso.detalle or {}
+        try:
+            await self._canales_opcionales.notificar_excursion_critica(
+                device_id=aviso.device_id,
+                temperatura=detalle.get("temperatura_interna"),
+                timestamp=detalle.get("captured_at") or aviso.abierto_en.isoformat(),
+                origen_no_verificado=True,
+            )
+        except Exception:  # pragma: no cover - el canal ya traga sus fallos
+            logger.exception("Fallo en canales opcionales (SIN_DATOS) para %s", aviso.device_id)
 
     async def _avisar_por_canales_opcionales(
         self, aviso: AvisoExcursion, dispositivo: dict, auditoria: AuditarAccionCriticaUseCase
     ) -> None:
-        telefono = dispositivo.get("responsable_telefono")
         try:
-            resultado = await self._canales_opcionales.notificar_excursion_critica(
+            await self._canales_opcionales.notificar_excursion_critica(
                 device_id=aviso.device_id,
                 temperatura=aviso.temperatura,
                 timestamp=aviso.captured_at.isoformat(),
-                telefono_destino=telefono,
             )
-        except Exception:  # pragma: no cover - los canales ya tragan sus fallos
+        except Exception:  # pragma: no cover - el canal ya traga sus fallos
             logger.exception("Fallo en canales opcionales para %s", aviso.device_id)
-            return
-        await self._auditar_sms(auditoria, aviso, resultado, telefono)
 
     def _programar_reintento(self, aviso: AvisoExcursion | AvisoSinDatos, intentos: int) -> None:
         espera = self._esperas[min(intentos - 1, len(self._esperas) - 1)] if self._esperas else 0

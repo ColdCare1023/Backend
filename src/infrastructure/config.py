@@ -225,18 +225,10 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
-    # HU-54 (backlog 54 HU): canal SMS opcional, "sujeto a viabilidad y
-    # configuración del proveedor" — se modela contra una pasarela
-    # compatible con la API REST de Twilio (Account SID + Auth Token, la
-    # forma más extendida entre proveedores SMS), sin atarse a un SDK
-    # propietario. `sms_from` es el número/ID remitente que exige el
-    # proveedor; el destinatario es el teléfono del responsable registrado
-    # en cada dispositivo (devices.responsable_telefono), no uno global.
-    sms_enabled: bool = False
-    sms_api_url: str = "https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
-    sms_account_sid: str = ""
-    sms_auth_token: str = ""
-    sms_from: str = ""
+    # HU-53 (v3.3): el canal SMS se retiró del alcance; el aviso externo es
+    # solo por correo (HU-52). Las variables SMS_* de despliegues anteriores
+    # (SMS_ENABLED, SMS_API_URL, SMS_ACCOUNT_SID, SMS_AUTH_TOKEN, SMS_FROM) ya
+    # no son campos: `extra="ignore"` las descarta sin impedir el arranque.
 
     # Un episodio crítico genera una lectura cada pocos segundos; sin esta
     # ventana el responsable recibiría cientos de avisos y silenciaría el canal.
@@ -535,12 +527,6 @@ class Settings(BaseSettings):
             ):
                 raise ValueError(
                     "TELEGRAM_ENABLED requiere TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID."
-                )
-            if self.sms_enabled and not all(
-                (self.sms_account_sid, self.sms_auth_token, self.sms_from)
-            ):
-                raise ValueError(
-                    "SMS_ENABLED requiere SMS_ACCOUNT_SID, SMS_AUTH_TOKEN y SMS_FROM."
                 )
             self._validar_codigos_en_produccion()
         return self

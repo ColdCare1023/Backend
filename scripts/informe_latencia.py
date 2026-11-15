@@ -53,7 +53,7 @@ def seleccionar(filas: list[tuple], device_id: str | None) -> list[dict]:
     salida = []
     for creado, detalle in filas:
         d = json.loads(detalle) if isinstance(detalle, str) else (detalle or {})
-        # El SMS también deja NOTIFICACION_ENVIADA (sin latencia): solo cuenta el correo.
+        # Solo cuenta el correo: las filas `canal=sms` son anteriores a la retirada de HU-53.
         # Las filas anteriores a este campo no traen `canal`: se asumen de correo.
         if d.get("canal", "email") != "email":
             continue

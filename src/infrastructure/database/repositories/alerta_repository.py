@@ -121,10 +121,30 @@ class SQLAlchemyAlertaRepository(IAlertaRepository):
         return _to_entity(model)
 
     async def marcar_atendida_si_no_atendida(self, alerta_id: UUID, timestamp: datetime) -> bool:
+        """HU-23 esc. 3: solo RECONOCIDA -> ATENDIDA (nunca desde PENDIENTE)."""
         stmt = (
             update(ThermalAlertModel)
-            .where(ThermalAlertModel.id == alerta_id, ThermalAlertModel.estado != EstadoAlerta.ATENDIDA.value)
+            .where(ThermalAlertModel.id == alerta_id, ThermalAlertModel.estado == EstadoAlerta.RECONOCIDA.value)
             .values(estado=EstadoAlerta.ATENDIDA.value, atendida_en=timestamp)
+        )
+        resultado = await self._session.execute(stmt)
+        await self._session.flush()
+        return resultado.rowcount == 1
+
+    async def reconocer_si_pendiente(self, alerta_id: UUID, usuario_id: UUID, timestamp: datetime) -> bool:
+        """HU-23 esc. 1, atómico: PENDIENTE -> RECONOCIDA con quién y cuándo.
+        En PostgreSQL el UPDATE bloquea la fila hasta el COMMIT, así que una
+        acción concurrente sobre la misma alerta espera y luego no la encuentra
+        PENDIENTE."""
+        stmt = (
+            update(ThermalAlertModel)
+            .where(ThermalAlertModel.id == alerta_id, ThermalAlertModel.estado == EstadoAlerta.PENDIENTE.value)
+            .values(
+                estado=EstadoAlerta.RECONOCIDA.value,
+                reconocida_en=timestamp,
+                revisada=True,
+                revisada_por=usuario_id,
+            )
         )
         resultado = await self._session.execute(stmt)
         await self._session.flush()

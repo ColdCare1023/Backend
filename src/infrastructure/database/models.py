@@ -107,9 +107,10 @@ class DeviceModel(Base):
     )
     observaciones_instalacion: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # HU-53/HU-54: responsable registrado del dispositivo — destinatario real
-    # de las notificaciones de excursión crítica por correo/SMS, en vez de un
-    # único destinatario global fijo para todos los dispositivos.
+    # HU-52: responsable registrado del dispositivo — destinatario real del
+    # correo de excursión crítica, en vez de un único destinatario global fijo
+    # para todos los dispositivos. HU-53 (v3.3): sin SMS; la columna
+    # responsable_telefono se conserva (sin uso) para no romper datos ni API.
     responsable_nombre: Mapped[str | None] = mapped_column(String(120), nullable=True)
     responsable_email: Mapped[str | None] = mapped_column(String(150), nullable=True)
     responsable_telefono: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -169,7 +170,8 @@ class UserModel(Base):
     id: Mapped[uuid.UUID] = _uuid_pk()
     nombre: Mapped[str] = mapped_column(String(120), nullable=False)
     email: Mapped[str] = mapped_column(String(150), unique=True, nullable=False, index=True)
-    # Migración 0036: celular E.164 del usuario (aviso por SMS al crear la cuenta).
+    # Migración 0036: celular E.164 del usuario. HU-53 (v3.3): el SMS de
+    # bienvenida se retiró; la columna se conserva (sin uso) por compatibilidad.
     telefono: Mapped[str | None] = mapped_column(String(20), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     rol_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("roles.id"), nullable=False)

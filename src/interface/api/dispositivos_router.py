@@ -819,7 +819,9 @@ async def actualizar_instalacion(
     )
     try:
         dispositivo = await use_case.execute(
-            device_id, body.ubicacion, body.fecha_instalacion, admin.id, body.observaciones
+            device_id, body.ubicacion, body.fecha_instalacion, admin.id, body.observaciones,
+            # PATCH: lo que el cliente no envía se conserva (exclude_unset).
+            campos_enviados=set(body.model_dump(exclude_unset=True)),
         )
     except RecursoNoEncontradoError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -830,7 +832,7 @@ async def actualizar_instalacion(
         usuario_id=admin.id,
         accion="ACTUALIZAR_INSTALACION_DISPOSITIVO",
         recurso=f"dispositivos/{device_id}/instalacion",
-        detalle={"ubicacion": body.ubicacion},
+        detalle={"ubicacion": dispositivo["ubicacion"]},
         ip_origen=request.client.host if request.client else None,
         device_id=device_id,
     )
@@ -846,9 +848,10 @@ async def actualizar_responsable(
     request: Request,
     admin=Depends(router_dep),
 ) -> DispositivoResponse:
-    """HU-53/HU-54: destinatario de las notificaciones de excursión crítica
-    de este dispositivo por correo y SMS, en vez del destinatario único
-    global. Un cambio queda como evento histórico (HU-49)."""
+    """HU-52: destinatario del correo de excursión crítica de este
+    dispositivo, en vez del destinatario único global. Un cambio queda como
+    evento histórico (HU-49). HU-53 (v3.3): sin SMS; `telefono` se conserva
+    solo por compatibilidad."""
     repositorio = SQLAlchemyDeviceRepository(session)
     use_case = ActualizarResponsableDispositivoUseCase(
         repositorio, RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session))
@@ -888,9 +891,13 @@ async def historial_configuracion(
     """HU-49: historial auditable de cambios de configuración/instalación/
     calibración/reemplazo de un dispositivo, de solo lectura. Esc. 2: cada
     cambio dice desde cuándo y hasta cuándo estuvo vigente, quién lo hizo
-    (`actor_nombre`) y se filtra por categoría, campo o periodo."""
+    (`actor_nombre`) y se filtra por categoría, campo o periodo. 404 si el
+    dispositivo no existe."""
     use_case = ConsultarHistorialConfiguracionUseCase(SQLAlchemyDeviceRepository(session))
-    historial = await use_case.execute(device_id, categoria=categoria, campo=campo, desde=desde, hasta=hasta)
+    try:
+        historial = await use_case.execute(device_id, categoria=categoria, campo=campo, desde=desde, hasta=hasta)
+    except RecursoNoEncontradoError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     usuarios = SQLAlchemyUsuarioRepository(session)
     nombres = {
         actor: nombre_visible(await usuarios.obtener_por_id(actor))

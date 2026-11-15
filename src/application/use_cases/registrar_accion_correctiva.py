@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
+from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.domain.entities.accion_correctiva import AccionCorrectiva
 from src.domain.exceptions import (
@@ -11,13 +12,25 @@ from src.domain.exceptions import (
 )
 from src.domain.repositories.i_accion_correctiva_repository import IAccionCorrectivaRepository
 from src.domain.repositories.i_alerta_repository import IAlertaRepository
+from src.domain.repositories.i_audit_log_repository import IAuditLogRepository
 from src.domain.repositories.i_trazabilidad_repository import ITrazabilidadRepository
+from src.domain.value_objects.estado_alerta import EstadoAlerta
 from src.domain.value_objects.rol import Rol
+
+# HU-23: el reconocimiento implícito (acción sobre una alerta PENDIENTE) queda
+# como REVISAR_ALERTA con este origen, para distinguirlo del PATCH /revisar.
+ORIGEN_ACCION_CORRECTIVA = "accion_correctiva"
 
 
 class RegistrarAccionCorrectivaUseCase:
-    """RF-10 / HU-27: el usuario responsable registra una acción correctiva
-    asociada a una alerta activa, que la transiciona a ATENDIDA (HU-23).
+    """RF-10 / HU-27: el Químico Farmacéutico responsable registra una acción
+    correctiva asociada a una alerta PENDIENTE o RECONOCIDA, que la
+    transiciona a ATENDIDA (HU-23).
+
+    HU-23 esc. 1 y 3: el flujo es PENDIENTE -> RECONOCIDA -> ATENDIDA. Si la
+    alerta sigue PENDIENTE, quien registra la acción la reconoce primero
+    (queda `revisada_por` y `reconocida_en`, y el eslabón REVISAR_ALERTA con
+    `origen="accion_correctiva"` antes del de la acción) y luego la atiende.
 
     Escenario 2 (concurrencia): si otro usuario ya atendió la misma alerta
     (dos pestañas, dos compañeros), la transición ATENDIDA se intenta de
@@ -31,20 +44,43 @@ class RegistrarAccionCorrectivaUseCase:
         accion_repository: IAccionCorrectivaRepository,
         alerta_repository: IAlertaRepository,
         trazabilidad_repository: ITrazabilidadRepository,
+        audit_log_repository: IAuditLogRepository,
     ) -> None:
         self._accion_repository = accion_repository
         self._alerta_repository = alerta_repository
         self._registrar_hash = RegistrarHashEncadenadoUseCase(trazabilidad_repository)
+        self._auditoria = AuditarAccionCriticaUseCase(audit_log_repository, trazabilidad_repository)
+        # Si la última ejecución reconoció la alerta (estaba PENDIENTE).
+        self.reconocida_implicitamente = False
 
     async def execute(
         self, alert_id: UUID, usuario_id: UUID, descripcion: str,
         decision: str | None = None, justificacion: str | None = None,
+        ip_origen: str | None = None,
     ) -> AccionCorrectiva:
+        self.reconocida_implicitamente = False
         alerta = await self._alerta_repository.obtener_por_id(alert_id)
         if alerta is None:
             raise RecursoNoEncontradoError(f"Alerta {alert_id} no encontrada")
 
         ahora = datetime.now(tz=timezone.utc)
+        if alerta.estado == EstadoAlerta.PENDIENTE and await self._alerta_repository.reconocer_si_pendiente(
+            alert_id, usuario_id, ahora
+        ):
+            # Mismo registro que PATCH /revisar (bitácora + eslabón en la cadena
+            # del dispositivo), antes del eslabón de la acción: el auditor ve el
+            # orden real PENDIENTE -> RECONOCIDA -> ATENDIDA.
+            self.reconocida_implicitamente = True
+            await self._auditoria.execute(
+                usuario_id=usuario_id,
+                accion="REVISAR_ALERTA",
+                recurso=f"alertas/{alert_id}",
+                detalle={"nivel_riesgo": alerta.nivel_riesgo.value, "origen": ORIGEN_ACCION_CORRECTIVA},
+                ip_origen=ip_origen,
+                device_id=alerta.device_id,
+            )
+        # Si otro usuario la reconoció entre la lectura y el UPDATE, se atiende
+        # igual desde RECONOCIDA; si ya la atendió, aquí se pierde la carrera.
         gano_la_carrera = await self._alerta_repository.marcar_atendida_si_no_atendida(alert_id, ahora)
         if not gano_la_carrera:
             raise DomainError(

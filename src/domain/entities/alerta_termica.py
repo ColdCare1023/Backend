@@ -82,9 +82,13 @@ class AlertaTermica:
         """HU-23 Escenario 2: RECONOCIDA -> ATENDIDA, al registrarse la
         acción correctiva (HU-27). Una alerta ya ATENDIDA no puede volver a
         atenderse — eso es exactamente la condición de carrera que HU-27
-        Escenario 2 exige rechazar."""
+        Escenario 2 exige rechazar. Una PENDIENTE tampoco: el flujo es
+        PENDIENTE -> RECONOCIDA -> ATENDIDA (HU-23 esc. 3) y antes debe constar
+        quién la reconoció y cuándo."""
         if self.estado == EstadoAlerta.ATENDIDA:
             raise DomainError("La alerta ya fue atendida por otra acción correctiva")
+        if self.estado != EstadoAlerta.RECONOCIDA:
+            raise DomainError("La alerta debe reconocerse antes de marcarse como atendida")
         self.estado = EstadoAlerta.ATENDIDA
         self.atendida_en = timestamp
 
@@ -136,7 +140,9 @@ class AlertaTermica:
     def reabrir(self, reading_id: UUID, timestamp: datetime) -> None:
         """Dentro de la ventana de cooldown, un episodio recién cerrado del
         mismo dispositivo y tipo de riesgo se reabre en vez de crear una
-        alerta nueva (evita flapping de apertura/cierre inmediato)."""
+        alerta nueva (evita flapping de apertura/cierre inmediato). No cambia
+        `estado`: por eso `GenerarAlertaUseCase` nunca reabre un episodio
+        ATENDIDO (HU-21 esc. 3)."""
         self.episodio_abierto = True
         self.cerrada_en = None
         self.lectura_mas_reciente_id = reading_id

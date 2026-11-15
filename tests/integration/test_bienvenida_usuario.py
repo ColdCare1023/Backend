@@ -1,6 +1,8 @@
-"""Al crear una cuenta, el usuario recibe un correo y un SMS reales de bienvenida."""
+"""Al crear una cuenta, el usuario recibe un correo real de bienvenida.
 
-import pytest
+HU-53 (v3.3): el SMS de bienvenida se retiró. `telefono` se sigue aceptando en
+el alta por compatibilidad, pero no envía nada ni aparece en la auditoría."""
+
 from sqlalchemy import select
 
 from src.infrastructure.config import Settings
@@ -45,28 +47,21 @@ async def _bienvenidas(db_session_factory):
     return [f for f in filas if f.accion == "BIENVENIDA_NOTIFICADA"]
 
 
-async def test_crear_la_cuenta_envia_correo_y_sms_y_lo_audita(client, app, token_admin, db_session_factory, monkeypatch):
+async def test_crear_la_cuenta_envia_el_correo_y_lo_audita(client, app, token_admin, db_session_factory):
     transporte = _Transporte()
-    sms = []
+    app.dependency_overrides[get_notificador_bienvenida] = lambda: NotificadorBienvenida(_ajustes(), transporte)
 
-    class _Sms:
-        async def enviar_sms_a(self, telefono, texto, referencia):
-            sms.append((telefono, texto))
-            return True
-
-    monkeypatch.setattr(bienvenida, "obtener_notificacion_service", lambda s: _Sms())
-    ajustes = _ajustes(sms_enabled=True, sms_account_sid="AC1", sms_auth_token="t", sms_from="+15550001111")
-    app.dependency_overrides[get_notificador_bienvenida] = lambda: NotificadorBienvenida(ajustes, transporte)
-
-    assert _alta(client, token_admin).status_code == 201
+    respuesta = _alta(client, token_admin)  # con teléfono: un cliente antiguo
+    assert respuesta.status_code == 201
+    assert respuesta.json()["telefono"] == "+51••••••777"  # se conserva, enmascarado
 
     (correo,) = transporte.enviados
     assert correo.destinatario == "ana@prueba.pe" and correo.asunto == "Activa tu cuenta de ColdCare"
     assert "Clave-Segura" not in correo.cuerpo  # nunca la contraseña
     assert "https://coldcare.example" in correo.cuerpo
-    assert sms[0][0] == "+51999888777" and "Clave-Segura" not in sms[0][1]
     (fila,) = await _bienvenidas(db_session_factory)
-    assert (fila.detalle["correo"], fila.detalle["sms"]) == ("enviado", "enviado")
+    assert fila.detalle["correo"] == "enviado"
+    assert "sms" not in fila.detalle and "telefono" not in fila.detalle
     assert "ana@prueba.pe" not in str(fila.detalle) and "999888" not in str(fila.detalle)  # enmascarado
 
 
@@ -76,7 +71,7 @@ async def test_un_proveedor_caido_se_audita_como_fallido_y_la_alta_no_falla(clie
     assert _alta(client, token_admin, telefono=None).status_code == 201
 
     (fila,) = await _bienvenidas(db_session_factory)
-    assert (fila.detalle["correo"], fila.detalle["sms"]) == ("fallido", "sin_telefono")
+    assert fila.detalle["correo"] == "fallido"
 
 
 async def test_sin_proveedores_configurados_queda_registrado_como_no_configurado(client, app, token_admin, db_session_factory):
@@ -85,7 +80,7 @@ async def test_sin_proveedores_configurados_queda_registrado_como_no_configurado
     assert _alta(client, token_admin).status_code == 201
 
     (fila,) = await _bienvenidas(db_session_factory)
-    assert (fila.detalle["correo"], fila.detalle["sms"]) == ("no_configurado", "no_configurado")
+    assert fila.detalle["correo"] == "no_configurado"
 
 
 async def test_el_aviso_no_se_envia_si_el_alta_falla(client, app, token_admin):
@@ -97,11 +92,6 @@ async def test_el_aviso_no_se_envia_si_el_alta_falla(client, app, token_admin):
     assert len(transporte.enviados) == 1
 
 
-@pytest.mark.parametrize("campo", ["correo", "sms"])
-def test_el_texto_incluye_el_enlace_y_no_la_clave(campo):
-    ajustes = _ajustes()
-    texto = (
-        bienvenida.componer_correo(ajustes, "Ana", "ana@prueba.pe").cuerpo
-        if campo == "correo" else bienvenida.componer_sms(ajustes)
-    )
+def test_el_texto_incluye_el_enlace_y_no_la_clave():
+    texto = bienvenida.componer_correo(_ajustes(), "Ana", "ana@prueba.pe").cuerpo
     assert "https://coldcare.example" in texto and "contraseña:" not in texto.lower()
