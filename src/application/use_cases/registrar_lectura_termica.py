@@ -355,18 +355,16 @@ class RegistrarLecturaTermicaUseCase:
         # predicción del modelo": aunque nivel_riesgo (model_class) quede en
         # None por no_clasificable, una temperatura fuera de 2-8 °C sigue
         # marcando excursion_confirmada=True y riesgo_efectivo=critica.
+        #
+        # IA-D18 (P-8): cuando el modelo no da clase —omitida (historial o reloj
+        # insuficiente), fallida, tiempo agotado o modelo no disponible, con el
+        # preventivo activo, el legado activo o ambos—, decide la regla 2-8 °C:
+        # una lectura válida EN rango es normal. Así siempre llega a la gestión
+        # de alertas y cierra por recuperación el episodio crítico abierto
+        # (también el ATENDIDO); la excursión siguiente abre una alerta
+        # PENDIENTE nueva con su aviso. Sin temperatura válida queda None.
         lectura.excursion_confirmada = lectura.es_excursion_confirmada()
         lectura.riesgo_efectivo = lectura.calcular_riesgo_efectivo()
-        # Si la IA falló (tiempo agotado o excepción) no hay nivel de modelo, pero
-        # una lectura DENTRO de 2-8 °C sigue siendo normal: sin esto no llegaría a
-        # la gestión de alertas y un episodio abierto no se cerraría nunca.
-        if (
-            lectura.riesgo_efectivo is None
-            and lectura.estado_inferencia == ESTADO_FALLIDA
-            and lectura.temperatura_interna is not None
-            and RANGO_TERMICO_BPA.contiene(lectura.temperatura_interna)
-        ):
-            lectura.riesgo_efectivo = NivelRiesgo.NORMAL
         # HU-20: el modelo legado (datos sintéticos) en modo experimental deja su
         # clase como evidencia marcada, pero no abre alertas preventivas: sin
         # excursión, el riesgo efectivo es el de la salvaguarda determinista.
@@ -381,11 +379,12 @@ class RegistrarLecturaTermicaUseCase:
         # solo opera la regla 2-8 °C: una lectura válida EN rango es normal, aunque el modelo o la
         # salvaguarda sugieran un riesgo preventivo. Una lectura sin temperatura válida (sensor en
         # falla, nula) NO pasa a normal: conserva lo que ya tenía (None). Con el preventivo activo
-        # y aprobado, o el legado activo, manda el modelo.
+        # y aprobado, o el legado activo, manda la clase del modelo cuando la hay (sin clase, la
+        # regla ya la dejó en normal arriba).
         sin_modelo_aprobado = not reemplazada and self._ia_legado_modo != "activo"
         if (
             sin_modelo_aprobado
-            and lectura.temperatura_interna is not None
+            and lectura.tiene_temperatura_interna_valida()
             and RANGO_TERMICO_BPA.contiene(lectura.temperatura_interna)
         ):
             lectura.riesgo_efectivo = NivelRiesgo.NORMAL

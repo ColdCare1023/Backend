@@ -137,11 +137,34 @@ class LecturaTermica:
     def calcular_riesgo_efectivo(self) -> NivelRiesgo | None:
         """HU-18/21/34: una excursión confirmada por rango es EXCURSION_CRITICA
         sin importar qué haya clasificado la IA (incluso si `nivel_riesgo` es
-        None por no_clasificable). Si no hay excursión confirmada, el riesgo
-        efectivo es el que produjo el pipeline IA/salvaguarda tal cual."""
+        None por no_clasificable). Sin excursión, manda la clase del pipeline
+        IA/salvaguarda cuando la hay.
+
+        IA-D18 (P-8): si el modelo no dio clase (inferencia omitida por
+        historial o reloj, fallida, tiempo agotado, modelo no disponible; en
+        cualquier modo), decide la regla 2-8 °C: una temperatura interna válida
+        dentro del rango es NORMAL. Con None la lectura no llegaba a la gestión
+        de alertas, un episodio crítico ATENDIDO no se cerraba por recuperación
+        y la excursión siguiente quedaba escondida en él, sin alerta pendiente
+        ni aviso. Sin temperatura interna (falla de sensor) sigue siendo None;
+        el tablero distingue «Sin clasificación IA» con `estado_riesgo`."""
         if self.es_excursion_confirmada():
             return NivelRiesgo.EXCURSION_CRITICA
-        return self.nivel_riesgo
+        if self.nivel_riesgo is not None:
+            return self.nivel_riesgo
+        if self.tiene_temperatura_interna_valida():
+            return NivelRiesgo.NORMAL  # válida y no fuera de rango: en 2-8 °C
+        return None
+
+    def tiene_temperatura_interna_valida(self) -> bool:
+        """Temperatura del DS18B20 presente, numérica y finita."""
+        valor = self.temperatura_interna
+        return (
+            valor is not None
+            and isinstance(valor, Real)
+            and not isinstance(valor, bool)
+            and math.isfinite(valor)
+        )
 
     def estado_riesgo(self) -> str:
         """HU-34 esc. 4: lo que el tablero debe mostrar como riesgo.
