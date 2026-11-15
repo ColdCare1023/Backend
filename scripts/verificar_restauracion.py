@@ -27,7 +27,7 @@ from pathlib import Path
 
 from scripts.respaldo_postgres import CODIGO_FALLO, _huellas, sha256_archivo, url_libpq
 from src.infrastructure.config import normalizar_database_url
-from src.infrastructure.respaldo.huellas import comparar_huellas
+from src.infrastructure.respaldo.huellas import columnas_de_manifiesto, comparar_huellas
 
 logger = logging.getLogger("restauracion")
 
@@ -57,7 +57,10 @@ def verificar(manifiesto_ruta: Path, url_destino: str, url_produccion: str | Non
     if not integro:
         return {**informe, "coincide": False, "motivo": "el SHA-256 del respaldo no coincide con el manifiesto"}
     restaurar(archivo, url_destino)
-    comparacion = comparar_huellas(manifiesto["huellas"], asyncio.run(_huellas(normalizar_database_url(url_destino))))
+    restaurada = asyncio.run(
+        _huellas(normalizar_database_url(url_destino), columnas_de_manifiesto(manifiesto))
+    )
+    comparacion = comparar_huellas(manifiesto["huellas"], restaurada)
     return {**informe, **comparacion}
 
 

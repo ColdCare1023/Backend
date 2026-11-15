@@ -429,6 +429,9 @@ class ThermalAlertModel(Base):
     iniciada_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     temperatura_pico: Mapped[float | None] = mapped_column(Float, nullable=True)
     historica: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa_text("false"))
+    # Migración 0039 (HU-20 esc. 3): inicio de la ventana de normalización de
+    # un episodio preventivo (NULL = no se está normalizando).
+    normalizacion_desde: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = _created_at_column()
 
     lectura: Mapped[ThermalReadingModel] = relationship(back_populates="alertas", foreign_keys=[reading_id])
@@ -496,6 +499,9 @@ class AuditLogModel(Base):
     recurso: Mapped[str] = mapped_column(String(100), nullable=False)
     detalle: Mapped[dict | None] = mapped_column(JSONVariant, nullable=True)
     ip_origen: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    # HU-42/HU-50 (migración 0039): exitoso, fallido, denegado o bloqueado.
+    # NULL en filas anteriores: se deriva de la acción (no se reescriben).
+    resultado: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = _created_at_column()
 
 
@@ -708,3 +714,59 @@ class IncidenteOperativoModel(Base):
     # HU-44: lectura que disparó una excursión no verificada (temperatura, hora).
     detalle: Mapped[dict | None] = mapped_column(JSONVariant, nullable=True)
     created_at: Mapped[datetime] = _created_at_column()
+
+
+class EstadoNodoModel(Base):
+    """HU-48: último `estado_nodo` aceptado de cada nodo (una fila por nodo).
+
+    Es telemetría de salud, no evidencia: se sobrescribe en cada latido y no
+    entra en la cadena de hash (el `estado_nodo` nunca se auditó)."""
+
+    __tablename__ = "estado_nodo_dispositivo"
+
+    device_id: Mapped[str] = mapped_column(String(50), ForeignKey("devices.id"), primary_key=True)
+    recibido_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ocurrido_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    boot_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    pendientes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    capacidad: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ocupacion_pct: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    perdidas_total: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    cuarentena: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pendientes_desde: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pendientes_hasta: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ultima_sincronizacion_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    detalle: Mapped[dict | None] = mapped_column(JSONVariant, nullable=True)
+
+
+class EpisodioBufferSaturadoModel(Base):
+    """HU-48 / HU-06 esc. 3: periodo en que LittleFS estuvo lleno y el nodo
+    descartó muestras nuevas. Lo identifica la primera muestra perdida; los
+    `buffer_saturado` siguientes del mismo episodio lo actualizan."""
+
+    __tablename__ = "episodios_buffer_saturado"
+    __table_args__ = (
+        Index(
+            "uq_episodios_buffer_saturado_inicio",
+            "device_id", "desde_boot_id", "desde_seq_no",
+            unique=True,
+            postgresql_where=sa_text("desde_boot_id IS NOT NULL AND desde_seq_no IS NOT NULL"),
+            sqlite_where=sa_text("desde_boot_id IS NOT NULL AND desde_seq_no IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    device_id: Mapped[str] = mapped_column(String(50), ForeignKey("devices.id"), nullable=False, index=True)
+    desde: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hasta: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    desde_boot_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    desde_seq_no: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    hasta_boot_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    hasta_seq_no: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    causa: Mapped[str] = mapped_column(String(40), nullable=False)
+    perdidas: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    perdidas_total: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    abierto: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    registrado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    cerrado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -26,9 +26,15 @@ from src.infrastructure.database.repositories.reporte_repository import SQLAlche
 from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
+from src.infrastructure.database.repositories.usuario_repository import SQLAlchemyUsuarioRepository
 from src.interface.api.api_protection import limitar_concurrencia, limitar_por_usuario
 from src.interface.api.deps import DbSessionDep, require_roles
-from src.interface.api.mappers import alerta_to_response, lectura_to_response, trazabilidad_to_response
+from src.interface.api.mappers import (
+    alerta_to_response,
+    lectura_to_response,
+    nombre_visible,
+    trazabilidad_to_response,
+)
 from src.interface.api.schemas import ReporteBPAResponse
 
 router = APIRouter(prefix="/api/reportes", tags=["reportes"])
@@ -141,6 +147,10 @@ async def exportar_reporte_bpa_pdf(
     # dispararía eventos de emergencia y snapshots forenses como efecto
     # colateral — la detección activa vive en GET /api/trazabilidad/verificar.
     verificar_integridad = VerificarIntegridadRegistroUseCase(trazabilidad_repository)
+    usuarios = SQLAlchemyUsuarioRepository(session)
+
+    async def nombre_de_usuario(usuario_id) -> str | None:
+        return nombre_visible(await usuarios.obtener_por_id(usuario_id))
 
     use_case = ExportarReporteBPAPDFUseCase(
         SQLAlchemyLecturaRepository(session),
@@ -151,6 +161,7 @@ async def exportar_reporte_bpa_pdf(
         verificar_integridad,
         accion_repository=SQLAlchemyAccionCorrectivaRepository(session),
         device_repository=SQLAlchemyDeviceRepository(session),
+        nombre_de_usuario=nombre_de_usuario,
     )
     pdf_bytes = await use_case.execute(
         usuario_id=usuario.id,

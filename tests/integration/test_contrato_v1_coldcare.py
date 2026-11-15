@@ -163,6 +163,8 @@ async def test_reenvio_es_duplicate_y_contenido_distinto_va_a_cuarentena(entorno
         {"captured_at": None},                       # null sin unsynced
         {"campo_extra": 1},                          # extra="forbid"
         {"firmware_version": "1.0.0"},               # sin la v
+        {"schema_version": "2.0"},                   # HU-07: versión de contrato no soportada
+        {"schema_version": "9.9"},
     ],
 )
 async def test_mutaciones_invalidas_se_rechazan_con_identidad(entorno, cambios):

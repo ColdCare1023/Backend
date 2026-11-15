@@ -6,6 +6,7 @@ from pathlib import Path
 from threading import Lock
 
 import joblib
+import sklearn
 
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 from src.infrastructure.ai.features import FEATURE_NAMES, FeaturesRiesgoTermico
@@ -47,6 +48,9 @@ ESTADO_COMPLETADA = "completada"
 ESTADO_OMITIDA = "omitida"
 ESTADO_FALLIDA = "fallida"
 ESTADO_MODELO_NO_DISPONIBLE = "modelo_no_disponible"
+# HU-16: motivo_no_inferencia cuando el artefacto existe pero no superó la
+# verificación (checksum, hash de la versión activa o compatibilidad).
+MOTIVO_MODELO_RECHAZADO = "modelo_rechazado_por_verificacion"
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +122,12 @@ class RandomForestRiesgoService:
         self._lock = Lock()
         # HU-46 esc. 3: hash de la versión activa registrada en base de datos.
         self._hash_aprobado: str | None = None
+        # HU-16 esc. 2: por qué se rechazó el artefacto (checksum, hash de la
+        # versión activa, features o clases incompatibles). Mientras tenga
+        # valor, el modelo queda «no disponible» y no se vuelve a leer ni a
+        # hashear el archivo en cada lectura: solo fijar_hash_aprobado() (o
+        # un reinicio con otro artefacto) lo reevalúa.
+        self._motivo_rechazo: str | None = None
 
     def _validar_compatibilidad(self, modelo, metadata: dict | None) -> None:
         """Comprueba, al cargar, que el artefacto declara el checksum, las
@@ -181,38 +191,62 @@ class RandomForestRiesgoService:
             self._hash_aprobado = model_hash
             self._modelo = None
             self._metadata = None
+            self._motivo_rechazo = None
+
+    @property
+    def hash_aprobado(self) -> str | None:
+        """Hash de la versión activa que fijó la base de datos (None si ninguna)."""
+        return self._hash_aprobado
 
     def _validar_hash_aprobado(self) -> None:
         if self._hash_aprobado is None:
             return
         if self.hash_artefacto() != self._hash_aprobado:
-            logger.critical("El artefacto no coincide con la versión activa registrada; no se carga.")
             raise RuntimeError(
                 "El artefacto del modelo no coincide con el hash de la versión activa aprobada."
             )
 
+    def _leer_y_validar(self) -> tuple[object, dict | None]:
+        """Verifica la integridad ANTES de deserializar y la compatibilidad
+        después. Lanza RuntimeError (u otra excepción de lectura) si el
+        artefacto no puede usarse; quien llama la convierte en «no disponible»."""
+        self._validar_hash_aprobado()
+        metadata_externa = None
+        if self._metadata_path.exists():
+            metadata_externa = json.loads(self._metadata_path.read_text(encoding="utf-8"))
+            self._validar_checksum_externo(metadata_externa)
+        artefacto = joblib.load(self._model_path)
+        # Formato v2: dict {"modelo", "metadata"} (metadata embebida,
+        # con la circularidad de auto-referencia documentada en
+        # AIV-06); v3: estimador puro + model_metadata.json externo
+        # (AIV-06 corregido, sin re-serializar tras el hash); v1: el
+        # estimador a secas, sin metadata alguna.
+        if isinstance(artefacto, dict):
+            modelo = artefacto["modelo"]
+            metadata = artefacto.get("metadata")
+        else:
+            modelo = artefacto
+            metadata = metadata_externa
+        self._validar_compatibilidad(modelo, metadata)
+        return modelo, metadata
+
     def _cargar_modelo(self):
-        if self._modelo is None:
+        """Devuelve el estimador o None. Nunca lanza (HU-16 esc. 2 y 3): un
+        artefacto ausente, alterado o incompatible deja el modelo «no
+        disponible» y la ingesta sigue con la regla directa 2-8 °C. El rechazo
+        se recuerda para no volver a leer ni hashear el archivo por lectura."""
+        if self._modelo is None and self._motivo_rechazo is None:
             with self._lock:
-                if self._modelo is None and self._model_path.exists():
-                    self._validar_hash_aprobado()
-                    metadata_externa = None
-                    if self._metadata_path.exists():
-                        metadata_externa = json.loads(self._metadata_path.read_text(encoding="utf-8"))
-                        self._validar_checksum_externo(metadata_externa)
-                    artefacto = joblib.load(self._model_path)
-                    # Formato v2: dict {"modelo", "metadata"} (metadata embebida,
-                    # con la circularidad de auto-referencia documentada en
-                    # AIV-06); v3: estimador puro + model_metadata.json externo
-                    # (AIV-06 corregido, sin re-serializar tras el hash); v1: el
-                    # estimador a secas, sin metadata alguna.
-                    if isinstance(artefacto, dict):
-                        modelo = artefacto["modelo"]
-                        metadata = artefacto.get("metadata")
-                    else:
-                        modelo = artefacto
-                        metadata = metadata_externa
-                    self._validar_compatibilidad(modelo, metadata)
+                if self._modelo is None and self._motivo_rechazo is None and self._model_path.exists():
+                    try:
+                        modelo, metadata = self._leer_y_validar()
+                    except Exception as exc:
+                        self._motivo_rechazo = (str(exc) or type(exc).__name__)[:200]
+                        # HU-46 esc. 3: un artefacto que no supera la verificación
+                        # es un error crítico, no una advertencia.
+                        logger.critical("Modelo Random Forest rechazado; no se sirven clasificaciones: %s",
+                                        self._motivo_rechazo)
+                        return None
                     self._modelo = modelo
                     self._metadata = metadata
         return self._modelo
@@ -220,11 +254,8 @@ class RandomForestRiesgoService:
     def motivo_rechazo(self) -> str | None:
         """Carga el modelo y devuelve por qué se rechazó (p. ej. checksum
         inválido), o None si carga bien o no hay artefacto en este entorno."""
-        try:
-            self._cargar_modelo()
-        except Exception as exc:
-            return str(exc)[:200]
-        return None
+        self._cargar_modelo()
+        return self._motivo_rechazo
 
     @property
     def modelo_disponible(self) -> bool:
@@ -232,9 +263,27 @@ class RandomForestRiesgoService:
 
     @property
     def metadata(self) -> dict | None:
-        """Metadatos de entrenamiento embebidos en el artefacto (versión, fecha, seed)."""
+        """Metadatos de entrenamiento embebidos en el artefacto (versión, fecha, seed).
+        None si el artefacto no existe o fue rechazado."""
         self._cargar_modelo()
         return self._metadata
+
+    def estado(self) -> dict:
+        """HU-16: resumen para /health/detalle. No lanza ni expone rutas."""
+        disponible = self.modelo_disponible
+        metadata = self._metadata or {}
+        entrenado_con = metadata.get("sklearn_version")
+        return {
+            "disponible": disponible,
+            "version": metadata.get("model_version") if disponible else None,
+            "motivo_rechazo": self._motivo_rechazo,
+            "artefacto_presente": self._model_path.exists(),
+            "hash_aprobado_fijado": self._hash_aprobado is not None,
+            # Un modelo entrenado con otra versión de scikit-learn puede
+            # deserializarse con advertencias o predecir distinto.
+            "sklearn_entrenamiento": entrenado_con,
+            "sklearn_instalado": sklearn.__version__,
+        }
 
     def metricas_entrenamiento(self) -> dict | None:
         """Métricas del último entrenamiento (accuracy, precision, recall, F1 por
@@ -253,7 +302,9 @@ class RandomForestRiesgoService:
                 confianza=None,
                 origen=ORIGEN_REGLA_SALVAGUARDA,
                 estado_inferencia=ESTADO_MODELO_NO_DISPONIBLE,
-                motivo_no_inferencia="modelo_no_cargado_en_este_entorno",
+                motivo_no_inferencia=(
+                    MOTIVO_MODELO_RECHAZADO if self._motivo_rechazo else "modelo_no_cargado_en_este_entorno"
+                ),
                 nivel_regla=nivel_regla,
             )
 

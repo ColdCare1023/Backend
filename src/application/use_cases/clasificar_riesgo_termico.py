@@ -26,6 +26,24 @@ UMBRAL_DESVIACION_C = 0.5
 # de rango 2-8 °C (HU-21), que no depende de este historial.
 MINIMO_HISTORIAL_PARA_TENDENCIA = 2
 
+# HU-17 esc. 1 (sin fuga y con paridad entre entrenamiento y servicio):
+# - Solo cuentan lecturas capturadas ANTES de t (timestamp < t).
+# - El historial se lleva a una rejilla de PASO_REJILLA_MIN hacia atrás desde
+#   t (t-1, t-2, ... min), tomando en cada punto la lectura válida más cercana.
+#   train_model_v3 genera un tick por minuto; el nodo captura cada 10 s (banco)
+#   o 30 s (nominal). Sin la rejilla, la pendiente «por índice» y el conteo de
+#   desviaciones cambiaban con la cadencia (a 10 s, la pendiente salía 6 veces
+#   menor que en entrenamiento).
+# - Se mira como mucho VENTANA_HISTORIAL_MIN hacia atrás: el episodio de
+#   entrenamiento más largo (TICKS_MAX = 35 ticks) nunca ve más que esto, así
+#   que la ventana no recorta lo que vio el modelo.
+# Entrenamiento (train_model_v3) y servicio llaman a esta MISMA función.
+PASO_REJILLA_MIN = 1.0
+VENTANA_HISTORIAL_MIN = 35
+# Lecturas a pedir al repositorio para cubrir la ventana a la cadencia mínima
+# del nodo (10 s → 6 por minuto) con margen.
+LIMITE_HISTORIAL_IA = int(VENTANA_HISTORIAL_MIN * 6 + 30)
+
 TIME_QUALITY_SIN_SINCRONIZAR = "unsynced"
 
 
@@ -47,6 +65,37 @@ def _ultimo_valor_valido(historial_ordenado: list[LecturaTermica], campo: str) -
         if valor is not None and math.isfinite(valor):
             return valor
     return None
+
+
+def historial_anterior(lectura: LecturaTermica, historial: list[LecturaTermica]) -> list[LecturaTermica]:
+    """HU-17: solo lo capturado antes de t, en orden cronológico."""
+    t = _a_utc(lectura.timestamp)
+    return sorted((h for h in historial if _a_utc(h.timestamp) < t), key=lambda h: _a_utc(h.timestamp))
+
+
+def historial_en_rejilla(lectura: LecturaTermica, historial: list[LecturaTermica]) -> list[LecturaTermica]:
+    """Lecturas que representan los puntos t-1, t-2, ..., t-VENTANA min de la
+    rejilla (orden cronológico). Cada punto k toma la lectura con temperatura
+    interna válida más cercana a t-k·paso dentro de su medio paso; un punto
+    sin lectura queda vacío (no se rellena). Lo capturado a menos de medio
+    paso de t corresponde al punto de la propia lectura y no entra."""
+    t = _a_utc(lectura.timestamp)
+    paso_s = PASO_REJILLA_MIN * 60.0
+    elegidas: dict[int, tuple[tuple[float, float], LecturaTermica]] = {}
+    for h in historial:
+        if h.temperatura_interna is None or _es_invalido(h.temperatura_interna):
+            continue
+        atras_s = (t - _a_utc(h.timestamp)).total_seconds()
+        if atras_s <= 0:
+            continue  # t o posterior: sería información del futuro
+        k = int((atras_s + paso_s / 2) // paso_s)
+        if not 1 <= k <= VENTANA_HISTORIAL_MIN / PASO_REJILLA_MIN:
+            continue
+        # Más cercana al punto; ante empate, la más reciente.
+        clave = (abs(atras_s - k * paso_s), atras_s)
+        if k not in elegidas or clave < elegidas[k][0]:
+            elegidas[k] = (clave, h)
+    return [elegidas[k][1] for k in sorted(elegidas, reverse=True)]
 
 
 class ClasificarRiesgoTermicoUseCase:
@@ -78,29 +127,30 @@ class ClasificarRiesgoTermicoUseCase:
         self, lectura: LecturaTermica, historial: list[LecturaTermica]
     ) -> FeaturesRiesgoTermico:
         temperatura_interna = lectura.temperatura_interna or 0.0
+        t = _a_utc(lectura.timestamp)
 
-        historial_ordenado = sorted(historial, key=lambda lec: _a_utc(lec.timestamp))
-        temperaturas_previas = [
-            h.temperatura_interna for h in historial_ordenado if h.temperatura_interna is not None
-        ]
+        # HU-17: misma rejilla causal en entrenamiento y en servicio.
+        previas = historial_en_rejilla(lectura, historial)
+        temperaturas_previas = [h.temperatura_interna for h in previas]
 
         duracion_fuera_rango = 0.0
-        if historial_ordenado:
-            for h in reversed(historial_ordenado):
-                if h.temperatura_interna is None or RANGO_TERMICO_BPA.contiene(h.temperatura_interna):
-                    break
-                delta = (_a_utc(lectura.timestamp) - _a_utc(h.timestamp)).total_seconds() / 60.0
-                duracion_fuera_rango = max(duracion_fuera_rango, abs(delta))
+        for h in reversed(previas):
+            if RANGO_TERMICO_BPA.contiene(h.temperatura_interna):
+                break
+            delta = (t - _a_utc(h.timestamp)).total_seconds() / 60.0
+            duracion_fuera_rango = max(duracion_fuera_rango, abs(delta))
 
         frecuencia_desviaciones = sum(
             1
-            for t in temperaturas_previas
-            if not RANGO_TERMICO_BPA.contiene(t)
+            for temp in temperaturas_previas
+            if not RANGO_TERMICO_BPA.contiene(temp)
         )
 
+        # °C/min por tiempo real (no por índice): no depende de la cadencia
+        # ni de los huecos por mensajes perdidos.
         tendencia_termica = 0.0
         if len(temperaturas_previas) >= 2:
-            x = np.arange(len(temperaturas_previas), dtype=float)
+            x = np.array([(_a_utc(h.timestamp) - t).total_seconds() / 60.0 for h in previas], dtype=float)
             y = np.array(temperaturas_previas, dtype=float)
             pendiente, _ = np.polyfit(x, y, 1)
             tendencia_termica = float(pendiente)
@@ -161,7 +211,8 @@ class ClasificarRiesgoTermicoUseCase:
                 estado_inferencia=ESTADO_OMITIDA, motivo_no_inferencia="sensor_humedad_valor_no_finito",
             )
 
-        historial_ordenado = sorted(historial, key=lambda lec: _a_utc(lec.timestamp))
+        # HU-17: ni los respaldos ni las features miran lecturas de t o posteriores.
+        historial_ordenado = historial_anterior(lectura, historial)
 
         if ambiental is None:
             # Solo un sensor válido (el crítico): se aplica el fallback
@@ -193,10 +244,9 @@ class ClasificarRiesgoTermicoUseCase:
                 )
             lectura = replace(lectura, humedad_ambiental=humedad_fallback)
 
-        temperaturas_previas_validas = sum(
-            1 for h in historial_ordenado
-            if h.temperatura_interna is not None and math.isfinite(h.temperatura_interna)
-        )
+        # Puntos de la rejilla con temperatura válida (no lecturas crudas: a
+        # 10 s, dos lecturas de los últimos 20 s no son una ventana).
+        temperaturas_previas_validas = len(historial_en_rejilla(lectura, historial_ordenado))
         if temperaturas_previas_validas < MINIMO_HISTORIAL_PARA_TENDENCIA:
             # HU-17 criterio 2 (caso explícito del enunciado: "el nodo acaba
             # de conectarse y no hay suficiente historial térmico reciente
@@ -211,7 +261,7 @@ class ClasificarRiesgoTermicoUseCase:
                 motivo_no_inferencia="historial_insuficiente_para_tendencia",
             )
 
-        features = self._construir_features(lectura, historial)
+        features = self._construir_features(lectura, historial_ordenado)
         # RF-08: una lectura ya fuera de 2-8 °C no se clasifica con el modelo;
         # la regla directa decide y la IA no consume tiempo del aviso.
         if solo_regla:

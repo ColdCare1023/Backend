@@ -171,8 +171,14 @@ async def login(
         alcance = "cuenta" if bloqueo_cuenta else "ip"
         sin_auditar = LIMITE_AUDITORIA.permitir(f"login_bloqueado:{alcance}:{cuenta if bloqueo_cuenta else ip}")
         if sin_auditar is not None:
+            # HU-50 esc. 3: el bloqueo de una cuenta existente se correlaciona por actor.
+            titular = (
+                await SQLAlchemyUsuarioRepository(session).obtener_por_email(form_data.username.strip())
+                if bloqueo_cuenta
+                else None
+            )
             await auditoria.execute(
-                usuario_id=None,
+                usuario_id=titular.id if titular is not None else None,
                 accion="UMBRAL_INTENTOS_FALLIDOS_EXCEDIDO",
                 recurso="auth/login",
                 detalle={
@@ -205,11 +211,13 @@ async def login(
     except CredencialesInvalidasError as exc:
         limiter.registrar_fallo(ip)
         limiter_cuenta.registrar_fallo(cuenta)
+        # HU-50 esc. 1 y 3: con la cuenta existente, el intento queda a nombre
+        # de su usuario (filtrable por actor); la respuesta sigue siendo genérica.
         await auditoria.execute(
-            usuario_id=None,
+            usuario_id=exc.usuario_id,
             accion="LOGIN_FALLIDO",
             recurso="auth/login",
-            detalle={"email": enmascarar_email(form_data.username)},
+            detalle={"email": enmascarar_email(form_data.username), "motivo": exc.motivo},
             ip_origen=ip,
         )
         await session.commit()
@@ -437,10 +445,10 @@ async def login_google(
     except CredencialesInvalidasError as exc:
         limiter.registrar_fallo(ip)
         await auditoria.execute(
-            usuario_id=None,
+            usuario_id=exc.usuario_id,
             accion="LOGIN_GOOGLE_FALLIDO",
             recurso="auth/google",
-            detalle={"motivo": "identidad no autorizada o token inválido"},
+            detalle={"motivo": "identidad no autorizada o token inválido", "causa": exc.motivo},
             ip_origen=ip,
         )
         await session.commit()

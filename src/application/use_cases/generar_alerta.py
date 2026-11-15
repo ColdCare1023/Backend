@@ -22,6 +22,23 @@ MENSAJES_POR_RIESGO = {
 # (ver GenerarAlertaUseCase.__init__ y su construcción en los routers).
 COOLDOWN_MINUTOS = 15
 
+# HU-20 esc. 3: un episodio PREVENTIVO no se resuelve con la primera lectura
+# Normal, sino cuando el riesgo lleva esta ventana completa en Normal sin
+# interrupción (una lectura preventiva la reinicia; una crítica escala). 0 =
+# comportamiento anterior (cierre inmediato). La excursión crítica (HU-21 esc.
+# 2) sigue cerrándose con la primera lectura válida en rango.
+MINUTOS_NORMALES_RESOLVER_PREVENTIVA = 10
+
+# Transiciones del episodio que quedan en la cadena (HU-20 esc. 4).
+TRANSICION_CREACION = "creacion"
+TRANSICION_ACTUALIZACION = "actualizacion"
+TRANSICION_REAPERTURA = "reapertura"
+TRANSICION_NORMALIZACION = "normalizacion_en_curso"
+# Motivo del cierre (payload de ALERTA_CERRADA).
+CIERRE_RECUPERACION = "recuperacion"
+CIERRE_NORMALIZACION = "ventana_normalizacion_cumplida"
+CIERRE_CAMBIO_NIVEL = "cambio_de_nivel"
+
 # HU-53 (P4): una lectura que llega más de esto después de capturada viene del
 # buffer offline del nodo: el aviso debe decir que la excursión es diferida.
 RETRASO_LECTURA_DIFERIDA = timedelta(minutes=5)
@@ -64,8 +81,10 @@ class GenerarAlertaUseCase:
     no una alerta por lectura (corrige AIV-02, "tormenta de alertas").
 
     Reglas:
-    - Una lectura NORMAL cierra el episodio abierto del dispositivo (evento
-      de recuperación), sin crear ninguna fila nueva.
+    - Una lectura NORMAL cierra el episodio CRÍTICO abierto del dispositivo
+      (evento de recuperación), sin crear ninguna fila nueva. Un episodio
+      PREVENTIVO entra en normalización y se cierra cuando el riesgo lleva
+      `minutos_normales_preventiva` seguidos en Normal (HU-20 esc. 3).
     - Una lectura crítica del MISMO tipo que el episodio ya abierto solo
       actualiza ese episodio (lectura más reciente + timestamp).
     - Una lectura crítica de OTRO tipo (escalamiento/desescalamiento) cierra
@@ -84,23 +103,49 @@ class GenerarAlertaUseCase:
         self,
         alerta_repository: IAlertaRepository,
         ventana_normalizacion_minutos: int = COOLDOWN_MINUTOS,
+        minutos_normales_preventiva: int = MINUTOS_NORMALES_RESOLVER_PREVENTIVA,
     ) -> None:
         self._alerta_repository = alerta_repository
         self._ventana_normalizacion_minutos = ventana_normalizacion_minutos
+        self._minutos_normales_preventiva = minutos_normales_preventiva
         self.avisos_pendientes: list[AvisoExcursion] = []
         # Episodios que este caso de uso cerró: quien orquesta deja el evento
         # ALERTA_CERRADA en la cadena (el cierre no devuelve la alerta).
         self.cierres: list[AlertaTermica] = []
+        # Por qué se cerró cada episodio de `cierres` (clave: id de la alerta).
+        self.motivos_cierre: dict[UUID, str] = {}
+        # HU-20 esc. 4: qué le pasó al episodio con la última lectura.
+        self.transicion: str | None = None
+
+    @property
+    def minutos_normales_preventiva(self) -> int:
+        return self._minutos_normales_preventiva
 
     @staticmethod
     def _es_diferida(timestamp: datetime, received_at: datetime | None) -> bool:
         """Lectura que llegó más de RETRASO_LECTURA_DIFERIDA después de capturada."""
         return received_at is not None and _a_utc(received_at) - _a_utc(timestamp) > RETRASO_LECTURA_DIFERIDA
 
-    async def _cerrar(self, episodio: AlertaTermica, timestamp: datetime) -> None:
+    async def _cerrar(self, episodio: AlertaTermica, timestamp: datetime, motivo: str = CIERRE_RECUPERACION) -> None:
         episodio.cerrar(timestamp)
         await self._alerta_repository.actualizar(episodio)
         self.cierres.append(episodio)
+        if episodio.id is not None:
+            self.motivos_cierre[episodio.id] = motivo
+
+    async def _normalizar_o_cerrar(self, episodio: AlertaTermica, timestamp: datetime) -> None:
+        """Lectura Normal con un episodio abierto. Crítico: se cierra ya
+        (HU-21 esc. 2). Preventivo: cuenta la ventana de normalización y se
+        cierra solo al completarla (HU-20 esc. 3)."""
+        if episodio.nivel_riesgo != NivelRiesgo.RIESGO_PREVENTIVO or self._minutos_normales_preventiva <= 0:
+            await self._cerrar(episodio, timestamp)
+            return
+        if episodio.iniciar_normalizacion(timestamp):
+            await self._alerta_repository.actualizar(episodio)
+        if episodio.minutos_en_normalizacion(timestamp) >= self._minutos_normales_preventiva:
+            await self._cerrar(episodio, timestamp, CIERRE_NORMALIZACION)
+        else:
+            self.transicion = TRANSICION_NORMALIZACION
 
     def _registrar_aviso_si_es_apertura_critica(
         self,
@@ -144,11 +189,12 @@ class GenerarAlertaUseCase:
         received_at: datetime | None = None,
         time_quality: str | None = None,
     ) -> AlertaTermica | None:
+        self.transicion = None
         episodio_abierto = await self._alerta_repository.obtener_episodio_abierto(device_id)
 
         if nivel_riesgo is None or nivel_riesgo == NivelRiesgo.NORMAL:
             if episodio_abierto is not None:
-                await self._cerrar(episodio_abierto, timestamp)
+                await self._normalizar_o_cerrar(episodio_abierto, timestamp)
             return None
 
         if episodio_abierto is not None:
@@ -157,10 +203,11 @@ class GenerarAlertaUseCase:
                 episodio_abierto.actualizar_pico(temperatura_interna)
                 if self._es_diferida(timestamp, received_at):
                     episodio_abierto.historica = True
+                self.transicion = TRANSICION_ACTUALIZACION
                 return await self._alerta_repository.actualizar(episodio_abierto)
             # Escalamiento/desescalamiento: cierra el episodio anterior antes
             # de evaluar si corresponde abrir/reabrir uno del nuevo tipo.
-            await self._cerrar(episodio_abierto, timestamp)
+            await self._cerrar(episodio_abierto, timestamp, CIERRE_CAMBIO_NIVEL)
 
         ultimo_cerrado = await self._alerta_repository.obtener_ultimo_cerrado(device_id, nivel_riesgo)
         if (
@@ -179,6 +226,7 @@ class GenerarAlertaUseCase:
             self._registrar_aviso_si_es_apertura_critica(
                 reabierta, episodio_abierto, temperatura_interna, timestamp, received_at, time_quality
             )
+            self.transicion = TRANSICION_REAPERTURA
             return reabierta
 
         alerta = AlertaTermica(
@@ -198,4 +246,5 @@ class GenerarAlertaUseCase:
         self._registrar_aviso_si_es_apertura_critica(
             creada, episodio_abierto, temperatura_interna, timestamp, received_at, time_quality
         )
+        self.transicion = TRANSICION_CREACION
         return creada

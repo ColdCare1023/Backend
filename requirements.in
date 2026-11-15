@@ -23,7 +23,11 @@ cryptography>=50.0.0
 # 2020, obligaba a fijar bcrypt<4.1).
 argon2-cffi>=23.1.0
 bcrypt>=4.2.0
-scikit-learn>=1.5.0
+# HU-16: versión exacta con la que se entrenaron los artefactos de
+# src/infrastructure/ai/models (model_metadata*.json: sklearn_version). Un
+# pickle de otra versión carga con InconsistentVersionWarning y sin garantía
+# de resultados idénticos. Cambiarla exige reentrenar y registrar de nuevo.
+scikit-learn==1.9.0
 joblib>=1.4.0
 numpy>=1.26.0
 pandas>=2.2.0

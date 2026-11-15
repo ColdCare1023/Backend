@@ -4,7 +4,10 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
-from src.application.use_cases.clasificar_riesgo_termico import ClasificarRiesgoTermicoUseCase
+from src.application.use_cases.clasificar_riesgo_termico import (
+    LIMITE_HISTORIAL_IA,
+    ClasificarRiesgoTermicoUseCase,
+)
 from src.application.use_cases.generar_alerta import AvisoExcursion, GenerarAlertaUseCase
 from src.application.use_cases.incidentes_lectura import abrir_incidente, cerrar_incidente
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
@@ -89,6 +92,7 @@ class RegistrarLecturaTermicaUseCase:
         ia_prueba_retardo_s: float = 0.0,
         ia_prueba_excepcion: bool = False,
         incidente_repository: IIncidenteRepository | None = None,
+        minutos_normales_preventiva: int | None = None,
     ) -> None:
         # Incidente `sensor_fault` (outcome 3): se abre/cierra con la telemetría.
         self._incidentes = incidente_repository
@@ -107,6 +111,12 @@ class RegistrarLecturaTermicaUseCase:
             **(
                 {"ventana_normalizacion_minutos": ventana_normalizacion_alerta_minutos}
                 if ventana_normalizacion_alerta_minutos is not None
+                else {}
+            ),
+            # HU-20 esc. 3: ALERTA_PREVENTIVA_MINUTOS_NORMALES.
+            **(
+                {"minutos_normales_preventiva": minutos_normales_preventiva}
+                if minutos_normales_preventiva is not None
                 else {}
             ),
         )
@@ -238,8 +248,12 @@ class RegistrarLecturaTermicaUseCase:
         )
         if not timestamp_valido:
             if self._audit_log_repository is not None:
-                await self._audit_log_repository.registrar(
-                    usuario_id=None,
+                # HU-42 esc. 2: el rechazo también se encadena (eslabón
+                # AUDIT_LOG de la cadena de SISTEMA, como las anomalías de
+                # reloj): la lectura no existe, así que la cadena del
+                # dispositivo no recibe nada que aparente una lectura.
+                await AuditarAccionCriticaUseCase(self._audit_log_repository, self._trazabilidad).execute(
+                    usuario_id=lectura.registrado_por if lectura.es_manual else None,
                     accion="LECTURA_RECHAZADA_TIMESTAMP",
                     recurso=f"lecturas/{lectura.device_id}",
                     detalle={
@@ -280,8 +294,12 @@ class RegistrarLecturaTermicaUseCase:
         if existente is not None:
             return existente
 
+        # HU-17: solo lecturas capturadas antes de esta (una lectura reenviada
+        # desde el buffer no ve las posteriores) y suficientes para cubrir la
+        # ventana de features a la cadencia mínima del nodo.
         historial = await self._lectura_repository.listar_recientes_por_device(
-            lectura.device_id, limite=20, solo_dispositivo=not lectura.es_manual
+            lectura.device_id, limite=LIMITE_HISTORIAL_IA, solo_dispositivo=not lectura.es_manual,
+            hasta=lectura.timestamp,
         )
         # La clasificación con el modelo no corre si la regla directa ya declaró la
         # excursión (RF-08): el aviso no gasta su presupuesto de tiempo en ella.
@@ -459,11 +477,15 @@ class RegistrarLecturaTermicaUseCase:
                         ),
                         "estado_nuevo": alerta.estado.value,
                         "origen_transicion": "motor_riesgo",
+                        # creacion | actualizacion | reapertura
+                        "transicion": self._generar_alerta.transicion,
+                        "alerta_id": str(alerta.id) if alerta.id is not None else None,
                     },
                     device_id=lectura_guardada.device_id,
                 )
 
         for cerrada in self._generar_alerta.cierres:
+            preventiva = cerrada.nivel_riesgo == NivelRiesgo.RIESGO_PREVENTIVO
             await self._registrar_hash.execute(
                 tipo_evento="ALERTA_CERRADA",
                 payload={
@@ -478,9 +500,18 @@ class RegistrarLecturaTermicaUseCase:
                     "estado_anterior": "episodio_abierto",
                     "estado_nuevo": "episodio_cerrado",
                     "origen_transicion": "motor_riesgo",
+                    # HU-20 esc. 3: recuperacion | ventana_normalizacion_cumplida | cambio_de_nivel
+                    "motivo_cierre": self._generar_alerta.motivos_cierre.get(cerrada.id),
+                    "normalizacion_desde": (
+                        cerrada.normalizacion_desde.isoformat() if cerrada.normalizacion_desde else None
+                    ),
+                    "minutos_normales_requeridos": (
+                        self._generar_alerta.minutos_normales_preventiva if preventiva else None
+                    ),
                 },
                 device_id=cerrada.device_id,
             )
         self._generar_alerta.cierres.clear()
+        self._generar_alerta.motivos_cierre.clear()
         await self._evaluar_sensor_fault(lectura_guardada, historial)
         return lectura_guardada

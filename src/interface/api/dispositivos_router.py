@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 
@@ -22,6 +22,10 @@ from src.application.use_cases.gestionar_dispositivos import (
     RotarCredencialDispositivoUseCase,
 )
 from src.application.use_cases.prueba_posesion import espera_prueba, mensaje_desafio, preparar_desafio
+from src.application.use_cases.registrar_estado_nodo import (
+    BRECHAS_EN_ESTADO_OPERATIVO,
+    construir_vista_buffer,
+)
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.application.use_cases.retencion_compromiso import abrir_monitoreo_suspendido
 from src.application.use_cases.vigilar_sin_datos import umbral_sin_datos
@@ -37,15 +41,19 @@ from src.domain.value_objects.device_id import PATRON_DEVICE_ID
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.database.repositories.audit_log_repository import SQLAlchemyAuditLogRepository
 from src.infrastructure.database.repositories.device_repository import SQLAlchemyDeviceRepository
+from src.infrastructure.database.repositories.estado_nodo_repository import SQLAlchemyEstadoNodoRepository
 from src.infrastructure.database.repositories.incidente_repository import SQLAlchemyIncidenteRepository
 from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
 from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
+from src.infrastructure.database.repositories.usuario_repository import SQLAlchemyUsuarioRepository
 from src.infrastructure.mqtt.broker_admin import BrokerAdmin, obtener_broker_admin
 from src.infrastructure.mqtt.desafio_posesion import PublicadorDesafios, obtener_publicador_desafios
 from src.interface.api.deps import DbSessionDep, SettingsDep, require_roles
+from src.interface.api.mappers import buffer_to_response, nombre_visible
 from src.interface.api.schemas import (
+    BufferLittleFSResponse,
     CalibracionRequest,
     ConfirmarBrokerRequest,
     CredencialDispositivoResponse,
@@ -112,12 +120,15 @@ async def _registrar_resultado_broker(
         SQLAlchemyDeviceRepository(session), RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session))
     ).execute(device_id, operacion, resultado, motivo, actor_id)
     if pendiente:
-        await SQLAlchemyAuditLogRepository(session).registrar(
+        await AuditarAccionCriticaUseCase(
+            SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+        ).execute(
             usuario_id=actor_id,
             accion="BROKER_OPERACION_PENDIENTE",
             recurso=f"dispositivos/{device_id}/broker",
             detalle={"operacion": operacion, "motivo": motivo},
             ip_origen=ip,
+            device_id=device_id,
         )
     await session.commit()
     return pendiente
@@ -270,6 +281,8 @@ def _estado_operativo(
     n_intervalos: int,
     retencion: list[IncidenteOperativo] | None = None,
     de_lectura: list[IncidenteOperativo] | None = None,
+    umbral_puerta: int | None = None,
+    buffer: BufferLittleFSResponse | None = None,
 ) -> EstadoOperativoResponse:
     """Clasifica el nodo por su última lectura recibida (no por la IA).
 
@@ -327,7 +340,22 @@ def _estado_operativo(
         estado_operativo=estado,
         sensores=sensores,
         incidencias_operativas=incidencias,
+        umbral_puerta_abierta_segundos=umbral_puerta,
+        buffer_littlefs=buffer,
     )
+
+
+async def _buffer_littlefs(
+    device_id: str, estados_nodo: SQLAlchemyEstadoNodoRepository, lecturas: SQLAlchemyLecturaRepository
+) -> BufferLittleFSResponse | None:
+    """HU-48: último `estado_nodo` y brechas por buffer agotado del nodo."""
+    estado = await estados_nodo.obtener_estado(device_id)
+    episodios = await estados_nodo.listar_episodios(device_id, limite=BRECHAS_EN_ESTADO_OPERATIVO)
+    ultima_captura = None
+    if estado is not None and estado.pendientes and not (estado.pendientes_desde and estado.pendientes_hasta):
+        # Solo hace falta para estimar el rango de los pendientes.
+        ultima_captura = await lecturas.ultima_hora_de_captura(device_id)
+    return buffer_to_response(construir_vista_buffer(estado, episodios, ultima_captura))
 
 
 @router.get("/estado-operativo", response_model=list[EstadoOperativoResponse])
@@ -346,6 +374,7 @@ async def estado_operativo(
     ahora = datetime.now(timezone.utc)
     lecturas = SQLAlchemyLecturaRepository(session)
     incidentes = SQLAlchemyIncidenteRepository(session)
+    estados_nodo = SQLAlchemyEstadoNodoRepository(session)
     resultado = []
     for device in await SQLAlchemyDeviceRepository(session).listar():
         if not device.get("activo", True):
@@ -361,6 +390,8 @@ async def estado_operativo(
         estado = _estado_operativo(
             device, await lecturas.ultima_recibida_por_device(device["id"]), ahora,
             await incidentes.abierto(device["id"]), settings.sin_datos_n_intervalos, retencion, de_lectura,
+            umbral_puerta=settings.puerta_umbral_prolongada_segundos,
+            buffer=await _buffer_littlefs(device["id"], estados_nodo, lecturas),
         )
         if todos or estado.estado_operativo != "OPERATIVO":
             resultado.append(estado)
@@ -462,7 +493,7 @@ async def dar_de_baja(
     )
     try:
         dispositivo = await use_case.execute(
-            device_id, body.motivo, body.descripcion, body.device_id_reemplazo
+            device_id, body.motivo, body.descripcion, body.device_id_reemplazo, admin_id=admin.id
         )
     except RecursoNoEncontradoError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -548,12 +579,15 @@ async def rotar_credencial(
     retenida = pendiente and body.causa == "compromiso"
     if retenida:
         await repositorio.marcar_rotacion_por_compromiso(device_id)
-        await SQLAlchemyAuditLogRepository(session).registrar(
+        await AuditarAccionCriticaUseCase(
+            SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+        ).execute(
             usuario_id=admin.id,
             accion="TELEMETRIA_RETENIDA_ROTACION_COMPROMISO",
             recurso=f"dispositivos/{device_id}/credenciales",
             detalle={"motivo": body.motivo},
             ip_origen=ip,
+            device_id=device_id,
         )
         # El monitoreo queda suspendido: se avisa en lugar de dejar que un
         # SIN_DATOS confunda la causa.
@@ -665,12 +699,15 @@ async def confirmar_operacion_broker(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except DomainError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    await SQLAlchemyAuditLogRepository(session).registrar(
+    await AuditarAccionCriticaUseCase(
+        SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+    ).execute(
         usuario_id=admin.id,
         accion="BROKER_CONSOLA_CONFIRMADA",
         recurso=f"dispositivos/{device_id}/broker",
         detalle={"operacion": operacion, "nota": body.nota},
         ip_origen=request.client.host if request.client else None,
+        device_id=device_id,
     )
     nonce = None
     if dispositivo.get("rotacion_por_compromiso"):
@@ -712,12 +749,15 @@ async def reenviar_desafio_posesion(
             detail="El dispositivo no espera una prueba de posesión (sin rotación por compromiso o consola pendiente).",
         )
     nonce = await preparar_desafio(repositorio, device_id, credencial, datetime.now(tz=timezone.utc))
-    await SQLAlchemyAuditLogRepository(session).registrar(
+    await AuditarAccionCriticaUseCase(
+        SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+    ).execute(
         usuario_id=admin.id,
         accion="DESAFIO_POSESION_REENVIADO",
         recurso=f"dispositivos/{device_id}/credenciales",
         detalle={},
         ip_origen=request.client.host if request.client else None,
+        device_id=device_id,
     )
     await session.commit()
     await _anotar_expulsion(session, device_id, "reenvio_desafio")
@@ -748,12 +788,15 @@ async def actualizar_intervalo_reporte(
     except DomainError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     if actualizado is not None:
-        await SQLAlchemyAuditLogRepository(session).registrar(
+        await AuditarAccionCriticaUseCase(
+            SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+        ).execute(
             usuario_id=admin.id,
             accion="INTERVALO_REPORTE_ACTUALIZADO",
             recurso=f"dispositivos/{device_id}/intervalo",
             detalle={"segundos": body.segundos},
             ip_origen=request.client.host if request.client else None,
+            device_id=device_id,
         )
         await session.commit()
     return DispositivoResponse(**(actualizado or await repositorio.obtener(device_id)))
@@ -836,9 +879,21 @@ async def historial_configuracion(
     device_id: DeviceIdRuta,
     session: DbSessionDep,
     _usuario=Depends(require_roles(Rol.ADMINISTRADOR, Rol.AUDITOR)),
+    categoria: Literal["instalacion", "calibracion", "responsable", "intervalo", "sensores", "reemplazo", "otro"]
+    | None = None,
+    campo: str | None = Query(default=None, max_length=50),
+    desde: datetime | None = None,
+    hasta: datetime | None = None,
 ) -> list[HistorialConfiguracionResponse]:
     """HU-49: historial auditable de cambios de configuración/instalación/
-    calibración de un dispositivo, de solo lectura."""
+    calibración/reemplazo de un dispositivo, de solo lectura. Esc. 2: cada
+    cambio dice desde cuándo y hasta cuándo estuvo vigente, quién lo hizo
+    (`actor_nombre`) y se filtra por categoría, campo o periodo."""
     use_case = ConsultarHistorialConfiguracionUseCase(SQLAlchemyDeviceRepository(session))
-    historial = await use_case.execute(device_id)
-    return [HistorialConfiguracionResponse(**h) for h in historial]
+    historial = await use_case.execute(device_id, categoria=categoria, campo=campo, desde=desde, hasta=hasta)
+    usuarios = SQLAlchemyUsuarioRepository(session)
+    nombres = {
+        actor: nombre_visible(await usuarios.obtener_por_id(actor))
+        for actor in {h["actor_id"] for h in historial if h["actor_id"] is not None}
+    }
+    return [HistorialConfiguracionResponse(**h, actor_nombre=nombres.get(h["actor_id"])) for h in historial]

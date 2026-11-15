@@ -269,6 +269,14 @@ class LecturaResponse(BaseModel):
     # confirmada a partir de nivel_riesgo=excursion_critica por sí solo.
     excursion_confirmada: bool = False
     riesgo_efectivo: NivelRiesgo | None = None
+    # HU-34 esc. 4: estado de riesgo que el tablero debe rotular. A diferencia
+    # de `riesgo_efectivo` (que vale "normal" para cualquier lectura válida en
+    # rango), distingue la lectura sin clasificación del modelo
+    # ("sin_clasificacion_ia") y la del DS18B20 en falla ("falla_sensor"), que
+    # no deben presentarse como Normal, Riesgo Preventivo ni Excursión Crítica.
+    estado_riesgo: Literal[
+        "normal", "riesgo_preventivo", "excursion_critica", "sin_clasificacion_ia", "falla_sensor"
+    ] | None = None
     # HU-01/HU-06: calidad del reloj del nodo al capturar y, para lecturas
     # `unsynced`, la hora reconstruida (None hasta que el arranque sincroniza).
     # Para graficar, usar `timestamp_estimado` cuando exista.
@@ -280,6 +288,17 @@ class LecturaResponse(BaseModel):
     # `registrado_por`). Un reporte o una pantalla no deben mezclarlas.
     origen: str = "dispositivo"
     registrado_por: UUID | None = None
+    # HU-07 (H2): lectura de un arranque sin hora sincronizada que aún no se
+    # pudo reanclar. Su `timestamp` es la hora de LLEGADA al backend, no la de
+    # captura: la interfaz debe rotularla «sin hora» y no ubicarla en la curva.
+    sin_hora: bool = False
+    # De dónde sale la hora que se muestra: "nodo" (reloj sincronizado o
+    # fechada por el nodo), "reconstruida" (`timestamp_estimado`),
+    # "recepcion" (sin hora: llegada al backend) o "manual" (la declaró quien
+    # registró la lectura).
+    origen_hora: Literal["nodo", "reconstruida", "recepcion", "manual"] = "nodo"
+    # HU-05: instante en que el backend recibió la lectura (None en filas antiguas).
+    recibida_en: datetime | None = None
 
 
 class AlertaResponse(BaseModel):
@@ -313,6 +332,9 @@ class AlertaResponse(BaseModel):
     temperatura_pico: float | None = None
     duracion_s: float | None = None
     historica: bool = False
+    # HU-20 esc. 3: alerta preventiva abierta que ya volvió a Normal y espera
+    # completar la ventana de normalización para resolverse (None = no).
+    normalizacion_desde: datetime | None = None
 
 
 class AccionCorrectivaCreateRequest(_PeticionEstricta):
@@ -324,10 +346,20 @@ class AccionCorrectivaCreateRequest(_PeticionEstricta):
 
 
 class AccionCorrectivaRectificarRequest(_PeticionEstricta):
-    """HU-28: nueva justificación que corrige la anterior, con su motivo (P6)."""
+    """HU-28 esc. 2: corrige la decisión, la acción ejecutada (`descripcion`)
+    y/o la justificación de la acción vigente, con su motivo (P6). Lo que no se
+    envía se hereda de la versión corregida; al menos un campo debe venir."""
 
-    descripcion: str = Field(min_length=1, max_length=2000)
+    descripcion: str | None = Field(default=None, min_length=1, max_length=2000)
+    decision: str | None = Field(default=None, min_length=1, max_length=2000)
+    justificacion: str | None = Field(default=None, min_length=1, max_length=2000)
     motivo_rectificacion: str = Field(min_length=10, max_length=500)
+
+    @model_validator(mode="after")
+    def _algo_que_corregir(self) -> "AccionCorrectivaRectificarRequest":
+        if self.descripcion is None and self.decision is None and self.justificacion is None:
+            raise ValueError("Indique la decisión, la acción o la justificación que se corrige")
+        return self
 
 
 class AccionCorrectivaResponse(BaseModel):
@@ -384,13 +416,34 @@ class VerificacionIntegridadResponse(BaseModel):
     detalle_inconsistencia: DetalleInconsistenciaResponse | None = None
     registros_posteriores_afectados: int = 0
     # HU-26: la verificación no se detiene en la primera ruptura.
-    estado: Literal["integra", "ruptura_aislada", "ruptura_detectada"] = "integra"
+    # `no_concluida` (HU-26 esc. 1): hay eslabones v3 que no se pudieron
+    # verificar sin la clave HMAC y ninguna ruptura demostrada; no es íntegra.
+    estado: Literal["integra", "ruptura_aislada", "ruptura_detectada", "no_concluida"] = "integra"
     total_rupturas: int = 0
     rupturas: list[DetalleInconsistenciaResponse] = Field(default_factory=list)
     registros_posteriores_consistentes: int = 0
     integra_desde: datetime | None = None
-    # HU-26 escenario 4: alcance explícito del resultado (no es certificación DIGEMID).
+    # HU-26 escenario 4: alcance explícito del resultado (no es certificación
+    # DIGEMID), redactado según las versiones de hash verificadas.
     alcance: str
+    # Cadena verificada (None = todas) y versiones de hash encontradas en ella.
+    chain_id: str | None = None
+    versiones_hash: list[int] = Field(default_factory=list)
+    # Eslabones que no se pudieron verificar (sin clave HMAC); no son rupturas.
+    total_no_verificables: int = 0
+    no_verificables: list[DetalleInconsistenciaResponse] = Field(default_factory=list)
+    # HU-38: hash_actual completo (64 hex) del último eslabón examinado.
+    hash_final: str | None = None
+
+
+class CadenaTrazabilidadResponse(BaseModel):
+    """HU-26: cadenas existentes (una por dispositivo y SISTEMA) para elegir
+    cuál verificar."""
+
+    chain_id: str
+    es_sistema: bool
+    total_registros: int
+    ultimo_registro_en: datetime | None = None
 
 
 class EstadoCadenaResponse(BaseModel):
@@ -402,6 +455,11 @@ class EstadoRegistroSegmentoResponse(BaseModel):
     tipo_evento: str
     timestamp: datetime
     integro: bool
+    # HU-37 esc. 2: el registro alterado se rotula "corrupto" con su ID y
+    # timestamp; sin clave HMAC, "no_verificable" (no se da por íntegro).
+    estado: Literal["integro", "corrupto", "no_verificable"] = "integro"
+    tipo_discrepancia: Literal["payload_alterado", "enlace_roto", "no_verificable"] | None = None
+    chain_seq: int | None = None
 
 
 class VerificacionSegmentoResponse(BaseModel):
@@ -415,6 +473,13 @@ class VerificacionSegmentoResponse(BaseModel):
     registros_del_dispositivo: list[EstadoRegistroSegmentoResponse]
     primer_registro_inconsistente: UUID | None = None
     alcance: str
+    # Resultado global: `integra` sigue siendo el booleano de siempre.
+    estado: Literal["integra", "corrupta", "no_concluida"] = "integra"
+    total_corruptos: int = 0
+    total_no_verificables: int = 0
+    versiones_hash: list[int] = Field(default_factory=list)
+    # Hash del eslabón inmediatamente anterior al periodo (o génesis): el ancla.
+    hash_ancla: str | None = None
 
 
 class ReporteBPAResponse(BaseModel):
@@ -535,6 +600,55 @@ class IncidenteOperativoResponse(BaseModel):
     detalle: dict | None = None
 
 
+class BrechaBufferResponse(BaseModel):
+    """HU-48 esc. 2: tramo en que LittleFS estuvo lleno y el nodo no pudo
+    almacenar muestras nuevas. `desde`/`hasta` son None si el nodo no tenía
+    hora al perderlas (se identifican por `*_boot_id`/`*_seq_no`)."""
+
+    desde: datetime | None
+    hasta: datetime | None
+    # Mismo valor en los dos nombres: `muestras_perdidas` es el que ya lee el
+    # tablero; `perdidas`, el del evento del nodo.
+    muestras_perdidas: int
+    perdidas: int
+    causa: Literal["buffer_agotado"] = "buffer_agotado"
+    # Causa tal como la reporta el firmware (p. ej. "buffer_lleno").
+    causa_nodo: str
+    descripcion: str
+    abierta: bool
+    registrada_en: datetime
+    actualizada_en: datetime
+    cerrada_en: datetime | None = None
+    desde_boot_id: int | None = None
+    desde_seq_no: int | None = None
+    hasta_boot_id: int | None = None
+    hasta_seq_no: int | None = None
+
+
+class BufferLittleFSResponse(BaseModel):
+    """HU-48: datos pendientes de sincronizar en el buffer LittleFS del nodo
+    (último `estado_nodo`) y brechas por capacidad agotada.
+
+    `desde`/`hasta`: rango temporal de los pendientes (None si no hay). Si el
+    firmware no lo informa se estima (`rango_estimado = true`): desde la
+    última lectura persistida del nodo hasta su último latido."""
+
+    pendientes: int
+    limite: int
+    ocupacion_pct: int | None = None
+    desde: datetime | None = None
+    hasta: datetime | None = None
+    rango_estimado: bool = False
+    # Muestras no almacenadas desde la instalación (contador persistente del nodo).
+    perdidas: int
+    cuarentena: int | None = None
+    # Cuándo llegó el último `estado_nodo` (None si solo hay brechas).
+    reportado_en: datetime | None = None
+    # Último latido con 0 pendientes (HU-48 esc. 3).
+    ultima_sincronizacion_en: datetime | None = None
+    brechas: list[BrechaBufferResponse] = Field(default_factory=list)
+
+
 class EstadoOperativoResponse(DispositivoResumenResponse):
     """HU-33: estado operativo del nodo a partir de su última lectura recibida.
 
@@ -549,6 +663,12 @@ class EstadoOperativoResponse(DispositivoResumenResponse):
     estado_operativo: Literal["OPERATIVO", "SIN_DATOS", "FALLA_SENSOR", "MONITOREO_SUSPENDIDO"]
     sensores: list[SensorIoTResponse] = Field(default_factory=list)
     incidencias_operativas: list[IncidenteOperativoResponse] = Field(default_factory=list)
+    # HU-35: umbral configurado (PUERTA_UMBRAL_PROLONGADA_SEGUNDOS) a partir del
+    # cual una apertura en curso se destaca como prolongada. Se informa aunque
+    # aún no haya lecturas, para que el tablero no use un valor propio.
+    umbral_puerta_abierta_segundos: int | None = None
+    # HU-48: None si el nodo nunca informó su buffer (firmware sin `estado_nodo`).
+    buffer_littlefs: BufferLittleFSResponse | None = None
 
 
 class DispositivoBajaRequest(_PeticionEstricta):
@@ -593,6 +713,15 @@ class HistorialConfiguracionResponse(BaseModel):
     valor_nuevo: str | None
     actor_id: UUID | None
     created_at: datetime
+    # HU-49 esc. 2: campo sin el origen ("intervalo_reporte_segundos"), quién
+    # lo originó ("administrador"/"nodo") si consta, grupo para filtrar y
+    # desde/hasta cuándo estuvo vigente (None = sigue vigente).
+    campo_base: str | None = None
+    origen: str | None = None
+    categoria: str | None = None
+    vigente_desde: datetime | None = None
+    vigente_hasta: datetime | None = None
+    actor_nombre: str | None = None
 
 
 class RotarCredencialRequest(_PeticionEstricta):
@@ -702,10 +831,15 @@ class InferenciaLecturaResponse(BaseModel):
     confianza: float | None
     origen_clasificacion: str | None
     version_era_activa_y_aprobada_en_ese_momento: bool | None
+    # HU-47 esc. 2: versión registrada que estaba activa al clasificar (None si
+    # ninguna). Si difiere de `modelo_version`, la clase no salió del modelo aprobado.
+    version_activa_en_ese_momento: str | None = None
     # B-13: lo que el panel de evidencia muestra junto a la clase del modelo.
     estado_inferencia: str | None = None
     excursion_confirmada: bool = False
     riesgo_efectivo: NivelRiesgo | None = None
+    # HU-34 esc. 4: ver LecturaResponse.estado_riesgo.
+    estado_riesgo: str | None = None
     # HU-18 esc. 4: contexto de la inferencia.
     horizonte_min: int | None = None
     feature_schema_version: str | None = None
@@ -850,3 +984,79 @@ class AuditLogResponse(BaseModel):
     detalle: dict | None
     ip_origen: str | None
     created_at: datetime
+    # HU-42 esc. 1 / HU-50: resultado de la operación. En filas anteriores a la
+    # migración 0039 se deriva de la acción (la bitácora no se reescribe).
+    resultado: Literal["exitoso", "fallido", "denegado", "bloqueado"] = "exitoso"
+
+
+class EstadisticaMagnitudResponse(BaseModel):
+    """Mínimo, máximo y promedio de una magnitud; `n` cuenta solo lecturas con valor."""
+
+    min: float | None = None
+    max: float | None = None
+    promedio: float | None = None
+    n: int = 0
+
+
+class BucketSerieResponse(BaseModel):
+    inicio: datetime
+    fin: datetime
+    lecturas: int
+    temperatura_interna: EstadisticaMagnitudResponse
+    temperatura_ambiental: EstadisticaMagnitudResponse
+    humedad_ambiental: EstadisticaMagnitudResponse
+    # Lecturas con temperatura interna fuera de 2-8 °C y con excursión confirmada.
+    fuera_de_rango: int = 0
+    excursiones: int = 0
+
+
+class BrechaSerieResponse(BaseModel):
+    """Tramo sin telemetría mayor que el umbral de silencio del nodo."""
+
+    desde: datetime
+    hasta: datetime
+    duracion_segundos: int
+    # "buffer_agotado" si coincide con un episodio de buffer saturado (HU-48).
+    causa: Literal["sin_datos", "buffer_agotado"]
+    perdidas: int | None = None
+    # La brecha llega hasta ahora: el nodo sigue sin reportar.
+    abierta: bool = False
+
+
+class ResumenSerieResponse(BaseModel):
+    lecturas: int
+    temperatura_interna: EstadisticaMagnitudResponse
+    temperatura_ambiental: EstadisticaMagnitudResponse
+    humedad_ambiental: EstadisticaMagnitudResponse
+    fuera_de_rango: int = 0
+    excursiones: int = 0
+    por_riesgo_efectivo: dict[str, int] = Field(default_factory=dict)
+    primera_lectura_en: datetime | None = None
+    ultima_lectura_en: datetime | None = None
+
+
+class SerieTermicaResponse(BaseModel):
+    """HU-31 / HU-36: serie agregada del periodo completo, sin tope de filas.
+
+    Cada intervalo (`bucket_segundos`, alineado a la época UNIX) trae mínimo,
+    máximo, promedio y conteo; los intervalos sin lecturas no se incluyen y
+    los tramos sin datos se listan en `brechas`. `total_lecturas` es el número
+    de lecturas del nodo con hora en el periodo (la suma de `lecturas` de los
+    intervalos): la interfaz lo compara con lo que trajo `/api/lecturas` para
+    avisar de un recorte. Las lecturas sin hora (HU-07) y las manuales no
+    entran en la curva y se cuentan aparte."""
+
+    device_id: str
+    desde: datetime
+    hasta: datetime
+    bucket_segundos: int
+    bucket_automatico: bool
+    intervalo_reporte_segundos: int
+    umbral_brecha_segundos: int
+    total_lecturas: int
+    lecturas_sin_hora: int
+    lecturas_manuales: int
+    buckets: list[BucketSerieResponse]
+    brechas: list[BrechaSerieResponse]
+    brechas_truncadas: bool = False
+    resumen: ResumenSerieResponse

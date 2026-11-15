@@ -1,11 +1,15 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
 from src.application.use_cases.auditar_accion_critica import AuditarAccionCriticaUseCase
 from src.application.use_cases.clasificar_riesgo_termico import ClasificarRiesgoTermicoUseCase
 from src.application.use_cases.consultar_historial_termico import ConsultarHistorialTermicoUseCase
+from src.application.use_cases.consultar_serie_termica import (
+    ConsultarSerieTermicaUseCase,
+    RangoSerieInvalidoError,
+)
 from src.application.use_cases.registrar_lectura_termica import RegistrarLecturaTermicaUseCase
 from src.domain.entities.lectura_termica import ORIGEN_MANUAL, LecturaTermica
 from src.domain.exceptions import DispositivoNoAutorizadoError, LecturaInvalidaError
@@ -16,14 +20,15 @@ from src.infrastructure.ai.random_forest_service import get_random_forest_servic
 from src.infrastructure.database.repositories.alerta_repository import SQLAlchemyAlertaRepository
 from src.infrastructure.database.repositories.audit_log_repository import SQLAlchemyAuditLogRepository
 from src.infrastructure.database.repositories.device_repository import SQLAlchemyDeviceRepository
+from src.infrastructure.database.repositories.estado_nodo_repository import SQLAlchemyEstadoNodoRepository
 from src.infrastructure.database.repositories.lectura_repository import SQLAlchemyLecturaRepository
 from src.infrastructure.database.repositories.trazabilidad_repository import (
     SQLAlchemyTrazabilidadRepository,
 )
 from src.interface.api.api_protection import limitar_ingesta_lecturas
 from src.interface.api.deps import DbSessionDep, SettingsDep, require_roles
-from src.interface.api.mappers import lectura_to_response, tipo_sse_lectura
-from src.interface.api.schemas import LecturaIngestRequest, LecturaResponse
+from src.interface.api.mappers import lectura_to_response, serie_to_response, tipo_sse_lectura
+from src.interface.api.schemas import LecturaIngestRequest, LecturaResponse, SerieTermicaResponse
 
 router = APIRouter(prefix="/api/lecturas", tags=["lecturas"])
 
@@ -65,6 +70,7 @@ async def ingestar_lectura(
         registro_dispositivos_estricto=settings.device_registry_estricto,
         audit_log_repository=SQLAlchemyAuditLogRepository(session),
         ventana_normalizacion_alerta_minutos=settings.alerta_ventana_normalizacion_minutos,
+        minutos_normales_preventiva=settings.alerta_preventiva_minutos_normales,
         antiguedad_maxima_horas=settings.lectura_antiguedad_max_horas,
         ia_legado_modo=settings.ia_legado_modo,
         ia_timeout_s=settings.ia_inferencia_timeout_s,
@@ -154,14 +160,23 @@ async def _emitir_eventos_sse(
                 "alerta_abierta": episodio_actual.episodio_abierto,
                 "lectura_inicial_id": str(episodio_actual.lectura_inicial_id),
                 "lectura_mas_reciente_id": str(episodio_actual.lectura_mas_reciente_id),
+                "normalizacion_desde": (
+                    episodio_actual.normalizacion_desde.isoformat()
+                    if episodio_actual.normalizacion_desde else None
+                ),
             },
             "alerta" if episodio_previo is None else "episodio_actualizado",
         )
 
 
+# Cabecera con el total sin paginar de GET /api/lecturas (expuesta por CORS).
+CABECERA_TOTAL = "X-Total-Count"
+
+
 @router.get("", response_model=list[LecturaResponse])
 async def listar_historial(
     session: DbSessionDep,
+    response: Response,
     _usuario=Depends(require_roles(Rol.TECNICO, Rol.FARMACEUTICO, Rol.AUDITOR)),
     device_id: str | None = Query(default=None, pattern=PATRON_DEVICE_ID),
     nivel_riesgo: str | None = Query(default=None, description="Clase cruda del modelo (model_class)"),
@@ -185,17 +200,62 @@ async def listar_historial(
         )
     lectura_repository = SQLAlchemyLecturaRepository(session)
     use_case = ConsultarHistorialTermicoUseCase(lectura_repository)
-    lecturas = await use_case.execute(
-        device_id=device_id,
-        nivel_riesgo=nivel_riesgo,
-        estado_conectividad=estado_conectividad,
-        riesgo_efectivo=riesgo_efectivo.value if riesgo_efectivo else None,
-        desde=desde,
-        hasta=hasta,
-        limite=limite,
-        offset=offset,
-    )
+    filtros = {
+        "device_id": device_id,
+        "nivel_riesgo": nivel_riesgo,
+        "estado_conectividad": estado_conectividad,
+        "riesgo_efectivo": riesgo_efectivo.value if riesgo_efectivo else None,
+        "desde": desde,
+        "hasta": hasta,
+    }
+    lecturas = await use_case.execute(**filtros, limite=limite, offset=offset)
+    # HU-31/HU-36: total sin `limite`/`offset`, para paginar la tabla y avisar
+    # cuando lo mostrado no cubre todo el periodo. Si la página no está llena
+    # con al menos una fila (o empieza en 0), el total ya se conoce sin contar.
+    if len(lecturas) < limite and (offset == 0 or lecturas):
+        total = offset + len(lecturas)
+    else:
+        total = await lectura_repository.contar(**filtros)
+    response.headers[CABECERA_TOTAL] = str(total)
     return [lectura_to_response(lectura) for lectura in lecturas]
+
+
+@router.get("/serie", response_model=SerieTermicaResponse)
+async def serie_termica(
+    session: DbSessionDep,
+    settings: SettingsDep,
+    _usuario=Depends(require_roles(Rol.TECNICO, Rol.FARMACEUTICO, Rol.AUDITOR)),
+    device_id: str = Query(pattern=PATRON_DEVICE_ID),
+    desde: datetime | None = Query(default=None, description="Por defecto, 24 h antes de `hasta` (HU-31 esc. 4)"),
+    hasta: datetime | None = Query(default=None, description="Por defecto, ahora"),
+    bucket: str = Query(
+        default="auto",
+        pattern=r"^(auto|\d{1,6})$",
+        description="Segundos por intervalo (10 a 86400) o `auto` (a lo sumo 1500 intervalos)",
+    ),
+) -> SerieTermicaResponse:
+    """HU-31 / HU-36: serie agregada (mín., máx., promedio y conteo por
+    intervalo) del periodo COMPLETO, con brechas y resumen. Reemplaza, para la
+    curva y el resumen, a pedir miles de lecturas crudas con tope. Mismos
+    roles que GET /api/lecturas. Se declara antes de `/{lectura_id}`."""
+    device = await SQLAlchemyDeviceRepository(session).obtener(device_id)
+    if device is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dispositivo no encontrado")
+    try:
+        serie = await ConsultarSerieTermicaUseCase(
+            SQLAlchemyLecturaRepository(session), SQLAlchemyEstadoNodoRepository(session)
+        ).execute(
+            device_id,
+            desde,
+            hasta,
+            intervalo_reporte_segundos=device.get("intervalo_reporte_segundos") or 30,
+            n_intervalos_sin_datos=settings.sin_datos_n_intervalos,
+            bucket_segundos=None if bucket == "auto" else int(bucket),
+            registrado_en=device.get("created_at"),
+        )
+    except RangoSerieInvalidoError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return serie_to_response(serie)
 
 
 @router.get("/{lectura_id}", response_model=LecturaResponse)

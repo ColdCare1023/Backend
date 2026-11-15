@@ -32,6 +32,8 @@ MATRIZ_ESPERADA: dict[tuple[str, str], frozenset[str] | str] = {
     ("POST", "/api/alertas/{alerta_id}/acciones-correctivas"): frozenset({F, T}),
     ("POST", "/api/alertas/acciones-correctivas/{accion_id}/rectificar"): frozenset({F, T}),
     ("GET", "/api/auditoria"): frozenset({A, AU}),
+    # HU-42/HU-50: exportación CSV de la bitácora (auditada).
+    ("GET", "/api/auditoria/exportar"): frozenset({A, AU}),
     ("POST", "/api/auth/login"): PUBLICO,
     # Segundo paso del login con código: autorizado por el desafío y el código del correo.
     ("POST", "/api/auth/login/verificar"): PUBLICO,
@@ -82,6 +84,8 @@ MATRIZ_ESPERADA: dict[tuple[str, str], frozenset[str] | str] = {
     ("POST", "/api/lecturas"): frozenset({F, T}),
     ("GET", "/api/lecturas"): frozenset({AU, F, T}),
     ("GET", "/api/lecturas/{lectura_id}"): frozenset({AU, F, T}),
+    # HU-31/HU-36: serie agregada, mismos roles que el historial.
+    ("GET", "/api/lecturas/serie"): frozenset({AU, F, T}),
     ("GET", "/api/reportes/bpa"): frozenset({AU, F}),
     ("GET", "/api/reportes/bpa/pdf"): frozenset({A, AU, F}),
     # Autenticado por ticket SSE de un solo uso (EventSource no envía headers).
@@ -90,6 +94,8 @@ MATRIZ_ESPERADA: dict[tuple[str, str], frozenset[str] | str] = {
     ("GET", "/api/trazabilidad/verificar"): frozenset({AU, F, T}),
     ("GET", "/api/trazabilidad/verificar-dispositivo"): frozenset({AU, F, T}),
     ("GET", "/api/trazabilidad/estado"): frozenset({AU, F, T}),
+    # HU-26: cadenas existentes para elegir el chain_id a verificar.
+    ("GET", "/api/trazabilidad/cadenas"): frozenset({AU, F, T}),
     ("POST", "/api/trazabilidad/corrupcion/{registro_id}/aislar"): frozenset({A}),
     ("POST", "/api/usuarios"): frozenset({A}),
     ("GET", "/api/usuarios"): frozenset({A}),

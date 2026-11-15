@@ -1,14 +1,66 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import BigInteger, Integer, and_, case, cast, extract, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.domain.entities.lectura_termica import ORIGEN_DISPOSITIVO, LecturaTermica
+from src.domain.entities.lectura_termica import ORIGEN_DISPOSITIVO, ORIGEN_MANUAL, LecturaTermica
+from src.domain.entities.serie_termica import BucketSerie, EstadisticaMagnitud, ResumenSerie
 from src.domain.repositories.i_lectura_repository import ILecturaRepository
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
+from src.domain.value_objects.rango_termico import RANGO_TERMICO_BPA
 from src.infrastructure.database.models import DeviceModel, ThermalReadingModel
+
+_T = ThermalReadingModel
+# HU-31/HU-07: hora de captura de la lectura. `timestamp_estimado` es la hora
+# reconstruida de una lectura `unsynced` cuando su arranque sincronizó.
+_HORA_CAPTURA = func.coalesce(_T.timestamp_estimado, _T.timestamp)
+# Lectura `unsynced` sin reanclar: su `timestamp` es la hora de LLEGADA al
+# backend, no la de captura. No se puede ubicar en la curva.
+_SIN_HORA = and_(_T.time_quality == "unsynced", _T.timestamp_estimado.is_(None))
+_CON_HORA = or_(_T.time_quality.is_(None), _T.time_quality != "unsynced", _T.timestamp_estimado.is_not(None))
+_FUERA_DE_RANGO = or_(
+    _T.temperatura_interna < RANGO_TERMICO_BPA.minimo_celsius,
+    _T.temperatura_interna > RANGO_TERMICO_BPA.maximo_celsius,
+)
+
+
+def _como_utc(instante: datetime | str | None) -> datetime | None:
+    """SQLite devuelve la hora sin zona (o como texto en expresiones
+    agregadas); todas las horas se guardan en UTC."""
+    if instante is None:
+        return None
+    if isinstance(instante, str):
+        instante = datetime.fromisoformat(instante)
+    return instante if instante.tzinfo else instante.replace(tzinfo=timezone.utc)
+
+
+def _real(valor) -> float | None:
+    return None if valor is None else round(float(valor), 3)
+
+
+def _estadistica(fila, prefijo: str) -> EstadisticaMagnitud:
+    return EstadisticaMagnitud(
+        minimo=_real(getattr(fila, f"{prefijo}_min")),
+        maximo=_real(getattr(fila, f"{prefijo}_max")),
+        promedio=_real(getattr(fila, f"{prefijo}_avg")),
+        n=int(getattr(fila, f"{prefijo}_n") or 0),
+    )
+
+
+def _agregados_magnitudes() -> list:
+    columnas = []
+    for prefijo, columna in (
+        ("ti", _T.temperatura_interna), ("ta", _T.temperatura_ambiental), ("h", _T.humedad_ambiental)
+    ):
+        columnas += [
+            func.min(columna).label(f"{prefijo}_min"),
+            func.max(columna).label(f"{prefijo}_max"),
+            func.avg(columna).label(f"{prefijo}_avg"),
+            func.count(columna).label(f"{prefijo}_n"),
+        ]
+    return columnas
 
 
 def _to_entity(model: ThermalReadingModel) -> LecturaTermica:
@@ -46,9 +98,26 @@ def _to_entity(model: ThermalReadingModel) -> LecturaTermica:
     )
 
 
+def _retraso_llegada_por_defecto() -> timedelta:
+    """Mayor demora admitida entre la captura y la llegada al backend: la
+    antigüedad máxima de HU-07 (LECTURA_ANTIGUEDAD_MAX_HORAS). Una lectura del
+    nodo más vieja que eso al llegar se rechaza, así que ninguna fila con hora
+    de captura dentro de un periodo pudo LLEGAR más tarde que `hasta` + ese
+    margen."""
+    from src.infrastructure.config import Settings, get_settings
+
+    try:
+        horas = get_settings().lectura_antiguedad_max_horas
+    except Exception:  # configuración incompleta (scripts, pruebas aisladas)
+        horas = Settings.model_fields["lectura_antiguedad_max_horas"].default
+    return timedelta(hours=horas)
+
+
 class SQLAlchemyLecturaRepository(ILecturaRepository):
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, retraso_llegada_maximo: timedelta | None = None) -> None:
         self._session = session
+        # HU-31: cota superior de `timestamp` en los filtros por hora de captura.
+        self._retraso_llegada_maximo = retraso_llegada_maximo
 
     async def _asegurar_device(self, device_id: str) -> None:
         existente = await self._session.get(DeviceModel, device_id)
@@ -164,7 +233,7 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
         return _to_entity(model) if model else None
 
     async def listar_recientes_por_device(
-        self, device_id: str, limite: int, solo_dispositivo: bool = True
+        self, device_id: str, limite: int, solo_dispositivo: bool = True, hasta: datetime | None = None
     ) -> list[LecturaTermica]:
         stmt = select(ThermalReadingModel).where(ThermalReadingModel.device_id == device_id)
         if solo_dispositivo:
@@ -172,6 +241,11 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
             # la telemetría del nodo: una carga manual no debe poder sesgar la
             # clasificación de las lecturas reales.
             stmt = stmt.where(ThermalReadingModel.origen == ORIGEN_DISPOSITIVO)
+        if hasta is not None:
+            # HU-17 esc. 1: estrictamente anterior. Al reenviar el buffer
+            # LittleFS llegan lecturas viejas cuando ya hay otras más nuevas
+            # persistidas; sin este tope, sus features usarían el futuro.
+            stmt = stmt.where(ThermalReadingModel.timestamp < hasta)
         stmt = stmt.order_by(ThermalReadingModel.timestamp.desc()).limit(limite)
         result = await self._session.execute(stmt)
         return [_to_entity(m) for m in result.scalars().all()]
@@ -268,3 +342,243 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
         result = await self._session.execute(stmt)
         model = result.scalar_one_or_none()
         return _to_entity(model) if model else None
+
+    async def estadisticas_periodo(
+        self,
+        device_id: str | None,
+        desde: datetime | None,
+        hasta: datetime | None,
+        minimo_celsius: float,
+        maximo_celsius: float,
+    ) -> dict:
+        """HU-38: agregados SQL sobre el periodo completo, sin el tope del
+        detalle. El periodo se mide con la HORA DE CAPTURA, el mismo criterio
+        que la serie (HU-31): `timestamp_estimado` si el backend la reconstruyó,
+        `timestamp` si no. Las lecturas `unsynced` sin reanclar no tienen hora
+        de captura (su `timestamp` es la llegada): no entran en las cifras y se
+        cuentan aparte en `lecturas_sin_hora`. Las manuales sí cuentan: su hora
+        es la que declaró la persona."""
+        en_periodo = self._filtro_captura(device_id, desde, hasta)
+        temperatura = ThermalReadingModel.temperatura_interna
+        en_rango = func.coalesce(
+            func.sum(case((and_(temperatura >= minimo_celsius, temperatura <= maximo_celsius), 1), else_=0)), 0
+        )
+        total, con_temperatura, conformes, minima, maxima, promedio = (
+            await self._session.execute(
+                select(
+                    func.count(ThermalReadingModel.id),
+                    func.count(temperatura),
+                    en_rango,
+                    func.min(temperatura),
+                    func.max(temperatura),
+                    func.avg(temperatura),
+                ).where(*en_periodo, _CON_HORA)
+            )
+        ).one()
+        # Mismo criterio que el detalle: riesgo efectivo, o la clase del modelo
+        # en lecturas antiguas que no lo tienen calculado.
+        nivel = func.coalesce(
+            ThermalReadingModel.riesgo_efectivo, ThermalReadingModel.nivel_riesgo, "sin_clasificar"
+        )
+        consulta_niveles = (
+            select(nivel, func.count(ThermalReadingModel.id)).where(*en_periodo, _CON_HORA).group_by(nivel)
+        )
+        por_nivel = {
+            str(clave): int(cantidad) for clave, cantidad in (await self._session.execute(consulta_niveles)).all()
+        }
+        # Sin hora de captura: `_HORA_CAPTURA` es su `timestamp` (la llegada).
+        sin_hora = (
+            await self._session.execute(select(func.count(ThermalReadingModel.id)).where(*en_periodo, _SIN_HORA))
+        ).scalar_one()
+        return {
+            "total_lecturas": int(total),
+            "lecturas_con_temperatura": int(con_temperatura),
+            "lecturas_en_rango": int(conformes),
+            "temp_minima": minima,
+            "temp_maxima": maxima,
+            "temp_promedio": float(promedio) if promedio is not None else None,
+            "por_nivel": por_nivel,
+            "lecturas_sin_hora": int(sin_hora or 0),
+        }
+
+    # ── HU-31 / HU-36: serie agregada ─────────────────────────────────────
+
+    def _dialecto(self) -> str:
+        return self._session.get_bind().dialect.name
+
+    def _epoca(self, expresion):
+        """Segundos UNIX de una hora. En SQLite la hora se guarda como texto
+        UTC sin zona; `strftime('%s')` la convierte."""
+        if self._dialecto() == "postgresql":
+            return extract("epoch", expresion)
+        return cast(func.strftime("%s", expresion), Integer)
+
+    def _indice_bucket(self, bucket_segundos: int):
+        """Número de intervalo de la lectura: piso(época / bucket). En
+        PostgreSQL la época es numérica y CAST redondea, de ahí el `floor`; en
+        SQLite es entera y la división entera ya es el piso (no depende de que
+        SQLite tenga las funciones matemáticas compiladas)."""
+        epoca = self._epoca(_HORA_CAPTURA)
+        if self._dialecto() == "postgresql":
+            return cast(func.floor(epoca / bucket_segundos), BigInteger)
+        return epoca // bucket_segundos
+
+    def _retraso_llegada(self) -> timedelta:
+        if self._retraso_llegada_maximo is None:
+            self._retraso_llegada_maximo = _retraso_llegada_por_defecto()
+        return self._retraso_llegada_maximo
+
+    def _filtro_captura(self, device_id: str | None, desde: datetime | None, hasta: datetime | None) -> list:
+        """Filtro por hora de captura con ambas cotas sobre `timestamp`, que
+        usan el índice (device_id, timestamp):
+
+        - `timestamp >= desde`: la hora reconstruida nunca es posterior a la de
+          llegada (`timestamp` de una `unsynced`).
+        - `timestamp <= hasta + retraso`: una lectura capturada dentro del
+          periodo llega, como mucho, la antigüedad máxima de HU-07 después
+          (`LECTURA_ANTIGUEDAD_MAX_HORAS`, 168 h). Sin esta cota, la serie de
+          un periodo antiguo recorría todas las filas hasta hoy (HU-31).
+        """
+        filtros = []
+        if device_id:
+            filtros.append(_T.device_id == device_id)
+        if desde:
+            filtros += [_T.timestamp >= desde, _HORA_CAPTURA >= desde]
+        if hasta:
+            filtros += [_T.timestamp <= hasta + self._retraso_llegada(), _HORA_CAPTURA <= hasta]
+        return filtros
+
+    def _en_periodo(self, device_id: str, desde: datetime, hasta: datetime) -> list:
+        return self._filtro_captura(device_id, desde, hasta)
+
+    async def contar(
+        self,
+        device_id: str | None = None,
+        nivel_riesgo: str | None = None,
+        estado_conectividad: str | None = None,
+        riesgo_efectivo: str | None = None,
+        desde: datetime | None = None,
+        hasta: datetime | None = None,
+    ) -> int:
+        stmt = select(func.count()).select_from(_T)
+        if device_id:
+            stmt = stmt.where(_T.device_id == device_id)
+        if nivel_riesgo:
+            stmt = stmt.where(_T.nivel_riesgo == nivel_riesgo)
+        if estado_conectividad:
+            stmt = stmt.where(_T.estado_conectividad == estado_conectividad)
+        if riesgo_efectivo:
+            stmt = stmt.where(_T.riesgo_efectivo == riesgo_efectivo)
+        if desde:
+            stmt = stmt.where(_T.timestamp >= desde)
+        if hasta:
+            stmt = stmt.where(_T.timestamp <= hasta)
+        return int((await self._session.execute(stmt)).scalar_one())
+
+    async def agregar_serie(
+        self, device_id: str, desde: datetime, hasta: datetime, bucket_segundos: int
+    ) -> list[BucketSerie]:
+        indice = self._indice_bucket(bucket_segundos).label("indice")
+        stmt = (
+            select(
+                indice,
+                func.count().label("lecturas"),
+                *_agregados_magnitudes(),
+                func.sum(case((_FUERA_DE_RANGO, 1), else_=0)).label("fuera"),
+                func.sum(case((_T.excursion_confirmada.is_(True), 1), else_=0)).label("excursiones"),
+            )
+            .where(*self._en_periodo(device_id, desde, hasta), _T.origen == ORIGEN_DISPOSITIVO, _CON_HORA)
+            .group_by(indice)
+            .order_by(indice)
+        )
+        buckets = []
+        for fila in (await self._session.execute(stmt)).all():
+            inicio = datetime.fromtimestamp(int(fila.indice) * bucket_segundos, tz=timezone.utc)
+            buckets.append(BucketSerie(
+                inicio=inicio,
+                fin=inicio + timedelta(seconds=bucket_segundos),
+                lecturas=int(fila.lecturas),
+                temperatura_interna=_estadistica(fila, "ti"),
+                temperatura_ambiental=_estadistica(fila, "ta"),
+                humedad_ambiental=_estadistica(fila, "h"),
+                fuera_de_rango=int(fila.fuera or 0),
+                excursiones=int(fila.excursiones or 0),
+            ))
+        return buckets
+
+    async def resumir_periodo(self, device_id: str, desde: datetime, hasta: datetime) -> ResumenSerie:
+        de_la_serie = and_(_T.origen == ORIGEN_DISPOSITIVO, _CON_HORA)
+        en_periodo = self._en_periodo(device_id, desde, hasta)
+        stmt = select(
+            func.count().label("lecturas"),
+            *_agregados_magnitudes(),
+            func.sum(case((_FUERA_DE_RANGO, 1), else_=0)).label("fuera"),
+            func.sum(case((_T.excursion_confirmada.is_(True), 1), else_=0)).label("excursiones"),
+            func.min(_HORA_CAPTURA).label("primera"),
+            func.max(_HORA_CAPTURA).label("ultima"),
+        ).where(*en_periodo, de_la_serie)
+        fila = (await self._session.execute(stmt)).one()
+        # Sin hora y manuales: su hora (llegada o la declarada por la persona)
+        # es `timestamp`, que aquí coincide con la hora de captura del filtro.
+        apartadas = (
+            await self._session.execute(
+                select(
+                    func.sum(case((and_(_T.origen == ORIGEN_DISPOSITIVO, _SIN_HORA), 1), else_=0)),
+                    func.sum(case((_T.origen == ORIGEN_MANUAL, 1), else_=0)),
+                ).where(*en_periodo)
+            )
+        ).one()
+        por_riesgo = {
+            (riesgo or "sin_clasificar"): int(n)
+            for riesgo, n in (
+                await self._session.execute(
+                    select(_T.riesgo_efectivo, func.count()).where(*en_periodo, de_la_serie).group_by(
+                        _T.riesgo_efectivo
+                    )
+                )
+            ).all()
+        }
+        return ResumenSerie(
+            lecturas=int(fila.lecturas or 0),
+            temperatura_interna=_estadistica(fila, "ti"),
+            temperatura_ambiental=_estadistica(fila, "ta"),
+            humedad_ambiental=_estadistica(fila, "h"),
+            fuera_de_rango=int(fila.fuera or 0),
+            excursiones=int(fila.excursiones or 0),
+            primera_lectura_en=_como_utc(fila.primera),
+            ultima_lectura_en=_como_utc(fila.ultima),
+            lecturas_sin_hora=int(apartadas[0] or 0),
+            lecturas_manuales=int(apartadas[1] or 0),
+            por_riesgo_efectivo=por_riesgo,
+        )
+
+    async def detectar_huecos(
+        self, device_id: str, desde: datetime, hasta: datetime, umbral_segundos: int, limite: int
+    ) -> list[tuple[datetime, datetime]]:
+        hora = _HORA_CAPTURA.label("hora")
+        epoca = self._epoca(_HORA_CAPTURA)
+        consecutivas = (
+            select(
+                hora,
+                func.lag(_HORA_CAPTURA).over(order_by=_HORA_CAPTURA).label("anterior"),
+                (epoca - func.lag(epoca).over(order_by=_HORA_CAPTURA)).label("salto"),
+            )
+            .where(*self._en_periodo(device_id, desde, hasta), _T.origen == ORIGEN_DISPOSITIVO, _CON_HORA)
+            .subquery()
+        )
+        stmt = (
+            select(consecutivas.c.anterior, consecutivas.c.hora)
+            .where(consecutivas.c.salto > umbral_segundos)
+            .order_by(consecutivas.c.hora)
+            .limit(limite)
+        )
+        return [
+            (_como_utc(anterior), _como_utc(siguiente))
+            for anterior, siguiente in (await self._session.execute(stmt)).all()
+        ]
+
+    async def ultima_hora_de_captura(self, device_id: str) -> datetime | None:
+        stmt = select(func.max(_HORA_CAPTURA)).where(
+            _T.device_id == device_id, _T.origen == ORIGEN_DISPOSITIVO, _CON_HORA
+        )
+        return _como_utc((await self._session.execute(stmt)).scalar_one_or_none())

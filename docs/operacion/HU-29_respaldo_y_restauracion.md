@@ -14,6 +14,11 @@ orden de clave primaria (`src/infrastructure/respaldo/huellas.py`). La prueba de
 restauración recalcula lo mismo en la base restaurada: si una sola fila
 difiere, la huella difiere.
 
+En `audit_logs` la huella incluye `resultado` (exitoso, fallido, denegado o
+bloqueado). El manifiesto declara en `columnas` las columnas con las que se
+calculó; un manifiesto anterior, sin `columnas`, se verifica con las del
+formato previo (sin `resultado`), así que sigue siendo verificable.
+
 ## Railway
 
 1. Servicio adicional **cron** con la misma imagen del backend (el Dockerfile ya

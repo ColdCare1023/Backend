@@ -1,3 +1,4 @@
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from functools import partial
 from uuid import UUID
@@ -72,7 +73,54 @@ def _calcular_estadisticas(lecturas: list[LecturaTermica]) -> dict:
         "temp_minima": min(temperaturas) if temperaturas else None,
         "temp_maxima": max(temperaturas) if temperaturas else None,
         "temp_promedio": (sum(temperaturas) / len(temperaturas)) if temperaturas else None,
+        # Calculadas sobre las lecturas cargadas (pueden estar recortadas).
+        "fuente": "muestra",
     }
+
+
+def _estadisticas_de_agregados(agregados: dict) -> dict:
+    """HU-38: mismas cifras que `_calcular_estadisticas`, pero desde los
+    agregados SQL del periodo COMPLETO: no dependen del tope del detalle."""
+    con_temperatura = agregados["lecturas_con_temperatura"]
+    por_nivel = agregados["por_nivel"]
+    return {
+        "total_lecturas": agregados["total_lecturas"],
+        "lecturas_con_temperatura": con_temperatura,
+        "por_nivel": por_nivel,
+        "alertas_criticas": por_nivel.get("excursion_critica", 0),
+        "porcentaje_en_rango": (agregados["lecturas_en_rango"] / con_temperatura * 100) if con_temperatura else 0.0,
+        "temp_minima": agregados["temp_minima"],
+        "temp_maxima": agregados["temp_maxima"],
+        "temp_promedio": agregados["temp_promedio"],
+        # Lecturas `unsynced` sin reanclar: sin hora de captura, fuera de las cifras.
+        "lecturas_sin_hora": agregados.get("lecturas_sin_hora", 0),
+        "fuente": "periodo_completo",
+    }
+
+
+def _valor_en(campo: str, actual: object, historial: list[dict], instante: datetime) -> object:
+    """HU-51 esc. 4: valor de `campo` vigente en `instante`, reconstruido del
+    historial de configuración: si hubo cambios posteriores, el valor anterior
+    del primero de ellos; si no, el valor actual."""
+    posteriores = [h for h in historial if h["campo"] == campo and _como_utc(h["created_at"]) > instante]
+    if not posteriores:
+        return actual
+    return min(posteriores, key=lambda h: _como_utc(h["created_at"]))["valor_anterior"]
+
+
+def _texto(valor: object) -> str | None:
+    if valor is None:
+        return None
+    return valor.isoformat() if hasattr(valor, "isoformat") else str(valor)
+
+
+def _solapa(payload: dict, desde: datetime, hasta: datetime) -> bool:
+    try:
+        inicio = _como_utc(datetime.fromisoformat(str(payload.get("desde"))))
+        fin = _como_utc(datetime.fromisoformat(str(payload.get("hasta"))))
+    except ValueError:
+        return False
+    return inicio <= hasta and fin >= desde
 
 
 class ExportarReporteBPAPDFUseCase:
@@ -94,6 +142,7 @@ class ExportarReporteBPAPDFUseCase:
         generador: GeneradorReporteBPAPDF | None = None,
         accion_repository: IAccionCorrectivaRepository | None = None,
         device_repository: IDeviceRepository | None = None,
+        nombre_de_usuario: Callable[[UUID], Awaitable[str | None]] | None = None,
     ) -> None:
         self._lectura_repository = lectura_repository
         self._alerta_repository = alerta_repository
@@ -104,6 +153,8 @@ class ExportarReporteBPAPDFUseCase:
         self._generador = generador or GeneradorReporteBPAPDF()
         self._accion_repository = accion_repository
         self._device_repository = device_repository
+        # HU-51: nombre visible de quien instaló (lo resuelve la interfaz).
+        self._nombre_de_usuario = nombre_de_usuario
 
     async def _acciones_de(self, alertas: list) -> list[dict]:
         if self._accion_repository is None or not alertas:
@@ -125,7 +176,10 @@ class ExportarReporteBPAPDFUseCase:
         ]
 
     async def _equipos_del_reporte(self, device_id: str | None, desde: datetime, hasta: datetime) -> list[dict]:
-        """HU-51 esc. 4: ubicación vigente y sus cambios durante el periodo."""
+        """HU-51 esc. 4: ubicación e instalación VIGENTES DURANTE el periodo,
+        reconstruidas del historial de configuración (no la ficha actual, que
+        pudo cambiar después), los cambios dentro del periodo y la referencia
+        al historial completo."""
         if self._device_repository is None:
             return []
         if device_id:
@@ -133,6 +187,7 @@ class ExportarReporteBPAPDFUseCase:
             dispositivos = [uno] if uno else []
         else:
             dispositivos = await self._device_repository.listar()
+        desde, hasta = _como_utc(desde), _como_utc(hasta)
         equipos = []
         for d in dispositivos:
             historial = await self._device_repository.listar_historial_configuracion(d["id"])
@@ -140,8 +195,84 @@ class ExportarReporteBPAPDFUseCase:
                 h for h in historial
                 if h["campo"] == "ubicacion" and desde <= _como_utc(h["created_at"]) <= hasta
             ]
-            equipos.append({**d, "cambios_ubicacion": cambios})
+            instalacion = ("ubicacion", "fecha_instalacion", "observaciones_instalacion")
+            posteriores = [
+                h for h in historial if h["campo"] in instalacion and _como_utc(h["created_at"]) > hasta
+            ]
+            if posteriores:
+                # Quien instaló lo vigente al cierre: autor del último cambio de
+                # instalación hasta esa fecha (la ficha guarda solo el último).
+                previos = [
+                    h for h in historial if h["campo"] in instalacion and _como_utc(h["created_at"]) <= hasta
+                ]
+                instalador = max(previos, key=lambda h: _como_utc(h["created_at"]))["actor_id"] if previos else None
+            else:
+                instalador = d.get("instalado_por")
+            nombre_instalador = (
+                await self._nombre_de_usuario(instalador) if instalador and self._nombre_de_usuario else None
+            )
+            equipos.append(
+                {
+                    **d,
+                    "ubicacion_periodo": _valor_en("ubicacion", d.get("ubicacion"), historial, hasta),
+                    "ubicacion_inicio_periodo": _valor_en("ubicacion", d.get("ubicacion"), historial, desde),
+                    "fecha_instalacion_periodo": _valor_en(
+                        "fecha_instalacion", _texto(d.get("fecha_instalacion")), historial, hasta
+                    ),
+                    "observaciones_instalacion_periodo": _valor_en(
+                        "observaciones_instalacion", d.get("observaciones_instalacion"), historial, hasta
+                    ),
+                    "instalado_por_periodo": str(instalador) if instalador else None,
+                    "instalado_por_nombre": nombre_instalador,
+                    "cambios_ubicacion": cambios,
+                    "cambios_historial_total": len(historial),
+                    "cambios_posteriores_al_periodo": len(posteriores),
+                }
+            )
         return equipos
+
+    async def _estadisticas(
+        self, device_id: str | None, desde: datetime, hasta: datetime, lecturas: list[LecturaTermica], alertas: list
+    ) -> dict:
+        """HU-38 esc. 3: resumen y excursiones de TODO el periodo con agregados
+        SQL; el tope de 10 000 filas solo limita las tablas de detalle."""
+        agregados = await self._lectura_repository.estadisticas_periodo(
+            device_id, desde, hasta, TEMP_MIN_RANGO, TEMP_MAX_RANGO
+        )
+        estadisticas = (
+            _estadisticas_de_agregados(agregados) if agregados is not None else _calcular_estadisticas(lecturas)
+        )
+        episodios = await self._alerta_repository.contar_por_nivel(device_id, desde, hasta)
+        if episodios is None:
+            episodios = {}
+            for alerta in alertas:
+                if alerta.nivel_riesgo is not None:
+                    episodios[alerta.nivel_riesgo.value] = episodios.get(alerta.nivel_riesgo.value, 0) + 1
+        estadisticas["episodios_por_nivel"] = episodios
+        estadisticas["episodios_criticos"] = episodios.get("excursion_critica", 0)
+        return estadisticas
+
+    async def _ultima_verificacion(self, device_id: str | None, desde: datetime, hasta: datetime) -> dict | None:
+        """HU-38 esc. 2: la verificación HU-37 más reciente cuyo periodo
+        verificado se solapa con el del reporte (del dispositivo, si lo hay)."""
+        eventos = await self._trazabilidad_repository.listar(
+            tipo_evento="VERIFICACION_INTEGRIDAD", device_id=device_id, limite=200
+        )
+        desde, hasta = _como_utc(desde), _como_utc(hasta)
+        for evento in eventos:  # más reciente primero
+            if not _solapa(evento.payload, desde, hasta):
+                continue
+            payload = evento.payload
+            return {
+                "realizada_en": _como_utc(evento.timestamp).strftime("%Y-%m-%d %H:%M UTC"),
+                "device_id": payload.get("device_id"),
+                "desde": payload.get("desde"),
+                "hasta": payload.get("hasta"),
+                "resultado": payload.get("resultado") or ("integra" if payload.get("integra") else "corrupta"),
+                "total_bloques_verificados": payload.get("total_bloques_verificados"),
+                "hash_eslabon": evento.hash_actual,
+            }
+        return None
 
     async def execute(
         self,
@@ -177,6 +308,20 @@ class ExportarReporteBPAPDFUseCase:
             fecha_desde.date().isoformat(), fecha_hasta.date().isoformat()
         )
 
+        # HU-38 esc. 3: si el listado de alertas se recortó, las excursiones
+        # críticas del periodo se traen todas igualmente.
+        if alertas_truncadas:
+            vistas = {a.id for a in alertas}
+            criticas = await self._alerta_repository.listar_por_nivel(
+                "excursion_critica", device_id, fecha_desde, fecha_hasta
+            )
+            alertas = sorted(
+                [*alertas, *(a for a in criticas if a.id not in vistas)],
+                key=lambda a: _como_utc(a.created_at) if a.created_at else datetime.min.replace(tzinfo=timezone.utc),
+                reverse=True,
+            )
+        estadisticas = await self._estadisticas(device_id, fecha_desde, fecha_hasta, lecturas, alertas)
+
         # HU-38 esc. 1: acciones de las alertas del periodo y datos del equipo.
         acciones = await self._acciones_de(alertas)
         equipos = await self._equipos_del_reporte(device_id, fecha_desde, fecha_hasta)
@@ -197,7 +342,12 @@ class ExportarReporteBPAPDFUseCase:
             ),
             "alcance": resultado.alcance,
             "verificado_en": datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-            "digest_cadena": (resultado.hash_final or "")[:16] + "…" if resultado.hash_final else "N/A",
+            # HU-38 esc. 2: referencia reproducible COMPLETA (64 hex), no un prefijo.
+            "digest_cadena": resultado.hash_final or "N/A",
+            "total_no_verificables": resultado.total_no_verificables,
+            "versiones_hash": list(resultado.versiones_hash),
+            "chain_id": device_id,
+            "ultima_verificacion": await self._ultima_verificacion(device_id, fecha_desde, fecha_hasta),
         }
 
         # B-8: ReportLab es síncrono y tarda en reportes largos; se genera en un
@@ -251,7 +401,7 @@ class ExportarReporteBPAPDFUseCase:
                     }
                     for c in checklists
                 ],
-                estadisticas=_calcular_estadisticas(lecturas),
+                estadisticas=estadisticas,
                 veredicto_integridad=veredicto,
                 fecha_desde=fecha_desde.date().isoformat(),
                 fecha_hasta=fecha_hasta.date().isoformat(),

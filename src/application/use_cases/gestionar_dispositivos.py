@@ -1,3 +1,4 @@
+import re
 import secrets
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
@@ -19,6 +20,8 @@ def _contacto_minimizado(email: str | None, telefono: str | None) -> str:
     return f"{correo} / {fono}"
 
 _MOTIVOS_BAJA = frozenset({"falla_hardware", "mantenimiento", "reemplazo", "fin_de_servicio"})
+# HU-49: origen de las filas del historial que registran la configuración inicial.
+ORIGEN_ALTA = "alta"
 
 class DarDeBajaDispositivoUseCase:
     """HU-43: retira un ESP32/sensor de operación sin corromper la trazabilidad
@@ -40,7 +43,9 @@ class DarDeBajaDispositivoUseCase:
         motivo: str,
         descripcion: str | None,
         device_id_reemplazo: str | None,
+        admin_id: UUID | None = None,
     ) -> dict:
+        """admin_id (HU-49 esc. 1): actor de la baja y del reemplazo."""
         if motivo not in _MOTIVOS_BAJA:
             raise DomainError(f"Motivo de baja inválido: {motivo}")
         dispositivo = await self._device_repository.obtener(device_id)
@@ -67,15 +72,24 @@ class DarDeBajaDispositivoUseCase:
         await self._device_repository.revocar_credencial(device_id, cuando)
         actualizado["mqtt_token_activo"] = False
 
+        # HU-49 esc. 1: la baja y el reemplazo constan en el historial de
+        # configuración con su actor (antes el reemplazo quedaba sin autor).
+        await self._device_repository.registrar_evento_config(
+            device_id, campo="baja", valor_anterior="activo", valor_nuevo=motivo, actor_id=admin_id,
+        )
         if device_id_reemplazo:
             # Cadena de custodia virtual: el nuevo device_id queda vinculado al
             # anterior para lectura de histórico; inicia su propia cadena hash
             # de lecturas independiente (no se copian ni migran registros).
             await self._device_repository.vincular_reemplazo(device_id_reemplazo, device_id)
-            # HU-49 esc. 1: el reemplazo también consta en el historial de configuración.
             await self._device_repository.registrar_evento_config(
                 device_id, campo="reemplazado_por", valor_anterior=None,
-                valor_nuevo=device_id_reemplazo, actor_id=None,
+                valor_nuevo=device_id_reemplazo, actor_id=admin_id,
+            )
+            # El historial del equipo nuevo dice desde cuándo reemplaza al anterior.
+            await self._device_repository.registrar_evento_config(
+                device_id_reemplazo, campo="reemplaza_a", valor_anterior=None,
+                valor_nuevo=device_id, actor_id=admin_id,
             )
 
         await self._registrar_hash.execute(
@@ -85,8 +99,10 @@ class DarDeBajaDispositivoUseCase:
                 "motivo_baja": motivo,
                 "device_id_reemplazo_si_existe": device_id_reemplazo,
                 "timestamp_baja": cuando.isoformat(),
+                "admin_id": str(admin_id) if admin_id else None,
             },
             device_id=device_id,
+            usuario_id=admin_id,
         )
         return actualizado
 
@@ -143,18 +159,22 @@ class RegistrarCalibracionUseCase:
             fecha_proxima = _sumar_meses(fecha_calibracion, meses_vigencia)
         else:
             raise DomainError("Indique la fecha de vencimiento del certificado")
-        anterior = dispositivo.get("fecha_ultima_calibracion")
         actualizado = await self._device_repository.registrar_calibracion(
             device_id, fecha_calibracion, numero_certificado, fecha_proxima, observaciones, margen_aviso_dias
         )
-        # HU-49: historial de configuración también cubre calibración.
-        await self._device_repository.registrar_evento_config(
-            device_id,
-            campo="fecha_ultima_calibracion",
-            valor_anterior=anterior.isoformat() if anterior else None,
-            valor_nuevo=fecha_calibracion.isoformat(),
-            actor_id=usuario_id,
-        )
+        # HU-49: historial de configuración también cubre calibración: fecha,
+        # certificado, vencimiento y margen de aviso (cada uno desde cuándo rige).
+        for campo, nuevo in (
+            ("fecha_ultima_calibracion", fecha_calibracion.isoformat()),
+            ("numero_certificado_calibracion", numero_certificado),
+            ("fecha_proxima_calibracion", fecha_proxima.isoformat()),
+            ("margen_aviso_calibracion_dias", str(margen_aviso_dias)),
+        ):
+            previo = _como_texto(dispositivo.get(campo))
+            if campo == "fecha_ultima_calibracion" or previo != nuevo:
+                await self._device_repository.registrar_evento_config(
+                    device_id, campo=campo, valor_anterior=previo, valor_nuevo=nuevo, actor_id=usuario_id
+                )
 
         await self._registrar_hash.execute(
             tipo_evento="CALIBRACION_SENSORES",
@@ -297,6 +317,23 @@ class RegistrarAltaDispositivoUseCase:
         creado = await self._device_repository.crear(
             device_id, nombre, ubicacion, sensores_habilitados, admin_id, es_demo=es_demo
         )
+        # HU-49 esc. 1 y 2: la configuración INICIAL también consta en el
+        # historial, para saber desde cuándo rige. Sin estas filas, la ubicación
+        # y los sensores del alta solo se deducían del valor anterior del primer
+        # cambio, y los sensores (que ningún endpoint modifica) no constaban.
+        # El origen «(alta)» los distingue de una modificación posterior.
+        if ubicacion is not None:
+            await self._device_repository.registrar_evento_config(
+                device_id, campo=f"ubicacion ({ORIGEN_ALTA})", valor_anterior=None, valor_nuevo=ubicacion,
+                actor_id=admin_id,
+            )
+        await self._device_repository.registrar_evento_config(
+            device_id,
+            campo=f"sensores_habilitados ({ORIGEN_ALTA})",
+            valor_anterior=None,
+            valor_nuevo=", ".join(sensores_habilitados) if sensores_habilitados else "ninguno",
+            actor_id=admin_id,
+        )
 
         await self._registrar_hash.execute(
             tipo_evento="ALTA_DISPOSITIVO",
@@ -403,6 +440,16 @@ class ActualizarResponsableDispositivoUseCase:
         actualizado = await self._device_repository.actualizar_responsable(
             device_id, nombre, email, telefono
         )
+        if anterior.get("responsable_nombre") != nombre:
+            # HU-49: el nombre del responsable no es un dato de contacto; se
+            # historiza tal cual (el contacto, minimizado, va aparte).
+            await self._device_repository.registrar_evento_config(
+                device_id,
+                campo="responsable_nombre",
+                valor_anterior=anterior.get("responsable_nombre"),
+                valor_nuevo=nombre,
+                actor_id=actor_id,
+            )
         if anterior["responsable_email"] != email or anterior["responsable_telefono"] != telefono:
             await self._device_repository.registrar_evento_config(
                 device_id,
@@ -545,12 +592,86 @@ class ActualizarIntervaloReporteUseCase:
         return actualizado
 
 
+# HU-49: grupo de cada campo del historial (filtro "instalación",
+# "calibración", "responsable", "intervalo", "reemplazo" del auditor).
+CATEGORIAS_HISTORIAL: dict[str, str] = {
+    "ubicacion": "instalacion",
+    "fecha_instalacion": "instalacion",
+    "observaciones_instalacion": "instalacion",
+    "fecha_ultima_calibracion": "calibracion",
+    "numero_certificado_calibracion": "calibracion",
+    "fecha_proxima_calibracion": "calibracion",
+    "margen_aviso_calibracion_dias": "calibracion",
+    "responsable_nombre": "responsable",
+    "responsable_contacto": "responsable",
+    "intervalo_reporte_segundos": "intervalo",
+    "sensores_habilitados": "sensores",
+    "baja": "reemplazo",
+    "reemplazado_por": "reemplazo",
+    "reemplaza_a": "reemplazo",
+}
+# "intervalo_reporte_segundos (administrador)": campo y origen del cambio.
+_CAMPO_CON_ORIGEN = re.compile(r"^(?P<campo>[a-z_]+) \((?P<origen>[^)]+)\)$")
+
+
+def _como_texto(valor: object) -> str | None:
+    if valor is None:
+        return None
+    return valor.isoformat() if hasattr(valor, "isoformat") else str(valor)
+
+
+def _como_utc(valor: datetime) -> datetime:
+    return valor if valor.tzinfo is not None else valor.replace(tzinfo=timezone.utc)
+
+
+def describir_historial(filas: list[dict]) -> list[dict]:
+    """HU-49 esc. 2: a cada cambio le añade su campo base, origen, categoría y
+    el intervalo en que estuvo vigente (desde su registro hasta el siguiente
+    cambio del mismo campo; `vigente_hasta=None` si sigue vigente)."""
+    descritas = []
+    for fila in filas:
+        coincidencia = _CAMPO_CON_ORIGEN.match(fila["campo"])
+        campo_base = coincidencia["campo"] if coincidencia else fila["campo"]
+        descritas.append(
+            {
+                **fila,
+                "campo_base": campo_base,
+                "origen": coincidencia["origen"] if coincidencia else None,
+                "categoria": CATEGORIAS_HISTORIAL.get(campo_base, "otro"),
+                "vigente_desde": fila["created_at"],
+                "vigente_hasta": None,
+            }
+        )
+    siguiente: dict[str, datetime] = {}
+    for fila in sorted(descritas, key=lambda f: _como_utc(f["created_at"]), reverse=True):
+        fila["vigente_hasta"] = siguiente.get(fila["campo_base"])
+        siguiente[fila["campo_base"]] = fila["created_at"]
+    return descritas
+
+
 class ConsultarHistorialConfiguracionUseCase:
     """HU-49: historial de cambios de configuración/instalación/calibración/
-    reemplazo de un dispositivo, de solo lectura."""
+    reemplazo de un dispositivo, de solo lectura, filtrable por categoría,
+    campo y periodo."""
 
     def __init__(self, device_repository: IDeviceRepository) -> None:
         self._device_repository = device_repository
 
-    async def execute(self, device_id: str) -> list[dict]:
-        return await self._device_repository.listar_historial_configuracion(device_id)
+    async def execute(
+        self,
+        device_id: str,
+        categoria: str | None = None,
+        campo: str | None = None,
+        desde: datetime | None = None,
+        hasta: datetime | None = None,
+    ) -> list[dict]:
+        filas = describir_historial(await self._device_repository.listar_historial_configuracion(device_id))
+        if categoria is not None:
+            filas = [f for f in filas if f["categoria"] == categoria]
+        if campo is not None:
+            filas = [f for f in filas if f["campo_base"] == campo]
+        if desde is not None:
+            filas = [f for f in filas if _como_utc(f["created_at"]) >= _como_utc(desde)]
+        if hasta is not None:
+            filas = [f for f in filas if _como_utc(f["created_at"]) <= _como_utc(hasta)]
+        return filas

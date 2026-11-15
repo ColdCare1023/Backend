@@ -45,15 +45,22 @@ class AutenticarUsuarioUseCase:
         # El repositorio compara sin distinguir mayúsculas y, entre filas
         # heredadas que solo difieren en ellas, prefiere la que coincide
         # exactamente: por eso el correo no se pasa a minúsculas aquí.
+        # HU-50: el mensaje es el mismo en los tres casos (no revela si la
+        # cuenta existe); la excepción lleva el usuario y el motivo para que
+        # LOGIN_FALLIDO se pueda correlacionar por actor en la bitácora.
         usuario = await self._usuario_repository.obtener_por_email(email.strip())
         if usuario is None:
             await verify_password_async(password, _HASH_SENUELO)
-            raise CredencialesInvalidasError("Email o contraseña incorrectos")
+            raise CredencialesInvalidasError("Email o contraseña incorrectos", motivo="cuenta_inexistente")
         if not await verify_password_async(password, usuario.password_hash):
-            raise CredencialesInvalidasError("Email o contraseña incorrectos")
+            raise CredencialesInvalidasError(
+                "Email o contraseña incorrectos", usuario_id=usuario.id, motivo="password_incorrecta"
+            )
         # HU-45: un usuario desactivado no puede volver a iniciar sesión.
         if not usuario.is_active:
-            raise CredencialesInvalidasError("Email o contraseña incorrectos")
+            raise CredencialesInvalidasError(
+                "Email o contraseña incorrectos", usuario_id=usuario.id, motivo="usuario_desactivado"
+            )
         # BE-021: los hashes heredados (bcrypt) o con parámetros antiguos se
         # sustituyen por Argon2id vigente; el llamador confirma la transacción.
         if necesita_rehash(usuario.password_hash):

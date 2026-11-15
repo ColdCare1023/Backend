@@ -74,7 +74,10 @@ en `infra-local/` (backend en `http://localhost:8001`, mismos validadores que en
 
 `GET /health` es solo *liveness* (no consulta la base de datos, para que una caída de PostgreSQL no provoque
 reinicios en bucle). `GET /health/detalle` (solo administrador) informa base de datos, revisión de Alembic,
-estado de la conexión MQTT y la cola de notificaciones.
+estado de la conexión MQTT, la cola de notificaciones y `modelo_ia` (HU-16): si el modelo está disponible,
+su versión, el motivo del rechazo cuando el artefacto no supera la verificación (checksum, hash de la versión
+activa o compatibilidad), la versión de scikit-learn con que se entrenó frente a la instalada y el modo del
+modelo preventivo. Un artefacto rechazado deja `status` en `degradado`; la ingesta y la regla 2-8 °C siguen.
 
 ### Topología: 1 réplica y 1 worker, por diseño
 
@@ -122,5 +125,6 @@ instancias exigiría un almacén compartido (p. ej. Redis), fuera del alcance de
 | `NOTIFICACION_MAX_INTENTOS` | — | `3` | Reintentos con espera de 30 s, 2 min y 5 min |
 | `NOTIFICACION_COOLDOWN_MINUTOS` | — | `15` | Antiflood de Telegram/SMS (HU-54); el correo se deduplica por episodio |
 | `ALERTA_VENTANA_NORMALIZACION_MINUTOS` | — | `15` | HU-20: reabrir dentro de la ventana es el mismo episodio (sin correo nuevo) |
+| `ALERTA_PREVENTIVA_MINUTOS_NORMALES` | — | `10` | HU-20: minutos seguidos en Normal para resolver una alerta preventiva; `0` la cierra con la primera lectura normal |
 | `TELEGRAM_*`, `SMS_*` | si se habilitan | | Canales opcionales (HU-54) |
 | `GOOGLE_OAUTH_ENABLED`, `GOOGLE_CLIENT_ID` | si se habilita | | RF-17 |

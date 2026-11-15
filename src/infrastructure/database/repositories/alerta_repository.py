@@ -1,14 +1,14 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.entities.alerta_termica import AlertaTermica
 from src.domain.repositories.i_alerta_repository import IAlertaRepository
 from src.domain.value_objects.estado_alerta import EstadoAlerta
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
-from src.infrastructure.database.models import ThermalAlertModel
+from src.infrastructure.database.models import ThermalAlertModel, ThermalReadingModel
 
 
 def _to_entity(model: ThermalAlertModel) -> AlertaTermica:
@@ -34,6 +34,7 @@ def _to_entity(model: ThermalAlertModel) -> AlertaTermica:
         iniciada_en=model.iniciada_en,
         temperatura_pico=model.temperatura_pico,
         historica=bool(model.historica),
+        normalizacion_desde=model.normalizacion_desde,
     )
 
 
@@ -60,6 +61,7 @@ class SQLAlchemyAlertaRepository(IAlertaRepository):
             iniciada_en=alerta.iniciada_en,
             temperatura_pico=alerta.temperatura_pico,
             historica=alerta.historica,
+            normalizacion_desde=alerta.normalizacion_desde,
         )
         self._session.add(model)
         await self._session.flush()
@@ -113,6 +115,7 @@ class SQLAlchemyAlertaRepository(IAlertaRepository):
         model.iniciada_en = alerta.iniciada_en
         model.temperatura_pico = alerta.temperatura_pico
         model.historica = alerta.historica
+        model.normalizacion_desde = alerta.normalizacion_desde
         await self._session.flush()
         await self._session.refresh(model)
         return _to_entity(model)
@@ -192,3 +195,54 @@ class SQLAlchemyAlertaRepository(IAlertaRepository):
         result = await self._session.execute(stmt)
         model = result.scalar_one_or_none()
         return _to_entity(model) if model else None
+
+    @staticmethod
+    def _filtros_periodo(device_id: str | None, desde: datetime | None, hasta: datetime | None) -> list:
+        """Filtros del periodo del reporte (HU-38/HU-51).
+
+        El periodo se ancla en el instante de CAPTURA de la lectura que abrió
+        el episodio (`thermal_readings.timestamp`), igual que el resto del
+        reporte. Filtrar por `created_at` de la alerta (hora de inserción en
+        la BD) desalinea el conteo cuando la ingesta llega con retraso
+        (buffer offline del ESP32, colas MQTT) y deja episodios fuera del
+        periodo al que pertenecen. Requiere el JOIN de `_con_lectura_inicial`.
+        """
+        filtros = []
+        if device_id:
+            filtros.append(ThermalAlertModel.device_id == device_id)
+        if desde is not None:
+            filtros.append(ThermalReadingModel.timestamp >= desde)
+        if hasta is not None:
+            filtros.append(ThermalReadingModel.timestamp <= hasta)
+        return filtros
+
+    @staticmethod
+    def _con_lectura_inicial(stmt):
+        return stmt.join(ThermalReadingModel, ThermalReadingModel.id == ThermalAlertModel.lectura_inicial_id)
+
+    async def contar_por_nivel(
+        self, device_id: str | None, desde: datetime | None, hasta: datetime | None
+    ) -> dict[str, int]:
+        stmt = (
+            self._con_lectura_inicial(select(ThermalAlertModel.nivel_riesgo, func.count(ThermalAlertModel.id)))
+            .where(*self._filtros_periodo(device_id, desde, hasta))
+            .group_by(ThermalAlertModel.nivel_riesgo)
+        )
+        return {str(nivel): int(cantidad) for nivel, cantidad in (await self._session.execute(stmt)).all()}
+
+    async def listar_por_nivel(
+        self,
+        nivel_riesgo: str,
+        device_id: str | None,
+        desde: datetime | None,
+        hasta: datetime | None,
+        limite: int = 10_000,
+    ) -> list[AlertaTermica]:
+        stmt = (
+            self._con_lectura_inicial(select(ThermalAlertModel))
+            .where(ThermalAlertModel.nivel_riesgo == nivel_riesgo, *self._filtros_periodo(device_id, desde, hasta))
+            .order_by(ThermalReadingModel.timestamp.desc())
+            .limit(limite)
+        )
+        return [_to_entity(m) for m in (await self._session.execute(stmt)).scalars().all()]
+

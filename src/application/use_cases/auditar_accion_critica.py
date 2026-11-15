@@ -4,6 +4,7 @@ from uuid import UUID
 from src.application.use_cases.registrar_hash_encadenado import RegistrarHashEncadenadoUseCase
 from src.domain.repositories.i_audit_log_repository import IAuditLogRepository
 from src.domain.repositories.i_trazabilidad_repository import ITrazabilidadRepository
+from src.domain.value_objects.resultado_auditoria import ResultadoAuditoria, resultado_de_accion
 
 
 class AuditarAccionCriticaUseCase:
@@ -37,18 +38,25 @@ class AuditarAccionCriticaUseCase:
         detalle: dict | None = None,
         ip_origen: str | None = None,
         device_id: str | None = None,
+        resultado: ResultadoAuditoria | str | None = None,
     ) -> None:
         """device_id (HU-25): cuando la acción auditada concierne a una
         unidad monitoreada concreta (alerta, instalación, responsable de un
         dispositivo), el eslabón de trazabilidad se encadena en la cadena de
         ESE dispositivo en vez de en la cadena de sistema — es lo que permite
-        reconstruir el ciclo completo de una alerta por chain_id (HU-28)."""
+        reconstruir el ciclo completo de una alerta por chain_id (HU-28).
+
+        resultado (HU-42 esc. 1): exitoso, fallido, denegado o bloqueado; si se
+        omite, se deriva de la acción. Va también dentro del payload
+        encadenado, junto con el actor, para que ambos queden bajo el hash."""
+        resultado_final = ResultadoAuditoria(resultado or resultado_de_accion(accion))
         await self._audit_log_repository.registrar(
             usuario_id=usuario_id,
             accion=accion,
             recurso=recurso,
             detalle=detalle or {},
             ip_origen=ip_origen,
+            resultado=resultado_final.value,
         )
         if self._registrar_hash is not None:
             await self._registrar_hash.execute(
@@ -58,6 +66,8 @@ class AuditarAccionCriticaUseCase:
                     "recurso": recurso,
                     "detalle": detalle or {},
                     "ip_origen": ip_origen,
+                    "resultado": resultado_final.value,
+                    "usuario_id": str(usuario_id) if usuario_id else None,
                 },
                 usuario_id=usuario_id,
                 device_id=device_id,

@@ -75,7 +75,12 @@ class AutenticarConGoogleUseCase:
         # token no vale": si el error distinguiera los casos, cualquiera podría
         # averiguar qué correos tienen acceso al sistema probando con los suyos.
         if usuario is None or not usuario.is_active:
-            raise CredencialesInvalidasError("No se pudo iniciar sesión con Google")
+            # HU-50: la bitácora sí distingue la cuenta (para correlacionar por actor).
+            raise CredencialesInvalidasError(
+                "No se pudo iniciar sesión con Google",
+                usuario_id=usuario.id if usuario is not None else None,
+                motivo="cuenta_no_provisionada" if usuario is None else "usuario_desactivado",
+            )
 
         token = self._jwt_handler.crear_token(usuario.id, usuario.email, usuario.rol)
         return ResultadoAutenticacion(

@@ -66,8 +66,11 @@ class PredecirRiesgoPreventivoUseCase:
     async def predecir(self, lectura: LecturaTermica) -> PrediccionPreventiva | None:
         if not self._servicio.habilitado or lectura.es_manual or (lectura.payload or {}).get("simulated"):
             return None
+        # HU-17: las LIMITE lecturas anteriores a t, no las más recientes del
+        # equipo (al reenviar el buffer, estas serían posteriores y el extractor
+        # las descartaría, dejando la ventana vacía).
         historial = await self._lectura_repository.listar_recientes_por_device(
-            lectura.device_id, limite=LIMITE_HISTORIAL_PREVENTIVO, solo_dispositivo=True
+            lectura.device_id, limite=LIMITE_HISTORIAL_PREVENTIVO, solo_dispositivo=True, hasta=lectura.timestamp
         )
         # En un hilo: el modelo es CPU y no debe bloquear el bucle de eventos.
         return await asyncio.to_thread(self._servicio.predecir, lectura, historial)

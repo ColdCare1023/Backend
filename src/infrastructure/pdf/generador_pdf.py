@@ -234,7 +234,7 @@ class GeneradorReporteBPAPDF:
         canvas.rect(0, alto - 12 * mm, ancho, 12 * mm, stroke=0, fill=1)
         canvas.setFillColor(colors.white)
         canvas.setFont("Helvetica-Bold", 8.5)
-        canvas.drawString(18 * mm, alto - 8 * mm, "ThermoTrace — Reporte de Buenas Prácticas de Almacenamiento")
+        canvas.drawString(18 * mm, alto - 8 * mm, "ColdCare — Reporte de Buenas Prácticas de Almacenamiento")
 
         # Pie con la declaración de verificabilidad y el folio de página.
         canvas.setFillColor(TENUE)
@@ -242,7 +242,7 @@ class GeneradorReporteBPAPDF:
         canvas.drawString(
             18 * mm,
             10 * mm,
-            "Trazabilidad digital verificable mediante encadenamiento SHA-256 (RF-14/RF-15). "
+            "Trazabilidad digital verificable mediante encadenamiento SHA-256 / HMAC-SHA256 (RF-14/RF-15). "
             f"Generado {self._generado_en}.",
         )
         canvas.drawRightString(ancho - 18 * mm, 10 * mm, f"Página {canvas.getPageNumber()}")
@@ -267,10 +267,15 @@ class GeneradorReporteBPAPDF:
 
     def _tarjetas_kpi(self, est: dict) -> Table:
         e = self._estilos
+        episodios = est.get("episodios_criticos")
         tarjetas = [
             (str(est["total_lecturas"]), "Lecturas registradas"),
             (f"{est['porcentaje_en_rango']:.1f}%", "Tiempo en rango 2–8 °C"),
-            (str(est["alertas_criticas"]), "Excursiones críticas"),
+            (
+                (str(episodios), f"Excursiones críticas ({est['alertas_criticas']} lecturas)")
+                if episodios is not None
+                else (str(est["alertas_criticas"]), "Excursiones críticas")
+            ),
             (
                 _fmt_num(est["temp_promedio"], " °C"),
                 f"Temp. media (mín {_fmt_num(est['temp_minima'])} / máx {_fmt_num(est['temp_maxima'])})",
@@ -334,56 +339,123 @@ class GeneradorReporteBPAPDF:
                 ]
             )
         )
-        return [Paragraph("1. Resumen del período", e["seccion"]), self._tarjetas_kpi(est), Spacer(1, 8), tabla]
+        bloques = [Paragraph("1. Resumen del período", e["seccion"]), self._tarjetas_kpi(est), Spacer(1, 8), tabla]
+        if est.get("fuente") == "periodo_completo":
+            # HU-38 esc. 3: las cifras no dependen del tope de las tablas de detalle.
+            bloques += [
+                Spacer(1, 4),
+                Paragraph(
+                    f"Cifras calculadas sobre la totalidad del período ({est['total_lecturas']} lecturas y "
+                    f"{est.get('episodios_criticos', 0)} episodio(s) de excursión crítica), con independencia del "
+                    "tope de filas de las tablas de detalle.",
+                    e["nota"],
+                ),
+            ]
+        sin_hora = est.get("lecturas_sin_hora") or 0
+        if sin_hora:
+            # HU-38/HU-31: el periodo se mide con la hora de captura, igual que la curva.
+            bloques += [
+                Spacer(1, 4),
+                Paragraph(
+                    f"{sin_hora} lectura(s) del período llegaron sin hora de captura (el nodo aún no había "
+                    "sincronizado su reloj) y no se incluyen en estas cifras.",
+                    e["nota"],
+                ),
+            ]
+        return bloques
 
     def _seccion_integridad(self, veredicto: dict) -> list:
         e = self._estilos
-        integra = veredicto.get("integra", False)
-        color_fondo = PINO_CLARO if integra else colors.HexColor("#FBE9E7")
-        color_borde = VERDE if integra else ROJO
+        estado = veredicto.get("estado") or ("integra" if veredicto.get("integra") else "ruptura_detectada")
+        integra = estado == "integra"
+        no_concluida = estado == "no_concluida"
+        color_borde = VERDE if integra else (AMBAR if no_concluida or estado == "ruptura_aislada" else ROJO)
+        color_fondo = PINO_CLARO if integra else (
+            colors.HexColor("#FFF6E5") if color_borde == AMBAR else colors.HexColor("#FBE9E7")
+        )
 
         # HU-38 criterio 2: fecha de la verificación y una referencia/digest
-        # reproducible — no hace falta imprimir el hash de cada lectura, pero
-        # sí un valor verificable que identifique el estado de la cadena en
-        # el momento de generar el reporte.
-        fecha_verificacion = veredicto.get("verificado_en", "")
-        digest = veredicto.get("digest_cadena", "")
+        # reproducible COMPLETA (los 64 caracteres hexadecimales) — no hace
+        # falta imprimir el hash de cada lectura, pero sí el valor que permite
+        # reproducir el estado de la cadena al generar el reporte.
+        fecha_verificacion = _texto(veredicto.get("verificado_en"))
+        digest = _texto(veredicto.get("digest_cadena"), "N/A")
+        cadena = (
+            f"la cadena del dispositivo <b>{_texto(veredicto['chain_id'])}</b>"
+            if veredicto.get("chain_id")
+            else "todas las cadenas"
+        )
+        referencia = (
+            f"Verificado el: <b>{fecha_verificacion}</b> ({cadena}).<br/>"
+            f"Referencia reproducible (hash del último eslabón examinado, 64 hex):<br/>"
+            f"<font face='Courier' size='7'>{digest}</font>"
+        )
 
         if integra:
-            titulo = "✓ Cadena de trazabilidad íntegra"
+            titulo = "✓ No se detectaron alteraciones en la cadena de trazabilidad"
             detalle = (
-                f"Se verificaron <b>{veredicto.get('total_registros', 0)}</b> registros encadenados "
-                "mediante SHA-256. Cada eslabón reproduce el hash esperado a partir del hash anterior, "
-                "su marca temporal y su contenido: ningún registro del período fue alterado tras su emisión.<br/>"
-                f"Verificado el: <b>{fecha_verificacion}</b><br/>"
-                f"Referencia de la cadena (último hash íntegro): <font face='Courier'>{digest}</font>"
+                f"Se verificaron <b>{veredicto.get('total_registros', 0)}</b> registros encadenados. Cada eslabón "
+                "reproduce el hash esperado (SHA-256 o HMAC-SHA256 según su versión) a partir del hash anterior, "
+                "su marca temporal y su contenido, y enlaza con el hash almacenado del eslabón previo.<br/>"
+                + referencia
             )
-        elif veredicto.get("estado") == "ruptura_aislada":
+        elif no_concluida:
+            titulo = "◌ Verificación no concluida"
+            detalle = (
+                f"<b>{veredicto.get('total_no_verificables', 0)}</b> eslabón(es) HMAC-SHA256 (v3) no se pudieron "
+                "verificar porque la clave de trazabilidad no estaba disponible. El resultado no se informa como "
+                "íntegro ni como alterado.<br/>" + referencia
+            )
+        elif estado == "ruptura_aislada":
             titulo = "◐ Cadena con ruptura aislada"
             detalle = (
                 f"La cadena registra <b>{veredicto.get('total_rupturas', 0)}</b> alteración(es) histórica(s), "
-                "todas aisladas por un administrador (HU-26). Los registros alterados no son verificables; "
-                f"la cadena vuelve a ser íntegra desde <b>{veredicto.get('integra_desde') or '—'}</b>.<br/>"
-                f"Verificado el: <b>{fecha_verificacion}</b>"
+                "todas aisladas por un administrador. Los registros alterados no son verificables; "
+                f"la cadena vuelve a ser verificable desde <b>{_texto(veredicto.get('integra_desde'))}</b>.<br/>"
+                + referencia
             )
         else:
             titulo = "✗ Cadena de trazabilidad comprometida"
             posicion = veredicto.get("primer_registro_inconsistente")
             detalle = (
-                f"La verificación detectó una inconsistencia en la posición <b>{posicion}</b> de la cadena, "
+                f"La verificación detectó una inconsistencia en la posición <b>{_texto(posicion)}</b> de la cadena, "
                 f"con <b>{veredicto.get('registros_posteriores_afectados', 0)}</b> registros posteriores afectados. "
                 "El contenido de este reporte debe considerarse NO verificable hasta que un administrador "
-                "aísle el registro corrupto y restaure la cadena (HU-26).<br/>"
-                f"Verificado el: <b>{fecha_verificacion}</b>"
+                "aísle el registro corrupto y restaure la cadena.<br/>" + referencia
             )
 
         contenido = [
             [Paragraph(f"<b>{titulo}</b>", e["cuerpo"])],
             [Paragraph(detalle, e["cuerpo"])],
         ]
-        # HU-26 escenario 4: el veredicto declara qué certifica y qué no.
+        # HU-38 esc. 2: última verificación por dispositivo y periodo (HU-37)
+        # que cubre este reporte, con su resultado, fecha y eslabón.
+        ultima = veredicto.get("ultima_verificacion")
+        if ultima:
+            contenido.append(
+                [
+                    Paragraph(
+                        f"Última verificación por dispositivo y periodo: <b>{_texto(ultima.get('resultado'))}</b>"
+                        f", realizada el {_texto(ultima.get('realizada_en'))} sobre "
+                        f"{_texto(ultima.get('device_id'))} del {_texto(ultima.get('desde'))} al "
+                        f"{_texto(ultima.get('hasta'))} ({_texto(ultima.get('total_bloques_verificados'))} bloques). "
+                        f"Eslabón: <font face='Courier' size='7'>{_texto(ultima.get('hash_eslabon'))}</font>",
+                        e["cuerpo"],
+                    )
+                ]
+            )
+        elif "ultima_verificacion" in veredicto:
+            contenido.append(
+                [
+                    Paragraph(
+                        "No consta una verificación por dispositivo y periodo que cubra este período.",
+                        e["nota"],
+                    )
+                ]
+            )
+        # HU-26 escenario 4: el veredicto declara qué comprueba y qué no.
         if veredicto.get("alcance"):
-            contenido.append([Paragraph(f"<i>{veredicto['alcance']}</i>", e["nota"])])
+            contenido.append([Paragraph(f"<i>{_texto(veredicto['alcance'])}</i>", e["nota"])])
         tabla = Table(contenido, colWidths=[172 * mm])
         tabla.setStyle(
             TableStyle(
@@ -426,15 +498,16 @@ class GeneradorReporteBPAPDF:
         ]
 
         detalle = (
-            f"Este reporte está <b>INCOMPLETO</b>. El período solicitado contiene más "
+            f"El detalle de este reporte está <b>INCOMPLETO</b>. El período solicitado contiene más "
             f"{' y más '.join(recortadas)} de los que admite un solo documento "
             f"(tope de <b>{limite:,}</b> registros por categoría). "
-            "Para obtener el histórico completo, divida el período en rangos más cortos "
-            "y conserve todos los reportes parciales como un único legajo."
+            "El resumen de la sección 1 y el conteo de excursiones críticas sí cubren el período completo, "
+            "y todas las excursiones críticas se listan en la sección 5. Para obtener el detalle completo, "
+            "divida el período en rangos más cortos y conserve todos los reportes parciales como un único legajo."
         ).replace(",", ".")
 
         contenido = [
-            [Paragraph("<b>⚠ Reporte parcial: faltan registros del período</b>", e["cuerpo"])],
+            [Paragraph("<b>⚠ Reporte parcial: faltan registros del período en el detalle</b>", e["cuerpo"])],
             [Paragraph(detalle, e["cuerpo"])],
         ]
         tabla = Table(contenido, colWidths=[172 * mm])
@@ -583,18 +656,32 @@ class GeneradorReporteBPAPDF:
         return bloques
 
     def _seccion_equipos(self, equipos: list[dict]) -> list:
-        """HU-38 esc. 1 y HU-51 esc. 4: identificación e instalación del equipo."""
+        """HU-38 esc. 1 y HU-51 esc. 4: identificación e instalación del equipo
+        VIGENTES durante el período (reconstruidas del historial de
+        configuración) y la referencia a ese historial."""
         if not equipos:
             return []
         e = self._estilos
-        filas = [["Equipo", "Ubicación vigente", "Instalación", "Observaciones"]]
+        filas = [["Equipo", "Ubicación en el período", "Instalación", "Observaciones"]]
         for d in equipos:
+            ubicacion = d.get("ubicacion_periodo", d.get("ubicacion"))
+            inicio = d.get("ubicacion_inicio_periodo", ubicacion)
+            celda_ubicacion = (
+                f"{_texto(inicio)} → {_texto(ubicacion)}" if inicio != ubicacion else _texto(ubicacion)
+            )
+            fecha = d.get("fecha_instalacion_periodo", d.get("fecha_instalacion"))
+            instalador = d.get("instalado_por_nombre")
             filas.append(
                 [
                     Paragraph(_texto(d.get("id")), e["celda"]),
-                    Paragraph(_texto(d.get("ubicacion")), e["celda"]),
-                    Paragraph(_texto(d.get("fecha_instalacion")), e["celda"]),
-                    Paragraph(_texto(d.get("observaciones_instalacion")), e["celda"]),
+                    Paragraph(celda_ubicacion, e["celda"]),
+                    Paragraph(
+                        _texto(fecha) + (f"<br/>por {_texto(instalador)}" if instalador else ""), e["celda"]
+                    ),
+                    Paragraph(
+                        _texto(d.get("observaciones_instalacion_periodo", d.get("observaciones_instalacion"))),
+                        e["celda"],
+                    ),
                 ]
             )
         tabla = Table(filas, colWidths=[40 * mm, 50 * mm, 26 * mm, 56 * mm], repeatRows=1)
@@ -606,6 +693,24 @@ class GeneradorReporteBPAPDF:
                     Paragraph(
                         f"{_texto(d.get('id'))}: la ubicación cambió de «{_texto(c.get('valor_anterior'))}» a "
                         f"«{_texto(c.get('valor_nuevo'))}» el {_fmt_dt(c.get('created_at'))}.",
+                        e["nota"],
+                    )
+                )
+            if d.get("cambios_posteriores_al_periodo"):
+                bloques.append(
+                    Paragraph(
+                        f"{_texto(d.get('id'))}: la instalación cambió después del período "
+                        f"(ubicación actual «{_texto(d.get('ubicacion'))}»); se muestra la vigente en el período.",
+                        e["nota"],
+                    )
+                )
+            if "cambios_historial_total" in d:
+                bloques.append(
+                    Paragraph(
+                        f"Historial de configuración de {_texto(d.get('id'))}: "
+                        f"{d.get('cambios_historial_total', 0)} cambio(s) registrado(s) con valor anterior, valor "
+                        "nuevo, actor y fecha (Dispositivos › Historial de configuración; "
+                        f"GET /api/dispositivos/{_texto(d.get('id'))}/historial-configuracion).",
                         e["nota"],
                     )
                 )
@@ -658,7 +763,7 @@ class GeneradorReporteBPAPDF:
 
     def _seccion_checklist(self, checklists: list[dict]) -> list:
         e = self._estilos
-        bloques = [Paragraph("3. Verificaciones BPA declaradas (HU-37)", e["seccion"])]
+        bloques = [Paragraph("3. Verificaciones BPA declaradas (checklist)", e["seccion"])]
         if not checklists:
             bloques.append(
                 Paragraph(
@@ -694,9 +799,10 @@ class GeneradorReporteBPAPDF:
         return [
             Spacer(1, 14),
             Paragraph(
-                "Este documento fue generado automáticamente por el sistema ThermoTrace a partir de los "
+                "Este documento fue generado automáticamente por el sistema ColdCare a partir de los "
                 "registros almacenados. Su contenido es verificable: la sección 2 declara el resultado de "
-                "recomputar la cadena de hashes SHA-256 sobre la totalidad de los eventos registrados. "
+                "recomputar la cadena de hashes (SHA-256 / HMAC-SHA256 según la versión de cada eslabón) "
+                "sobre la cadena verificada, con su referencia reproducible completa. "
                 "Elaborado en el marco de la tesis de monitoreo IoT de cadena de frío farmacéutica, como "
                 "referencia frente al Manual de Buenas Prácticas de Almacenamiento (RM N.º 132-2015/MINSA).<br/><br/>"
                 "<b>Este documento constituye evidencia del monitoreo y la trazabilidad térmica del período "
@@ -735,7 +841,7 @@ class GeneradorReporteBPAPDF:
             topMargin=20 * mm,
             bottomMargin=18 * mm,
             title=f"Reporte BPA {fecha_desde} a {fecha_hasta}",
-            author="ThermoTrace",
+            author="ColdCare",
             subject="Reporte de Buenas Prácticas de Almacenamiento — cadena de frío",
         )
 

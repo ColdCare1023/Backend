@@ -59,3 +59,8 @@ class ITrazabilidadRepository(ABC):
         limite: int = 100,
         offset: int = 0,
     ) -> list[RegistroTrazabilidad]: ...
+
+    async def listar_cadenas(self) -> list[dict]:
+        """HU-26: [{chain_id, total_registros, ultimo_registro_en}] por cadena."""
+        raise NotImplementedError
+

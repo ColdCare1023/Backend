@@ -5,7 +5,6 @@ en la primera inferencia real."""
 
 import joblib
 import numpy as np
-import pytest
 
 from src.infrastructure.ai.random_forest_service import RandomForestRiesgoService
 
@@ -33,8 +32,9 @@ def test_rechaza_modelo_con_numero_de_features_incorrecto(tmp_path):
         ruta,
     )
     servicio = RandomForestRiesgoService(model_path=ruta)
-    with pytest.raises(RuntimeError, match="features"):
-        servicio.modelo_disponible
+    # HU-16: el rechazo deja el modelo no disponible con su motivo, sin lanzar.
+    assert servicio.modelo_disponible is False
+    assert "features" in servicio.motivo_rechazo()
 
 
 def test_rechaza_modelo_con_clases_desconocidas(tmp_path):
@@ -44,8 +44,8 @@ def test_rechaza_modelo_con_clases_desconocidas(tmp_path):
         ruta,
     )
     servicio = RandomForestRiesgoService(model_path=ruta)
-    with pytest.raises(RuntimeError, match="clases desconocidas"):
-        servicio.modelo_disponible
+    assert servicio.modelo_disponible is False
+    assert "clases desconocidas" in servicio.motivo_rechazo()
 
 
 def test_rechaza_modelo_con_orden_de_features_distinto(tmp_path):
@@ -56,8 +56,8 @@ def test_rechaza_modelo_con_orden_de_features_distinto(tmp_path):
         ruta,
     )
     servicio = RandomForestRiesgoService(model_path=ruta)
-    with pytest.raises(RuntimeError, match="orden de features"):
-        servicio.modelo_disponible
+    assert servicio.modelo_disponible is False
+    assert "orden de features" in servicio.motivo_rechazo()
 
 
 def test_modelo_oficial_actual_pasa_la_validacion_de_compatibilidad():
@@ -75,8 +75,8 @@ def test_rechaza_artefacto_con_checksum_externo_alterado(tmp_path):
     metadata.write_text('{"model_hash": "checksum-falso"}')
 
     servicio = RandomForestRiesgoService(model_path=ruta, metadata_path=metadata)
-    with pytest.raises(RuntimeError, match="Checksum SHA-256 inválido"):
-        _ = servicio.modelo_disponible
+    assert servicio.modelo_disponible is False
+    assert "Checksum SHA-256 inválido" in servicio.motivo_rechazo()
 
 
 def test_modelo_version_es_none_si_el_artefacto_fue_rechazado(tmp_path):
