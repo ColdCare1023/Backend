@@ -32,8 +32,12 @@ El entrenamiento es **offline** (CLI). No hay rutas HTTP para entrenar ni subir 
    `riesgo_efectivo = excursion_critica` y la alerta salen del flujo existente.
 3. Modelo no cargado, alterado o incompatible → `MODELO_NO_DISPONIBLE` (en modo activo se conserva
    la clasificación legada: la ingesta nunca se detiene).
-4. Reloj no sincronizado o ventana de 15 min con menos de 80 % de cobertura → `HISTORIAL_INSUFICIENTE`.
-5. Features (el mismo extractor del entrenamiento) → puntuación → clase según el umbral del manifiesto.
+4. Reloj no sincronizado, ventana de 15 min con menos de 80 % de cobertura o, si el conjunto usa el
+   SHT31 (`termico_ambiente`), sin temperatura ambiental o humedad en t → `HISTORIAL_INSUFICIENTE`,
+   con el motivo `reloj_no_sincronizado`, `ventana_15min_sin_cobertura_suficiente` o
+   `ventana_15min_sin_contexto_ambiental` (ver `02_PREPROCESSING_AND_FEATURES.md` §4).
+5. Features (el mismo extractor, la misma rejilla y la misma segmentación del entrenamiento; la
+   puerta y el SHT31 solo si el conjunto los usa) → puntuación → clase según el umbral del manifiesto.
    Cualquier excepción → `FALLO_INFERENCIA`.
 
 `SIN_DATOS` (ausencia de telemetría) lo sigue calculando el estado operativo del dispositivo
