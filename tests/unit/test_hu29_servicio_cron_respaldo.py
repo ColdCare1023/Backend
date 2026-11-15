@@ -1,14 +1,16 @@
 """HU-29 esc. 1 y 3 (P0-4 c): lo que el servicio cron de Railway necesita
 está en el repositorio y es verificable sin tocar Railway.
 
-- Dockerfile.respaldo trae pg_dump de la versión mayor elegida (PG_MAJOR),
-  imagen fijada por digest, y el respaldo no corre como root.
+- Dockerfile.respaldo trae pg_dump de la versión mayor elegida (PG_MAJOR; por
+  omisión 18, la del servidor de producción), imagen fijada por digest, y el
+  respaldo no corre como root ni con el HOME de root.
 - railway.respaldo.json declara la programación `0 7 * * *` (02:00 en Perú).
 - La retención opcional del volumen nunca borra el respaldo recién hecho.
 """
 
 import json
 import re
+import shlex
 from pathlib import Path
 
 from scripts import respaldo_postgres
@@ -21,11 +23,25 @@ def _instrucciones(texto: str) -> list[str]:
     return [linea.strip() for linea in unidas.splitlines() if linea.strip() and not linea.strip().startswith("#")]
 
 
-def test_la_imagen_de_respaldo_fija_la_base_y_el_cliente_postgresql():
+def _comando_de_respaldo() -> list[str]:
+    """El `exec` con el que el arranque (root) lanza el respaldo, en tokens."""
     instrucciones = _instrucciones((RAIZ / "Dockerfile.respaldo").read_text(encoding="utf-8"))
+    (cmd,) = [i for i in instrucciones if i.startswith("CMD ")]
+    forma_exec = json.loads(cmd.removeprefix("CMD "))
+    assert forma_exec[:2] == ["sh", "-c"]
+    (lanzamiento,) = [paso.strip() for paso in forma_exec[2].split("&&") if paso.strip().startswith("exec ")]
+    return shlex.split(lanzamiento)
+
+
+def test_la_imagen_de_respaldo_fija_la_base_y_el_cliente_postgresql():
+    texto = (RAIZ / "Dockerfile.respaldo").read_text(encoding="utf-8")
+    instrucciones = _instrucciones(texto)
     desde = [i for i in instrucciones if i.startswith("FROM ")]
     assert len(desde) == 1 and re.match(r"^FROM \S+@sha256:[0-9a-f]{64}$", desde[0])
-    assert "ARG PG_MAJOR=17" in instrucciones
+    # Producción es PostgreSQL 18 (18.6 el 15/11/2026): un pg_dump 17 se niega
+    # a volcarlo, así que la imagen trae el 18 aunque falte la variable.
+    assert "ARG PG_MAJOR=18" in instrucciones
+    assert re.search(r"producción[^.]*PostgreSQL 18", texto)
     instalacion = next(i for i in instrucciones if "postgresql-client-" in i)
     assert '"postgresql-client-${PG_MAJOR}"' in instalacion
     assert "apt.postgresql.org.sh" in instalacion
@@ -40,6 +56,33 @@ def test_el_respaldo_corre_sin_root_y_sale_al_terminar():
     assert any(i.startswith("RUN useradd") and "10001" in i for i in instrucciones)
     # Ni uvicorn ni un proceso que quede vivo: Railway salta la ejecución siguiente.
     assert "uvicorn" not in cmd
+
+
+def test_el_respaldo_corre_con_un_home_que_app_puede_usar():
+    """setpriv cambia el usuario pero no HOME. Con el HOME=/root del arranque,
+    la primera ejecución en Railway (15/11/2026) falló con `[Errno 13]
+    Permission denied: '/root/.postgresql/postgresql.key'`: el driver de
+    PostgreSQL busca ahí la clave del cliente y `app` no puede entrar en
+    /root. La imagen fija HOME para el proceso de respaldo, sin depender de
+    una variable de Railway y sin vaciar el resto del entorno."""
+    comando = _comando_de_respaldo()
+    python = comando.index("python")
+    assert comando[:2] == ["exec", "env"]
+    asignaciones = {}
+    for token in comando[2:python]:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", token):
+            break
+        nombre, valor = token.split("=", 1)
+        asignaciones[nombre] = valor
+    # /tmp: el valor que arregló la ejecución en producción. Fijo, no una
+    # referencia a otra variable, y fuera de /root.
+    assert asignaciones.get("HOME") == "/tmp"
+    # setpriv recibe ese entorno y lanza el respaldo como `app`.
+    assert comando[comando.index("setpriv"):python][:3] == ["setpriv", "--reuid=app", "--regid=app"]
+    assert comando.index("env") < comando.index("setpriv") < python
+    # Ni `setpriv --reset-env` ni `env -i`: borrarían DATABASE_URL,
+    # RESPALDO_DESTINO y RESPALDO_RETENER.
+    assert not {"--reset-env", "-i", "--ignore-environment", "-"} & set(comando[:python])
 
 
 def test_la_configuracion_del_cron_de_railway():
@@ -170,6 +213,37 @@ def test_el_fallo_provocado_de_la_guia_llega_al_log_del_backend():
     # El procedimiento ya no es la contraseña errónea (solo se menciona para
     # explicar por qué no sirve).
     assert not re.search(r"^1\. .*contraseña errónea", escenario, flags=re.MULTILINE)
+
+
+def test_la_guia_del_cron_sigue_la_rama_de_despliegue_hasta_el_corte_de_config_as_code():
+    """Railway ya no deja elegir /railway.respaldo.json en un servicio nuevo y
+    sí lee el railway.json de la raíz, que es el de la API: el 15/11/2026 el
+    cron construyó la API. El cron sigue la rama deploy/respaldo-postgres
+    hasta el 2026-12-01, cuando Railway deja de leer config as code; antes de
+    esa fecha el Backend tiene que tener en su panel lo que hoy le da
+    railway.json."""
+    guia = (RAIZ / "docs/operacion/RESPALDO_RAILWAY.md").read_text(encoding="utf-8")
+    pasos = _seccion(guia, "## 2. Servicio cron `respaldo-postgres`")
+    assert "`deploy/respaldo-postgres`" in pasos
+    assert "Railway config file** ya no sirve" in pasos
+    assert "`18` en producción" in pasos
+    assert "`env HOME=/tmp`" in pasos
+    rama = _seccion(guia, "### Rama de despliegue y fin de config as code")
+    assert "2026-12-01" in rama
+    assert "git merge --no-edit origin/main" in rama
+    for ruta in ("scripts/respaldo_postgres.py", "src/infrastructure/respaldo/", "Dockerfile.respaldo"):
+        assert f"`{ruta}`" in rama, ruta
+    # La tabla de migración del Backend lleva los valores reales de railway.json.
+    api = json.loads((RAIZ / "railway.json").read_text(encoding="utf-8"))
+    for valor in (
+        api["build"]["dockerfilePath"],
+        api["deploy"]["startCommand"],
+        *api["deploy"]["preDeployCommand"],
+        api["deploy"]["healthcheckPath"],
+    ):
+        assert f"`{valor}`" in rama, valor
+    assert f"{api['deploy']['healthcheckTimeout']} s" in rama
+    assert f"{api['deploy']['restartPolicyMaxRetries']} reintentos" in rama
 
 
 def test_el_criterio_de_aceptacion_de_hu29_pide_el_fallo_que_llega_al_backend():
