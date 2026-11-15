@@ -233,7 +233,12 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
         return _to_entity(model) if model else None
 
     async def listar_recientes_por_device(
-        self, device_id: str, limite: int, solo_dispositivo: bool = True, hasta: datetime | None = None
+        self,
+        device_id: str,
+        limite: int,
+        solo_dispositivo: bool = True,
+        hasta: datetime | None = None,
+        desde: datetime | None = None,
     ) -> list[LecturaTermica]:
         stmt = select(ThermalReadingModel).where(ThermalReadingModel.device_id == device_id)
         if solo_dispositivo:
@@ -246,6 +251,11 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
             # LittleFS llegan lecturas viejas cuando ya hay otras más nuevas
             # persistidas; sin este tope, sus features usarían el futuro.
             stmt = stmt.where(ThermalReadingModel.timestamp < hasta)
+        if desde is not None:
+            # HU-17: alcance temporal del historial preventivo (15 min de
+            # ventana + 3 min de segmentación + 90 s de agregación). Con solo
+            # un tope de filas, un nodo a 5 s dejaba fuera parte de la ventana.
+            stmt = stmt.where(ThermalReadingModel.timestamp >= desde)
         stmt = stmt.order_by(ThermalReadingModel.timestamp.desc()).limit(limite)
         result = await self._session.execute(stmt)
         return [_to_entity(m) for m in result.scalars().all()]

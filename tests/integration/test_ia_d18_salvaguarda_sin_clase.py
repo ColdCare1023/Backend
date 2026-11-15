@@ -128,6 +128,10 @@ class _ServicioPreventivo:
     def habilitado(self) -> bool:
         return self.modo != MODO_DESACTIVADO
 
+    def alcance_historial(self) -> timedelta:
+        """Historial que pide el caso de uso (el del extractor por defecto)."""
+        return timedelta(seconds=1170)
+
     def _resultado(self, lectura, estado: str, motivo: str | None, clase: NivelRiesgo | None = None):
         return PrediccionPreventiva(
             device_id=lectura.device_id, timestamp_inferencia=lectura.timestamp, modo=self.modo,

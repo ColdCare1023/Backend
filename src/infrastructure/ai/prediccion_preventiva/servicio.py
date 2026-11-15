@@ -27,13 +27,14 @@ from threading import Lock
 from typing import NamedTuple
 
 import numpy as np
+import pandas as pd
 import sklearn
 
 from src.domain.entities.lectura_termica import LecturaTermica
 from src.domain.entities.prediccion_preventiva import PrediccionPreventiva
 from src.domain.value_objects.motivo_bloqueo import MotivoBloqueo
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
-from src.infrastructure.ai.prediccion_preventiva import registro
+from src.infrastructure.ai.prediccion_preventiva import calidad, registro
 from src.infrastructure.ai.prediccion_preventiva.configuracion import (
     CALIDAD_EXCURSION_EN_CURSO,
     CALIDAD_FALLO_INFERENCIA,
@@ -41,6 +42,7 @@ from src.infrastructure.ai.prediccion_preventiva.configuracion import (
     CALIDAD_MODELO_NO_DISPONIBLE,
     CALIDAD_OK,
     CALIDAD_SENSOR_FAULT,
+    CONFIGURACION_POR_DEFECTO,
     ESTADO_APROBADO,
     ESTADO_EXPERIMENTAL,
     ESTADO_VALIDADO_OFFLINE,
@@ -51,6 +53,7 @@ from src.infrastructure.ai.prediccion_preventiva.features import (
     CANAL_HUMEDAD,
     CANAL_PUERTA,
     CANALES_POR_CONJUNTO,
+    alcance_historial_s,
     evaluar_en_instante,
     nombres_features,
 )
@@ -183,6 +186,47 @@ def _valor(x) -> float:
         return math.nan
     valor = float(x)
     return valor if math.isfinite(valor) else math.nan
+
+
+# Columnas de `calidad.limpiar` (y de la rejilla) para cada señal de la lectura.
+_SENAL_DE_CANAL = {
+    CANAL_PUERTA: ("puerta", "apertura_refrigerador"),
+    CANAL_AMBIENTE: ("ambiente", "temperatura_ambiental"),
+    CANAL_HUMEDAD: ("humedad", "humedad_ambiental"),
+}
+
+
+def _orden_de_exportacion(h: LecturaTermica) -> tuple:
+    """Orden de `scripts/exportar_corridas.py` (hora de captura, boot_id,
+    seq_no; NULL al final, como en PostgreSQL). Decide cuál de dos duplicados
+    exactos conserva `calidad.limpiar` (el primero)."""
+    return (_a_ns(h.timestamp), h.boot_id is None, h.boot_id or 0, h.seq_no is None, h.seq_no or 0)
+
+
+def _senales_limpias(filas: list[LecturaTermica], canales: tuple[str, ...]) -> dict[str, np.ndarray]:
+    """HU-17: las señales de `filas` tras la MISMA limpieza que el
+    entrenamiento (`calidad.limpiar` sobre la exportación de corridas): un
+    duplicado exacto (misma hora y misma temperatura interna) cuenta una vez,
+    y una hora con temperaturas distintas se descarta entera (no hay forma de
+    saber cuál es la verdadera). Sin esto, el servicio promediaba ambas.
+    Devuelve `ts` (ns), `temperatura` y una entrada por canal del conjunto."""
+    ordenadas = sorted(filas, key=_orden_de_exportacion)
+    tabla = {
+        "serie_id": [0] * len(ordenadas),
+        "timestamp": np.array([_a_ns(h.timestamp) for h in ordenadas], dtype=np.int64),
+        "temperatura_interna": np.array([_valor(h.temperatura_interna) for h in ordenadas], dtype=float),
+    }
+    for canal in canales:
+        columna, atributo = _SENAL_DE_CANAL[canal]
+        tabla[columna] = np.array([_valor(getattr(h, atributo)) for h in ordenadas], dtype=float)
+    limpio, _ = calidad.limpiar(pd.DataFrame(tabla))
+    senales = {
+        "ts": limpio["timestamp"].to_numpy(dtype=np.int64),
+        "temperatura": limpio["temperatura_interna"].to_numpy(dtype=float),
+    }
+    for canal in canales:
+        senales[canal] = limpio[_SENAL_DE_CANAL[canal][0]].to_numpy(dtype=float)
+    return senales
 
 
 class ServicioPrediccionPreventiva:
@@ -351,6 +395,16 @@ class ServicioPrediccionPreventiva:
     @property
     def habilitado(self) -> bool:
         return self.modo != MODO_DESACTIVADO
+
+    def alcance_historial(self) -> timedelta:
+        """HU-17: cuánto historial anterior a t necesita `predecir` para
+        reproducir el vector del entrenamiento (`features.alcance_historial_s`
+        con la configuración del manifiesto cargado; 1170 s por defecto). El
+        caso de uso lo pide al repositorio por tiempo: con un tope fijo de
+        filas, un nodo que reporta cada 5-9 s dejaba fuera el inicio de la
+        ventana o de la segmentación. Puede cargar el modelo (llamar en un hilo)."""
+        self._cargar()
+        return timedelta(seconds=alcance_historial_s(self._config or CONFIGURACION_POR_DEFECTO))
 
     def _cargar(self) -> None:
         if self._intentado:
@@ -538,23 +592,20 @@ class ServicioPrediccionPreventiva:
         # Mismas filas que el entrenamiento (exportar_corridas + ingesta): solo
         # telemetría del nodo con hora sincronizada. Una lectura con el DS18B20
         # en falla no aporta temperatura (NaN), pero su puerta y su SHT31 sí,
-        # igual que en `calidad.preparar_rejillas`.
+        # igual que en `calidad.preparar_rejillas`. Y la misma limpieza de
+        # duplicados (`calidad.limpiar`).
         previas = [h for h in historial if h.time_quality != TIEMPO_NO_SINCRONIZADO and not h.es_manual]
-        filas = [*previas, lectura]
         conjunto = self._manifiesto["conjunto_features"]
         try:
             canales = CANALES_POR_CONJUNTO[conjunto]
-            ts = np.array([_a_ns(h.timestamp) for h in filas], dtype=np.int64)
-            temps = np.array([_valor(h.temperatura_interna) for h in filas], dtype=float)
             # Cada señal adicional solo se construye si el conjunto la usa.
-            puertas = np.array([_valor(h.apertura_refrigerador) for h in filas]) if CANAL_PUERTA in canales else None
-            ambiente = np.array([_valor(h.temperatura_ambiental) for h in filas]) if CANAL_AMBIENTE in canales else None
-            humedad = np.array([_valor(h.humedad_ambiental) for h in filas]) if CANAL_HUMEDAD in canales else None
-            vector, calidad, motivo = evaluar_en_instante(
-                ts, temps, puertas, _a_ns(lectura.timestamp), self._config, conjunto, ambiente, humedad
+            senales = _senales_limpias([*previas, lectura], canales)
+            vector, estado, motivo = evaluar_en_instante(
+                senales["ts"], senales["temperatura"], senales.get(CANAL_PUERTA), _a_ns(lectura.timestamp),
+                self._config, conjunto, senales.get(CANAL_AMBIENTE), senales.get(CANAL_HUMEDAD),
             )
             if vector is None:
-                return self._resultado(lectura, calidad, motivo)
+                return self._resultado(lectura, estado, motivo)
             puntuacion = float(self._modelo.predict_proba(vector.reshape(1, -1))[0, 1])
         except Exception as exc:  # defensa en profundidad, igual que RandomForestRiesgoService
             logger.exception("Fallo en la inferencia preventiva.")

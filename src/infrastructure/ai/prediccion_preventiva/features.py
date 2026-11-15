@@ -238,6 +238,23 @@ def features_de_rejillas(
     return x, ok
 
 
+def puntos_previos_rejilla(config: ConfiguracionPreventiva) -> int:
+    """Puntos de rejilla ANTES de t que usa `evaluar_en_instante`: los de la
+    ventana más larga más los `hueco_max_s` previos que necesita la
+    segmentación para medir un hueco que toque la ventana (15 + 3 por defecto)."""
+    return config.puntos_ventana - 1 + config.hueco_max_s // config.paso_rejilla_s
+
+
+def alcance_historial_s(config: ConfiguracionPreventiva) -> int:
+    """Segundos antes de t cuyas lecturas pueden cambiar el vector de t: la
+    rejilla de `evaluar_en_instante` empieza `puntos_previos_rejilla` pasos
+    antes de t y su primer punto promedia los `agregacion_s` anteriores.
+    15 min + 180 s + 90 s = 1170 s con la configuración por defecto. Una
+    lectura más antigua no cambia nada; una que falte dentro de este alcance
+    sí (HU-17: el servicio pide el historial por tiempo, no por cantidad)."""
+    return puntos_previos_rejilla(config) * config.paso_rejilla_s + config.agregacion_s
+
+
 class EvaluacionInstante(NamedTuple):
     """Resultado de `evaluar_en_instante`: vector (None si no se predice),
     calidad (CALIDAD_OK / CALIDAD_HISTORIAL_INSUFICIENTE) y, sin vector, el
@@ -304,7 +321,7 @@ def evaluar_en_instante(
         config.paso_rejilla_s,
         config.agregacion_s,
         ancla_ns=t_eval_ns,
-        desde_ns=t_eval_ns - (k - 1 + config.hueco_max_s // config.paso_rejilla_s) * paso_ns,
+        desde_ns=t_eval_ns - puntos_previos_rejilla(config) * paso_ns,
         hasta_ns=t_eval_ns,
         extras=extras,
     )
