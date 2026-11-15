@@ -91,3 +91,55 @@ def test_un_respaldo_fallido_no_poda(monkeypatch, tmp_path):
 
     assert codigo == respaldo_postgres.CODIGO_FALLO
     assert len(list(tmp_path.glob("*.dump"))) == 2
+
+
+# ── Documentación operativa (P2 y P0-2 de la revalidación) ──────────────────
+
+
+def _seccion(texto: str, titulo: str) -> str:
+    """Cuerpo de la sección `titulo` (hasta el siguiente encabezado)."""
+    inicio = texto.index(titulo) + len(titulo)
+    siguiente = re.search(r"^#{1,6} ", texto[inicio:], flags=re.MULTILINE)
+    return texto[inicio: inicio + siguiente.start()] if siguiente else texto[inicio:]
+
+
+def test_la_verificacion_de_restauracion_documenta_las_9_tablas():
+    from scripts import verificar_restauracion
+    from src.infrastructure.respaldo.huellas import TABLAS_EVIDENCIA
+
+    documentacion = verificar_restauracion.__doc__
+    assert len(TABLAS_EVIDENCIA) == 9
+    assert "9 tablas" in documentacion
+    assert [tabla for tabla in TABLAS_EVIDENCIA if tabla not in documentacion] == []
+
+
+def test_la_guia_de_railway_da_la_retencion_efectiva_de_los_backups_nativos():
+    """HU-29 esc. 1 pide documentar la retención efectiva: Railway conserva
+    los backups Daily 6 días, los Weekly 27 y los Monthly 89."""
+    guia = (RAIZ / "docs/operacion/RESPALDO_RAILWAY.md").read_text(encoding="utf-8")
+    seccion = _seccion(guia, "## 1. Respaldo nativo de Railway (escenario 1)")
+    for programa, dias in (("Daily", 6), ("Weekly", 27), ("Monthly", 89)):
+        assert re.search(rf"\*\*{programa}\*\*[^.]*\b{dias} días", seccion), programa
+    assert "~1 mes" not in seccion and "alrededor de" not in seccion
+
+
+def test_el_fallo_provocado_de_la_guia_llega_al_log_del_backend():
+    """HU-29 esc. 3 («alerta operativa crítica en el log del backend»): con
+    una contraseña errónea el cron no puede escribir RESPALDO_FALLIDO y el
+    vigilante de la API no ve nada. La guía provoca el fallo con la base
+    accesible: un PG_MAJOR anterior al del servidor, que
+    `verificar_cliente_compatible` rechaza antes de volcar."""
+    guia = (RAIZ / "docs/operacion/RESPALDO_RAILWAY.md").read_text(encoding="utf-8")
+    escenario = _seccion(guia, "### Escenario 3 (fallo provocado)")
+    assert "PG_MAJOR" in escenario
+    assert "RESPALDO_FALLIDO" in escenario
+    assert "RESPALDO_MAX_ANTIGUEDAD_HORAS=26" in escenario
+    assert 'respaldos.estado = "fallido"' in escenario
+    # El texto que se busca en el log del backend es el que escribe el vigilante.
+    assert "ALERTA OPERATIVA: el último respaldo programado de PostgreSQL falló" in escenario
+    assert "ALERTA OPERATIVA: el último respaldo programado de PostgreSQL falló" in (
+        RAIZ / "src/interface/tareas.py"
+    ).read_text(encoding="utf-8")
+    # El procedimiento ya no es la contraseña errónea (solo se menciona para
+    # explicar por qué no sirve).
+    assert not re.search(r"^1\. .*contraseña errónea", escenario, flags=re.MULTILINE)

@@ -20,7 +20,8 @@ Uso (servicio cron de Railway, docs/operacion/RESPALDO_RAILWAY.md):
    (`scripts.verificar_restauracion`), y deja RESPALDO_COMPLETADO en `audit_logs`.
 
 Escenario 3: si cualquier paso falla, escribe un log de nivel CRITICAL
-(«RESPALDO FALLIDO»), intenta dejar RESPALDO_FALLIDO en `audit_logs` y sale con
+(«RESPALDO FALLIDO»), borra el `.dump` (y el manifiesto) que esa ejecución
+dejara a medias, intenta dejar RESPALDO_FALLIDO en `audit_logs` y sale con
 código 2, para que la plataforma marque la ejecución como fallida y avise.
 
 El respaldo de volumen de Railway (si el plan lo incluye) no reemplaza a este:
@@ -137,11 +138,17 @@ def ejecutar_pg_dump(database_url: str, archivo: Path, snapshot: str | None = No
     )
 
 
-async def respaldar(database_url: str, destino: Path) -> dict:
+def marca_utc() -> str:
+    """Marca de los archivos de un respaldo (`coldcare_<marca>.*`): la hora UTC,
+    que también ordena la retención."""
+    return datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+async def respaldar(database_url: str, destino: Path, marca: str | None = None) -> dict:
     if shutil.which("pg_dump") is None:
         raise RuntimeError("pg_dump no está instalado en esta imagen")
     destino.mkdir(parents=True, exist_ok=True)
-    marca = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    marca = marca or marca_utc()
     archivo = destino / f"coldcare_{marca}.dump"
     engine = build_engine(database_url)
     try:
@@ -191,6 +198,29 @@ def podar_respaldos(destino: Path, retener: int) -> list[str]:
     return eliminados
 
 
+def descartar_incompletos(destino: Path, marca: str) -> list[str]:
+    """Borra lo que una ejecución fallida dejó a medias en el volumen: el
+    `.dump` (p. ej. cortado por falta de espacio) y, si llegó a escribirse, el
+    manifiesto de esa misma marca. Sin esto, `podar_respaldos` contaba el
+    `.dump` parcial como uno de los `retener` más recientes y, tras el
+    siguiente respaldo correcto, borraba a cambio un respaldo bueno; además
+    seguía ocupando el volumen lleno. Los respaldos anteriores no se tocan.
+
+    Nunca lanza: corre dentro del manejo del fallo, antes de auditarlo."""
+    descartados = []
+    for ruta in (destino / f"coldcare_{marca}.dump", destino / f"coldcare_{marca}.manifiesto.json"):
+        try:
+            if not ruta.is_file():
+                continue
+            ruta.unlink()
+        except OSError as exc:
+            logger.warning("No se pudo borrar %s, que dejó incompleto el respaldo fallido: %s", ruta.name, exc)
+            continue
+        logger.warning("Se borró %s, que dejó incompleto el respaldo fallido.", ruta.name)
+        descartados.append(ruta.name)
+    return descartados
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     parser = argparse.ArgumentParser(prog="respaldo_postgres")
@@ -201,11 +231,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     database_url = get_settings().database_url
+    marca = marca_utc()
     try:
-        manifiesto = asyncio.run(respaldar(database_url, args.destino))
+        manifiesto = asyncio.run(respaldar(database_url, args.destino, marca))
     except Exception as exc:
         motivo = exc.stderr.strip()[:300] if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else str(exc)[:300]
         logger.critical("RESPALDO FALLIDO: %s", motivo)
+        descartar_incompletos(args.destino, marca)
         try:
             asyncio.run(_auditar(database_url, "RESPALDO_FALLIDO", {"error": motivo}))
         except Exception:
