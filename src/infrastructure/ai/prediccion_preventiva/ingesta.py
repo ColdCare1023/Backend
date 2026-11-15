@@ -359,9 +359,10 @@ def importar_coldcare_csv(ruta_csv: Path) -> tuple[pd.DataFrame, InformeImportac
       temperatura; se convierte en hueco y se cuenta. Manda `ds18b20_status`;
       `sensor_fault` (que en el contrato v1 incluye el SHT31) solo cuenta en
       filas sin estado del DS18B20.
-    Exportador de referencia: `scripts/exportar_corridas.py` (P-1).
     - `temperatura_ambiental`, `humedad_ambiental`: contexto del SHT31 para la
-      ablación con y sin ese sensor."""
+      ablación con y sin ese sensor.
+
+    Exportador de referencia: `scripts/exportar_corridas.py` (P-1)."""
     informe = InformeImportacion(fuente="coldcare")
     texto = _leer_texto_acotado(ruta_csv)
     df = pd.read_csv(io.StringIO(texto), sep=detectar_separador(texto), dtype=str)

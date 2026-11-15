@@ -84,7 +84,8 @@ DATABASE_URL=postgresql+asyncpg://... python -m scripts.exportar_corridas \
    `time_quality`, `ds18b20_status`, `sensor_fault`, `corrida_id`, `temperatura_ambiental`,
    `humedad_ambiental`, `boot_id`, `seq_no` y `origen_hora`. La consulta anterior solo traía las
    cuatro primeras columnas y usaba la hora de llegada de las lecturas reconstruidas. Para una sola
-   corrida, la consulta equivalente en `psql` es:
+   corrida, esta consulta en `psql` da las mismas 13 columnas y filas. Los formatos son los de
+   PostgreSQL (hora según `DateStyle`, booleanos `t`/`f`), así que para el pipeline use el exportador:
 
 ```sql
 COPY (SELECT device_id,
@@ -93,7 +94,10 @@ COPY (SELECT device_id,
              CASE WHEN temperatura_interna IS NULL THEN 'SENSOR_FAULT' ELSE 'OK' END AS ds18b20_status,
              payload->>'sensor_fault' AS sensor_fault,
              'D01' AS corrida_id,
-             temperatura_ambiental, humedad_ambiental, boot_id, seq_no
+             temperatura_ambiental, humedad_ambiental, boot_id, seq_no,
+             CASE WHEN time_quality = 'unsynced'
+                  THEN CASE WHEN timestamp_estimado IS NULL THEN 'recepcion' ELSE 'reconstruida' END
+                  ELSE 'nodo' END AS origen_hora
       FROM thermal_readings
       WHERE origen = 'dispositivo' AND (payload->>'simulated') IS DISTINCT FROM 'true'
         AND device_id = 'ESP32_FARMACIA_01'

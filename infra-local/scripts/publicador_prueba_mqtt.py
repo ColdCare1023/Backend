@@ -8,7 +8,8 @@ backend no predice esas lecturas; este script nunca envía el campo `simulated`.
 Seguridad. Se comprueba antes de abrir ninguna conexión:
 - Broker: `localhost`, `127.0.0.1` o `::1`. Otro host exige `--permitir-host` y solo se acepta si es
   de red local (IP privada o de enlace local, nombre sin dominio, `.local`, `.lan`, `.localhost`,
-  `.test`, `.internal`, `.home.arpa`). Los dominios de EMQX Cloud y de Railway se rechazan siempre.
+  `.test`, `.internal`, `.home.arpa`). Los dominios de EMQX Cloud y de Railway (también su red
+  privada `*.railway.internal`) se rechazan siempre.
 - `device_id`: de prueba (lleva `TEST` o `PRUEBA` como segmento, p. ej. `PRUEBA_P13_01`,
   `FARM-02-TEST`) y nunca una identidad de producción (`ESP32_FARMACIA*`, `ESP32_DEMO*`,
   `ESP32_BANCO*`). Se exige también contra `localhost`, porque un puerto local puede ser un túnel.
@@ -24,11 +25,16 @@ Uso (desde infra-local/, con la pila arriba):
     python scripts/publicador_prueba_mqtt.py falla_sensor --base 90 --evento 3 --cola 30
     python scripts/publicador_prueba_mqtt.py csv --archivo escenario.csv
 Opciones comunes: --device-id, --intervalo-s (10, el del banco), --inicio (horas exactas; si falta,
-tiempo real), --time-quality, --sin-sht31, --sin-mc38, --registro evidencia.csv, --dry-run.
+tiempo real), --hueco-s, --uptime-inicial, --time-quality, --sin-sht31, --sin-mc38,
+--registro evidencia.csv, --dry-run.
 
 Horas: sin `--inicio`, la lectura i se captura en t0 + i·intervalo y se envía en ese instante (tiempo
-real, como el nodo). Con `--inicio`, o con `captured_at` en el CSV, las horas son exactas y los
-mensajes salen seguidos (`--pausa-s`); ninguna puede quedar en el futuro.
+real, como el nodo). Cada mensaje sale a su hora aunque el acuse del anterior no haya llegado: el
+backend acusa después del COMMIT, que va detrás de la inferencia, y el nodo tampoco lo espera (D08).
+`--hueco-s N` retrasa t0 N segundos sin conexión ni publicaciones: con `--uptime-inicial 0` es el
+reinicio con hueco (S-R) de D01 y D18. Con `--inicio`, o con `captured_at` en el CSV, las horas son exactas y los
+mensajes salen seguidos (`--pausa-s`), cada uno tras el acuse del anterior; ninguna puede quedar en el
+futuro.
 
 CSV (`csv --archivo`): una fila por lectura. `temp_ds18b20` es obligatoria; además `captured_at` u
 `offset_s` (no ambas) y, opcionales, `ds18b20_fault`, `temp_sht31`, `humedad_sht31`, `sht31_fault`,
@@ -40,7 +46,7 @@ de publicarlo. Los casos negativos (D19: 130 °C, -60 °C, `power_on_reset` con 
 necesitan `--permitir-invalidos`; el backend debe rechazarlos con un acuse `rejected`, y se espera ese
 estado con `--esperado rejected`.
 Sale con 0 si todos los acuses tienen el estado esperado (o con `--sin-acuse`), 1 si alguno no, y 2 si
-la guarda de seguridad o la entrada lo impiden.
+no se publica nada: la guarda de seguridad, una entrada inválida o un fallo al conectar (red, TLS, CA).
 """
 
 from __future__ import annotations
@@ -56,6 +62,7 @@ import re
 import ssl
 import sys
 import time
+from collections import deque
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
@@ -80,11 +87,16 @@ DEVICE_POR_DEFECTO = "PRUEBA_P13_01"
 FIRMWARE_POR_DEFECTO = "v1.2.0"
 HOSTS_LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1"})
 # Brokers y servicios de producción: nunca, ni con --permitir-host.
-SUFIJOS_NUBE = (".emqxsl.com", ".emqxsl.cn", ".emqx.cloud", ".emqxcloud.com", ".emqx.io", ".railway.app", ".rlwy.net")
+SUFIJOS_NUBE = (
+    ".emqxsl.com", ".emqxsl.cn", ".emqx.cloud", ".emqxcloud.com", ".emqx.io",
+    # Railway: dominios públicos y su red privada (`db.railway.internal`), que `.internal` aceptaría.
+    ".railway.app", ".rlwy.net", ".railway.internal",
+)
 SUFIJOS_RED_LOCAL = (".local", ".lan", ".localhost", ".test", ".internal", ".home.arpa")
 PREFIJOS_PRODUCCION = ("ESP32_FARMACIA", "ESP32_DEMO", "ESP32_BANCO")
 PATRON_PRUEBA = re.compile(r"(?:^|[_-])(?:TEST|PRUEBA)(?:[_-]|\d|$)", re.IGNORECASE)
 DERIVA_FUTURO_S = 60  # holgura del reloj local frente al del backend
+MARGEN_CONEXION_S = 5  # con --hueco-s, la conexión se abre este margen antes de la primera lectura
 ESTADOS_ACUSE = ("committed", "duplicate", "rejected")
 COLUMNAS_CSV = frozenset({
     "offset_s", "captured_at", "temp_ds18b20", "ds18b20_fault", "temp_sht31", "humedad_sht31",
@@ -263,7 +275,10 @@ def escenario_falla_sensor(t: Tramos, motivo: str) -> list[dict]:
 
 
 def _a_hora(texto: str) -> datetime:
-    valor = datetime.fromisoformat(texto.strip().replace("Z", "+00:00"))
+    try:
+        valor = datetime.fromisoformat(texto.strip().replace("Z", "+00:00"))
+    except ValueError:
+        raise ErrorEntrada(f"hora inválida: {texto!r}; use ISO 8601 UTC (p. ej. 2026-11-14T10:00:00Z)") from None
     if valor.tzinfo is None:
         raise ErrorEntrada(f"hora sin zona: {texto!r}; use UTC explícita (…Z o +00:00)")
     return valor.astimezone(timezone.utc)
@@ -550,13 +565,15 @@ class TransportePaho:
         self._cliente.publish(topico, cuerpo, qos=1).wait_for_publish(timeout=10)
 
     def esperar_acuse(self, boot_id: int, seq_no: int, timeout_s: float) -> dict | None:
+        """Acuse de (boot_id, seq_no), o None si no llega en `timeout_s`. Los acuses de otros mensajes
+        quedan guardados para cuando se pidan (pueden llegar en otro orden). Con plazo 0 revisa los ya
+        recibidos sin bloquear."""
         limite = time.monotonic() + timeout_s
-        while (clave := (boot_id, seq_no)) not in self._pendientes:
+        clave = (boot_id, seq_no)
+        while clave not in self._pendientes:
             restante = limite - time.monotonic()
-            if restante <= 0:
-                return None
             try:
-                acuse = self._acuses.get(timeout=restante)
+                acuse = self._acuses.get(timeout=restante) if restante > 0 else self._acuses.get_nowait()
             except queue.Empty:
                 return None
             self._pendientes[(acuse.get("boot_id"), acuse.get("seq_no"))] = acuse
@@ -573,6 +590,14 @@ class Resultado:
     estado: str  # committed / duplicate / rejected / sin_acuse / no_esperado
     huella_ok: bool | None = None
     detalle: dict = field(default_factory=dict)
+    publicado_en: datetime | None = None  # instante real de la publicación (tiempos de D08)
+
+
+def _resultado(mensaje: Mensaje, acuse: dict | None, publicado_en: datetime) -> Resultado:
+    if acuse is None:
+        return Resultado(mensaje, "sin_acuse", publicado_en=publicado_en)
+    estado = acuse.get("status") if acuse.get("status") in ESTADOS_ACUSE else "desconocido"
+    return Resultado(mensaje, estado, acuse.get("content_sha256") == mensaje.huella, acuse, publicado_en)
 
 
 def publicar_todos(
@@ -580,30 +605,57 @@ def publicar_todos(
     esperar_acuse: bool, timeout_s: float, reloj: Callable[[], datetime] | None = None,
     dormir: Callable[[float], None] = time.sleep, al_publicar: Callable[[Resultado], None] | None = None,
 ) -> list[Resultado]:
+    """Publica los mensajes y correlaciona cada acuse; el plazo de cada uno cuenta desde su publicación.
+
+    En tiempo real cada mensaje sale a su hora planificada aunque falten acuses anteriores, como el
+    nodo: el backend acusa después del COMMIT, que va detrás de la inferencia (hasta
+    `IA_INFERENCIA_TIMEOUT_S`), y esperarlo retrasaría la lectura siguiente. D08 necesita 8,5 °C menos
+    de 1 s después de 5,0 °C. Los acuses se recogen mientras se espera la hora del mensaje siguiente y
+    al final. Con horas exactas los mensajes salen en ráfaga y cada uno espera su acuse antes del
+    siguiente, para que la ventana del modelo encuentre guardadas las lecturas anteriores."""
     reloj = reloj or (lambda: datetime.now(timezone.utc))
     topico = f"farmacias/{device_id}/lecturas"
-    resultados = []
-    for i, mensaje in enumerate(mensajes):
+    resultados: list[Resultado | None] = [None] * len(mensajes)
+    pendientes: deque[tuple[int, datetime, datetime]] = deque()  # (índice, publicado_en, plazo)
+
+    def anotar(indice: int, resultado: Resultado) -> None:
+        resultados[indice] = resultado
+        if al_publicar:
+            al_publicar(resultado)
+
+    def recoger(hasta: datetime | None) -> None:
+        """Acuses de los pendientes, en orden de publicación. Con `hasta` vuelve a esa hora (la del
+        mensaje siguiente) aunque falten; sin `hasta` espera a cada uno hasta su plazo."""
+        while pendientes:
+            indice, publicado_en, plazo = pendientes[0]
+            corte = plazo if hasta is None else min(plazo, hasta)
+            mensaje = mensajes[indice]
+            restante = max(0.0, (corte - reloj()).total_seconds())
+            acuse = transporte.esperar_acuse(mensaje.boot_id, mensaje.seq_no, restante)
+            if acuse is None and corte < plazo and reloj() < plazo:
+                return
+            pendientes.popleft()
+            anotar(indice, _resultado(mensaje, acuse, publicado_en))
+
+    for indice, mensaje in enumerate(mensajes):
         if tiempo_real:
+            if esperar_acuse:
+                recoger(mensaje.envio)
             espera = (mensaje.envio - reloj()).total_seconds()
             if espera > 0:
                 dormir(espera)
-        elif i and pausa_s > 0:
+        elif indice and pausa_s > 0:
             dormir(pausa_s)
         transporte.publicar(topico, mensaje.cuerpo)
+        publicado_en = reloj()
         if not esperar_acuse:
-            resultado = Resultado(mensaje, "no_esperado")
-        else:
-            acuse = transporte.esperar_acuse(mensaje.boot_id, mensaje.seq_no, timeout_s)
-            if acuse is None:
-                resultado = Resultado(mensaje, "sin_acuse")
-            else:
-                estado = acuse.get("status") if acuse.get("status") in ESTADOS_ACUSE else "desconocido"
-                resultado = Resultado(mensaje, estado, acuse.get("content_sha256") == mensaje.huella, acuse)
-        resultados.append(resultado)
-        if al_publicar:
-            al_publicar(resultado)
-    return resultados
+            anotar(indice, Resultado(mensaje, "no_esperado", publicado_en=publicado_en))
+            continue
+        pendientes.append((indice, publicado_en, publicado_en + timedelta(seconds=timeout_s)))
+        if not tiempo_real:
+            recoger(None)
+    recoger(None)
+    return [r for r in resultados if r is not None]
 
 
 def cumple(resultados: list[Resultado], esperados: set[str]) -> bool:
@@ -617,7 +669,7 @@ def escribir_registro(ruta: Path, resultados: list[Resultado]) -> None:
         escritor = csv.writer(archivo)
         escritor.writerow([
             "boot_id", "seq_no", "captured_at", "time_quality", "temp_ds18b20", "ds18b20_status", "door_open",
-            "error_contrato", "acuse", "huella_ok", "content_sha256", "cuerpo",
+            "error_contrato", "acuse", "huella_ok", "content_sha256", "cuerpo", "publicado_en",
         ])
         for r in resultados:
             p = r.mensaje.payload
@@ -626,7 +678,7 @@ def escribir_registro(ruta: Path, resultados: list[Resultado]) -> None:
                 "" if p["temp_ds18b20"] is None else p["temp_ds18b20"], p["ds18b20_status"],
                 "" if p["door_open"] is None else str(p["door_open"]).lower(), r.mensaje.error_contrato or "",
                 r.estado, "" if r.huella_ok is None else str(r.huella_ok).lower(), r.mensaje.huella,
-                r.mensaje.cuerpo.decode(),
+                r.mensaje.cuerpo.decode(), "" if r.publicado_en is None else _iso(r.publicado_en),
             ])
 
 
@@ -658,6 +710,9 @@ def _parser() -> argparse.ArgumentParser:
     comun.add_argument("--intervalo-s", type=float, default=10.0)
     comun.add_argument("--inicio", default=None, help="hora exacta de la primera lectura (ISO 8601 UTC)")
     comun.add_argument("--pausa-s", type=float, default=0.2, help="entre mensajes con horas exactas")
+    comun.add_argument("--hueco-s", type=float, default=0.0,
+                       help="segundos sin publicar antes de la primera lectura (tiempo real); "
+                            "con --uptime-inicial 0 es el reinicio con hueco S-R (>= 300)")
     comun.add_argument("--boot-id", type=int, default=None, help="por defecto, un arranque nuevo por ejecución")
     comun.add_argument("--seq-inicial", type=int, default=1)
     comun.add_argument("--uptime-inicial", type=int, default=600)
@@ -734,7 +789,10 @@ def _imprimir(resultado: Resultado) -> None:
           f"puerta={p['door_open']!s:<5} -> {resultado.estado}{huella}")
 
 
-def main(argv: list[str] | None = None, transporte_factory: Callable[..., Transporte] | None = None) -> int:
+def main(
+    argv: list[str] | None = None, transporte_factory: Callable[..., Transporte] | None = None,
+    dormir: Callable[[float], None] = time.sleep,
+) -> int:
     args = _parser().parse_args(argv)
     try:
         # La guarda va primero: con un destino o una identidad no permitidos no se lee el token
@@ -748,7 +806,12 @@ def main(argv: list[str] | None = None, transporte_factory: Callable[..., Transp
         lecturas = construir_lecturas(args)
         ahora = datetime.now(timezone.utc).replace(microsecond=0)
         exactas = args.inicio is not None or any(lectura.hora_exacta for lectura in lecturas)
-        t0 = _a_hora(args.inicio) if args.inicio else ahora
+        if not 0 <= args.hueco_s <= 86_400:
+            raise ErrorEntrada("--hueco-s debe estar entre 0 y 86400")
+        if args.hueco_s and exactas:
+            raise ErrorEntrada("--hueco-s es para tiempo real; con horas exactas el hueco se escribe en "
+                               "--inicio o en captured_at")
+        t0 = _a_hora(args.inicio) if args.inicio else ahora + timedelta(seconds=args.hueco_s)
         boot_id = args.boot_id if args.boot_id is not None else int(time.time()) % UINT32
         mensajes = planificar(
             lecturas, device_id=args.device_id, boot_id=boot_id, seq_inicial=args.seq_inicial,
@@ -772,14 +835,28 @@ def main(argv: list[str] | None = None, transporte_factory: Callable[..., Transp
               f"`python scripts/crear_dispositivo.py {args.device_id}`).", file=sys.stderr)
         return 2
     token = token_archivo.read_text(encoding="utf-8").strip()
+    if args.hueco_s:
+        # S-R: el nodo reiniciado no está conectado durante el hueco; la sesión se abre al final.
+        print(f"Hueco: {args.hueco_s:g} s sin conexión ni publicaciones; primera lectura a las {_iso(t0)}.")
+        espera = (t0 - datetime.now(timezone.utc)).total_seconds() - MARGEN_CONEXION_S
+        if espera > 0:
+            dormir(espera)
     fabrica = transporte_factory or TransportePaho
-    transporte = fabrica(args.host, args.puerto, args.device_id, token, args.ca)
+    try:
+        transporte = fabrica(args.host, args.puerto, args.device_id, token, args.ca)
+    except (OSError, ValueError) as error:
+        # Red, TLS, CA ausente o puerto inválido (ConnectionError y ssl.SSLError son OSError): no se
+        # llegó a publicar nada. El mensaje de error nunca incluye el token.
+        print(f"No se publica nada: no se pudo conectar con {args.host}:{args.puerto}: "
+              f"{type(error).__name__}: {error}", file=sys.stderr)
+        return 2
     try:
         print(f"{len(mensajes)} lecturas de {args.device_id} (boot_id {boot_id}) a {args.host}:{args.puerto}, "
               f"{'horas exactas' if exactas else 'tiempo real'}; sin `simulated`.")
         resultados = publicar_todos(
             mensajes, transporte, args.device_id, tiempo_real=not exactas, pausa_s=args.pausa_s,
-            esperar_acuse=not args.sin_acuse, timeout_s=args.acuse_timeout_s, al_publicar=_imprimir,
+            esperar_acuse=not args.sin_acuse, timeout_s=args.acuse_timeout_s, dormir=dormir,
+            al_publicar=_imprimir,
         )
     finally:
         transporte.cerrar()

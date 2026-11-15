@@ -9,7 +9,9 @@ import asyncio
 import csv
 import hashlib
 import json
+import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from sqlalchemy import func, insert, select, text
@@ -23,6 +25,7 @@ from src.infrastructure.database.models import DeviceModel, ThermalReadingModel
 from tests.postgres import a_asyncpg, base_migrada
 
 DEV, OTRO = "ESP32_BANCO_PRUEBA", "ESP32_OTRO_PRUEBA"
+DOC_REPRODUCIBILIDAD = Path(__file__).resolve().parents[2] / "docs/ml/09_REPRODUCIBILITY.md"
 T0 = datetime(2026, 11, 14, 10, 0, tzinfo=timezone.utc)
 
 MANIFIESTO = (
@@ -179,7 +182,9 @@ def test_ida_y_vuelta_por_el_importador_del_pipeline(base_sqlite, manifiesto, tm
     assert lecturas["temperatura_interna"].notna().sum() == 4  # 5.0, 5.2, 6.0, 6.1
 
 
-def test_la_exportacion_no_modifica_la_base(base_sqlite, manifiesto, tmp_path):
+def test_la_exportacion_deja_el_archivo_sqlite_intacto(base_sqlite, manifiesto, tmp_path):
+    """El exportador no escribe por su cuenta. No prueba el solo lectura: con un motor normal un
+    SELECT tampoco cambiaría el archivo. Eso lo prueban los DELETE de las pruebas siguientes."""
     ruta, url = base_sqlite
     antes = hashlib.sha256(ruta.read_bytes()).hexdigest()
     _exportar(url, manifiesto, tmp_path / "corridas.csv")
@@ -316,3 +321,56 @@ def test_postgres_exporta_y_la_conexion_es_de_solo_lectura(manifiesto, tmp_path)
         with pytest.raises(DBAPIError, match="read-only"):
             asyncio.run(_intentar_escribir())
         assert asyncio.run(_contar(url)) == len(_lecturas())
+
+
+def _consulta_psql_del_documento(corrida) -> str:
+    """El SELECT del `COPY` de 09_REPRODUCIBILITY.md, con la corrida de ejemplo cambiada por `corrida`."""
+    texto = DOC_REPRODUCIBILIDAD.read_text(encoding="utf-8")
+    bloque = re.search(r"COPY \((SELECT .*?)\) TO STDOUT", texto, re.DOTALL)
+    assert bloque, "no se encontró la consulta COPY en 09_REPRODUCIBILITY.md"
+    consulta = bloque.group(1)
+    for ejemplo, valor in (
+        ("'D01'", f"'{corrida.corrida_id}'"),
+        ("'ESP32_FARMACIA_01'", f"'{corrida.device_id}'"),
+        ("'2026-12-01T00:00:00Z'", f"'{corrida.inicio.isoformat()}'"),
+        ("'2026-12-29T00:00:00Z'", f"'{corrida.fin.isoformat()}'"),
+    ):
+        assert ejemplo in consulta, ejemplo
+        consulta = consulta.replace(ejemplo, valor)
+    return consulta
+
+
+def _texto_pg(valor) -> str:
+    if isinstance(valor, datetime):
+        return exp._utc(valor).isoformat(timespec="milliseconds")
+    return exp._texto(valor)
+
+
+def test_la_consulta_psql_del_documento_da_las_columnas_y_filas_del_exportador(manifiesto, tmp_path):
+    """09_REPRODUCIBILITY.md la presenta como alternativa al exportador: mismas 13 columnas (con
+    `origen_hora`) y mismas filas, salvo el formato que decide psql."""
+    corridas = [c for c in exp.leer_manifiesto(manifiesto) if c.uso != "excluida"]
+    with base_migrada() as dsn:
+        url = a_asyncpg(dsn)
+        asyncio.run(_poblar(url, crear=False))
+        salida = tmp_path / "corridas.csv"
+        _exportar(url, manifiesto, salida)
+        esperadas = _filas(salida)
+
+        async def _consultar():
+            motor = create_async_engine(url)
+            try:
+                async with motor.connect() as conexion:
+                    filas = []
+                    for corrida in corridas:
+                        resultado = await conexion.exec_driver_sql(_consulta_psql_del_documento(corrida))
+                        columnas = list(resultado.keys())
+                        filas += [dict(zip(columnas, map(_texto_pg, fila), strict=True)) for fila in resultado]
+                    return columnas, filas
+            finally:
+                await motor.dispose()
+
+        columnas, filas = asyncio.run(_consultar())
+    assert columnas == list(exp.COLUMNAS)
+    assert {f["origen_hora"] for f in filas} == {"nodo", "reconstruida", "recepcion"}
+    assert filas == esperadas

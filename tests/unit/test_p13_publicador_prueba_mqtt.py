@@ -7,6 +7,9 @@ bucle de publicación con un transporte falso. Ninguna prueba abre una conexión
 import hashlib
 import importlib.util
 import json
+import queue
+import re
+import ssl
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,7 +18,9 @@ import pytest
 
 from src.infrastructure.mqtt.contrato_v1 import TelemetriaV1
 
-RUTA = Path(__file__).resolve().parents[2] / "infra-local/scripts/publicador_prueba_mqtt.py"
+REPO = Path(__file__).resolve().parents[2]
+RUTA = REPO / "infra-local/scripts/publicador_prueba_mqtt.py"
+DOC = REPO / "docs/ml/11_DATOS_DE_PRUEBA_Y_CORRIDAS.md"
 spec = importlib.util.spec_from_file_location("publicador_prueba_mqtt", RUTA)
 pub = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = pub  # las dataclasses del script resuelven sus anotaciones por el módulo
@@ -202,7 +207,12 @@ def test_un_host_remoto_exige_permitir_host():
 
 
 @pytest.mark.parametrize(
-    "host", ["abc123.ala.us-east-1.emqxsl.com", "broker.emqx.io", "coldcare.up.railway.app", "x.proxy.rlwy.net"]
+    "host",
+    [
+        "abc123.ala.us-east-1.emqxsl.com", "broker.emqx.io", "coldcare.up.railway.app", "x.proxy.rlwy.net",
+        # Red privada de Railway: `.internal` la aceptaría como red local (la base de producción vive ahí).
+        "db.railway.internal", "emqx.railway.internal", "railway.internal",
+    ],
 )
 def test_brokers_en_la_nube_se_rechazan_siempre(host):
     with pytest.raises(pub.ErrorEntrada, match="nube"):
@@ -213,6 +223,10 @@ def test_brokers_en_la_nube_se_rechazan_siempre(host):
 def test_permitir_host_no_cubre_direcciones_publicas(host):
     with pytest.raises(pub.ErrorEntrada, match="red local"):
         pub.validar_destino(host, "PRUEBA_P13_01", permitir_host=True)
+
+
+def test_internal_que_no_es_de_railway_sigue_siendo_red_local():
+    pub.validar_destino("host.docker.internal", "PRUEBA_P13_01", permitir_host=True)
 
 
 # ── Publicación ──────────────────────────────────────────────────────────
@@ -229,7 +243,7 @@ class TransporteFalso:
     def esperar_acuse(self, boot_id, seq_no, timeout_s):
         if not self.responde:
             return None
-        cuerpo = self.publicados[-1][1]
+        cuerpo = next(c for _, c in self.publicados if json.loads(c)["seq_no"] == seq_no)
         huella = hashlib.sha256(cuerpo).hexdigest() if self.huella_correcta else "0" * 64
         return {"device_id": "PRUEBA_P13_01", "boot_id": boot_id, "seq_no": seq_no, "status": self.estado,
                 "content_sha256": huella}
@@ -266,6 +280,97 @@ def test_el_veredicto_exige_estado_esperado_y_huella(transporte, esperados, ok):
         tiempo_real=False, pausa_s=0, esperar_acuse=True, timeout_s=0.01,
     )
     assert pub.cumple(resultados, esperados) is ok
+
+
+class TransporteConRetardo:
+    """Backend que acusa `retardo_s` después de cada publicación, como tras el COMMIT con la inferencia
+    colgada (D08: `IA_PRUEBA_RETARDO_S=2`, timeout 1,0 s → acuse a ~1,2 s). Respeta el plazo que se le
+    pide y avanza el reloj falso lo que habría bloqueado. `nunca` son los seq_no sin acuse."""
+
+    def __init__(self, reloj, retardo_s, nunca=()):
+        self.reloj, self.retardo, self.nunca = reloj, timedelta(seconds=retardo_s), set(nunca)
+        self.publicados = []  # (instante, seq_no, cuerpo)
+
+    def publicar(self, topico, cuerpo):
+        self.publicados.append((self.reloj["ahora"], json.loads(cuerpo)["seq_no"], cuerpo))
+
+    def esperar_acuse(self, boot_id, seq_no, timeout_s):
+        instante, cuerpo = next((t, c) for t, s, c in self.publicados if s == seq_no)
+        limite = self.reloj["ahora"] + timedelta(seconds=timeout_s)
+        listo = instante + self.retardo
+        if seq_no in self.nunca or listo > limite:
+            self.reloj["ahora"] = limite
+            return None
+        self.reloj["ahora"] = max(self.reloj["ahora"], listo)
+        return {"boot_id": boot_id, "seq_no": seq_no, "status": "committed",
+                "content_sha256": hashlib.sha256(cuerpo).hexdigest()}
+
+    def cerrar(self):
+        pass
+
+
+def _reloj_falso():
+    reloj = {"ahora": INICIO}
+
+    def dormir(segundos):
+        reloj["ahora"] += timedelta(seconds=segundos)
+
+    return reloj, dormir
+
+
+def test_d08_en_tiempo_real_la_lectura_siguiente_no_espera_el_acuse_de_la_anterior():
+    mensajes = _planificar(pub.escenario_valores([5.0, 8.5]), intervalo_s=0.5)
+    reloj, dormir = _reloj_falso()
+    transporte = TransporteConRetardo(reloj, retardo_s=1.2)
+    resultados = pub.publicar_todos(
+        mensajes, transporte, "PRUEBA_P13_01", tiempo_real=True, pausa_s=0, esperar_acuse=True, timeout_s=8,
+        reloj=lambda: reloj["ahora"], dormir=dormir,
+    )
+    # 8,5 °C sale a t0 + 0,5 s, la hora de su captured_at, no detrás del acuse de 5,0 °C (t0 + 1,2 s).
+    assert [t for t, _, _ in transporte.publicados] == [INICIO, INICIO + timedelta(seconds=0.5)]
+    assert [m.payload["captured_at"] for m in mensajes] == ["2026-11-14T10:00:00Z", "2026-11-14T10:00:00.500Z"]
+    assert [(r.mensaje.seq_no, r.estado, r.huella_ok) for r in resultados] == [(1, "committed", True),
+                                                                               (2, "committed", True)]
+    assert [r.publicado_en for r in resultados] == [INICIO, INICIO + timedelta(seconds=0.5)]
+
+
+def test_en_tiempo_real_un_acuse_ausente_vence_en_su_plazo_sin_frenar_los_demas():
+    mensajes = _planificar(pub.escenario_valores([5.0, 5.0, 5.0]), intervalo_s=1.0)
+    reloj, dormir = _reloj_falso()
+    transporte = TransporteConRetardo(reloj, retardo_s=1.5, nunca={2})
+    impresos = []
+    resultados = pub.publicar_todos(
+        mensajes, transporte, "PRUEBA_P13_01", tiempo_real=True, pausa_s=0, esperar_acuse=True, timeout_s=3,
+        reloj=lambda: reloj["ahora"], dormir=dormir, al_publicar=lambda r: impresos.append(r.mensaje.seq_no),
+    )
+    assert [t for t, _, _ in transporte.publicados] == [INICIO + timedelta(seconds=s) for s in (0, 1, 2)]
+    assert [r.estado for r in resultados] == ["committed", "sin_acuse", "committed"]
+    assert impresos == [1, 2, 3]  # en orden de publicación
+    assert reloj["ahora"] == INICIO + timedelta(seconds=4)  # plazo del 2 (1 + 3 s); el 3 ya había llegado
+    assert not pub.cumple(resultados, {"committed"})
+
+
+def test_con_horas_exactas_cada_mensaje_espera_su_acuse_antes_del_siguiente():
+    mensajes = _planificar(pub.escenario_valores([5.0, 5.0]))
+    reloj, dormir = _reloj_falso()
+    transporte = TransporteConRetardo(reloj, retardo_s=1.2)
+    pub.publicar_todos(
+        mensajes, transporte, "PRUEBA_P13_01", tiempo_real=False, pausa_s=0.2, esperar_acuse=True, timeout_s=8,
+        reloj=lambda: reloj["ahora"], dormir=dormir,
+    )
+    assert [t for t, _, _ in transporte.publicados] == [INICIO, INICIO + timedelta(seconds=1.4)]
+
+
+def test_transporte_paho_con_plazo_cero_recoge_los_acuses_ya_recibidos():
+    """Sin abrir conexión: solo el buffer de acuses. Antes, con plazo 0 devolvía None aunque el acuse
+    ya estuviera en la cola, y en tiempo real se habría dado por perdido."""
+    transporte = object.__new__(pub.TransportePaho)
+    transporte._acuses, transporte._pendientes = queue.Queue(), {}
+    for seq in (2, 1):  # llegan en otro orden
+        transporte._acuses.put({"boot_id": 7, "seq_no": seq, "status": "committed"})
+    assert transporte.esperar_acuse(7, 1, 0)["seq_no"] == 1
+    assert transporte.esperar_acuse(7, 2, 0)["seq_no"] == 2  # quedó guardado
+    assert transporte.esperar_acuse(7, 3, 0) is None
 
 
 def test_en_tiempo_real_cada_lectura_sale_en_su_hora_de_captura():
@@ -308,6 +413,86 @@ def test_main_no_lee_el_token_ni_conecta_si_la_guarda_lo_impide(argv, tmp_path, 
     assert "No se publica nada" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["en_rango", "--inicio", "foo"],
+        ["en_rango", "--inicio", "2026-13-40T10:00:00Z"],
+        ["en_rango", "--hueco-s", "300", "--inicio", "2026-11-14T10:00:00Z"],
+        ["en_rango", "--hueco-s", "-1"],
+        ["en_rango", "--hueco-s", "nan"],
+    ],
+)
+def test_main_entrada_invalida_sale_con_2_sin_traza(argv, tmp_path, capsys):
+    token = tmp_path / "t.token"
+    token.write_text("secreto-de-prueba", encoding="utf-8")
+    codigo = pub.main([*argv, "--token-archivo", str(token)], transporte_factory=_fabrica_prohibida)
+    assert codigo == 2
+    err = capsys.readouterr().err
+    assert "No se publica nada" in err and "Traceback" not in err
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ConnectionError("sin CONNACK de localhost:8883 en 10 s"),
+        ssl.SSLCertVerificationError(1, "certificate verify failed"),
+        FileNotFoundError(2, "No such file or directory", "certs/ca.crt"),
+        ConnectionRefusedError(61, "Connection refused"),
+        ValueError("Invalid port number."),
+    ],
+)
+def test_main_un_fallo_al_conectar_sale_con_2_y_no_imprime_el_token(error, tmp_path, capsys):
+    token = tmp_path / "t.token"
+    token.write_text("secreto-de-prueba", encoding="utf-8")
+
+    def fabrica(*_args, **_kwargs):
+        raise error
+
+    codigo = pub.main(["en_rango", "--lecturas", "1", "--token-archivo", str(token)], transporte_factory=fabrica)
+    assert codigo == 2
+    salida = capsys.readouterr()
+    assert "No se publica nada" in salida.err and "no se pudo conectar" in salida.err
+    assert "secreto-de-prueba" not in salida.out + salida.err
+
+
+def test_main_hueco_retrasa_la_primera_lectura_como_un_reinicio(capsys):
+    antes = datetime.now(timezone.utc)
+    codigo = pub.main(
+        ["en_rango", "--lecturas", "2", "--hueco-s", "330", "--uptime-inicial", "0", "--dry-run"],
+        transporte_factory=_fabrica_prohibida,
+    )
+    assert codigo == 0
+    lineas = [json.loads(linea) for linea in capsys.readouterr().out.splitlines()]
+    horas = [datetime.fromisoformat(d["captured_at"].replace("Z", "+00:00")) for d in lineas]
+    assert antes + timedelta(seconds=329) <= horas[0] <= datetime.now(timezone.utc) + timedelta(seconds=330)
+    assert horas[1] - horas[0] == timedelta(seconds=10)
+    assert [d["uptime_s"] for d in lineas] == [0, 10] and [d["seq_no"] for d in lineas] == [1, 2]
+
+
+def test_main_con_hueco_no_conecta_hasta_el_final_del_hueco(tmp_path, capsys):
+    """Un nodo reiniciado no está conectado durante el hueco: la sesión MQTT se abre después."""
+    token = tmp_path / "t.token"
+    token.write_text("secreto-de-prueba", encoding="utf-8")
+    eventos = []
+
+    def fabrica(*_args):
+        eventos.append("conectar")
+        return TransporteFalso()
+
+    def dormir(segundos):
+        eventos.append(("dormir", round(segundos)))
+
+    codigo = pub.main(
+        ["en_rango", "--lecturas", "1", "--hueco-s", "330", "--uptime-inicial", "0", "--token-archivo", str(token)],
+        transporte_factory=fabrica, dormir=dormir,
+    )
+    assert codigo == 0
+    assert eventos[1] == "conectar" and eventos[0][0] == "dormir"
+    assert 320 <= eventos[0][1] <= 326  # 330 s menos el margen de conexión (5 s)
+    assert "Hueco: 330 s sin conexión ni publicaciones" in capsys.readouterr().out
+
+
 def test_main_dry_run_imprime_mensajes_sin_conectar(capsys):
     codigo = pub.main(
         ["valores", "--valores", "1.9,8.1", "--inicio", "2026-11-14T10:00:00Z", "--boot-id", "3", "--dry-run"],
@@ -342,4 +527,40 @@ def test_main_publica_con_el_token_sin_imprimirlo_y_deja_registro(tmp_path, caps
     assert "secreto-de-prueba" not in salida.out + salida.err
     filas = registro.read_text(encoding="utf-8").splitlines()
     assert len(filas) == 4 and filas[0].startswith("boot_id,seq_no,captured_at")
+    assert filas[0].endswith(",publicado_en")
     assert "8.5" in filas[2] and "committed" in filas[2]
+
+
+# ── Ejemplos del documento ───────────────────────────────────────────────
+
+
+def _csv_del_documento(nombre):
+    texto = DOC.read_text(encoding="utf-8")
+    bloque = re.search(rf"`{re.escape(nombre)}`[^\n]*\n\n```csv\n(.*?)```", texto, re.DOTALL)
+    assert bloque, f"{nombre} no está en {DOC.name}"
+    return bloque.group(1)
+
+
+def test_el_csv_de_d12_del_documento_se_publica_tal_cual(tmp_path):
+    ruta = _csv(tmp_path, _csv_del_documento("d12_unsynced.csv"))
+    assert pub.main(["csv", "--archivo", str(ruta), "--dry-run"], transporte_factory=_fabrica_prohibida) == 0
+    mensajes = pub.planificar(
+        pub.leer_csv(ruta, 10.0), device_id="PRUEBA_P13_01", boot_id=1, seq_inicial=1, uptime_inicial=0, t0=INICIO
+    )
+    assert all(m.error_contrato is None and m.payload["time_quality"] == "unsynced" for m in mensajes)
+    assert mensajes[-1].payload["temp_ds18b20"] == 8.5
+
+
+def test_el_csv_de_d19_del_documento_solo_trae_negativos_que_el_backend_rechaza(tmp_path, capsys):
+    ruta = _csv(tmp_path, _csv_del_documento("d19_implausibles.csv"))
+    # Sin --permitir-invalidos no sale nada; con él se puede publicar y esperar `rejected` en todas.
+    assert pub.main(["csv", "--archivo", str(ruta), "--dry-run"], transporte_factory=_fabrica_prohibida) == 2
+    assert pub.main(
+        ["csv", "--archivo", str(ruta), "--permitir-invalidos", "--esperado", "rejected", "--dry-run"],
+        transporte_factory=_fabrica_prohibida,
+    ) == 0
+    mensajes = pub.planificar(
+        pub.leer_csv(ruta, 10.0), device_id="PRUEBA_P13_01", boot_id=1, seq_inicial=1, uptime_inicial=0,
+        t0=INICIO, permitir_invalidos=True,
+    )
+    assert len(mensajes) == 4 and all(m.error_contrato for m in mensajes)
