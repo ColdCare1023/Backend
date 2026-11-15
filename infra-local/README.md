@@ -110,6 +110,8 @@ python scripts/publicar_caso.py '{}'  # una telemetría v1.0 válida → acuse "
 python scripts/hu12_hu19_carga.py     # HU-12/19: 5 nodos simultáneos, API en paralelo, latencia SSE
 python scripts/espiar_lecturas.py 3   # captura mensajes crudos de lecturas/eventos
 python scripts/nodo_virtual.py ESP32_FARMACIA_01   # nodo SIN hardware con el src/core del firmware (abajo)
+python scripts/publicador_prueba_mqtt.py valores --valores 1.9,2.0,8.0,8.1   # P-13: valores exactos sin `simulated`
+                                      # (requiere crear_dispositivo.py PRUEBA_P13_01; ver docs/ml/11_DATOS_DE_PRUEBA_Y_CORRIDAS.md)
 docker compose logs -f emqx           # evidencia HU-10: bad_username_or_password, authorization denied
 ```
 
