@@ -25,6 +25,7 @@ import csv
 import io
 import itertools
 import json
+import os
 import statistics
 import subprocess
 import sys
@@ -33,7 +34,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
-EVIDENCIA = RAIZ / "evidencia" / "paper"
+# CORRIDAS_DIR permite reusar la herramienta para las corridas de entrenamiento de la IA (evidencia/ml).
+EVIDENCIA = Path(os.environ["CORRIDAS_DIR"]) if os.environ.get("CORRIDAS_DIR") else RAIZ / "evidencia" / "paper"
 ACTIVA = EVIDENCIA / ".corrida_activa"
 PG = "coldcare-develop-postgres-1"
 BACKEND = "coldcare-develop-backend-1"
