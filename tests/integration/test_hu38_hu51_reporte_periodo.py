@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import select
 
-from src.application.use_cases import exportar_reporte_bpa
+from src.application.use_cases import exportar_reporte_bpa, exportar_reporte_bpa_pdf
 from src.application.use_cases.exportar_reporte_bpa_pdf import ExportarReporteBPAPDFUseCase
 from src.application.use_cases.verificar_integridad_registro import VerificarIntegridadRegistroUseCase
 from src.infrastructure.database.models import ThermalAlertModel, ThermalReadingModel
@@ -184,8 +184,10 @@ async def test_ninguna_excursion_critica_se_omite_si_las_alertas_se_recortan(
 
 
 async def test_el_reporte_lleva_el_hash_final_completo_y_cita_la_verificacion_del_periodo(
-    client, token_tecnico, token_farmaceutico, db_session_factory
+    client, token_tecnico, token_farmaceutico, db_session_factory, monkeypatch
 ):
+    # La verificación del periodo debe recuperarse aunque esté en otra página.
+    monkeypatch.setattr(exportar_reporte_bpa_pdf, "VERIFICACIONES_POR_PAGINA", 1)
     _ingestar(client, token_tecnico, 5.0, minutos_atras=30)
     desde, hasta = AHORA - timedelta(hours=1), AHORA + timedelta(minutes=1)
     for inicio, fin in ((desde, hasta), (AHORA - timedelta(days=9), AHORA - timedelta(days=8))):
