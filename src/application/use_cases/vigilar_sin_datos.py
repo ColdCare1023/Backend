@@ -6,7 +6,7 @@ periódica del backend (`interface/tareas.py`) ejecuta este caso de uso cada
 pocos segundos:
 
 - abre un incidente cuando el silencio del nodo alcanza N x su intervalo de
-  captura (3 x 30 s = 90 s de fábrica), con auditoría en la cadena del
+  captura (3 x 10 s = 30 s con el perfil inicial), con auditoría en la cadena del
   dispositivo y un aviso que se entrega DESPUÉS del COMMIT;
 - lo resuelve cuando vuelven las lecturas (también lo hace la propia ingesta,
   ver `resolver_sin_datos_por_lectura`).
@@ -28,11 +28,11 @@ from src.domain.repositories.i_incidente_repository import (
     IncidenteOperativo,
 )
 from src.domain.repositories.i_lectura_repository import ILecturaRepository
+from src.domain.value_objects.intervalo_reporte import INTERVALO_REPORTE_POR_DEFECTO
 
 # Ciclos perdidos tolerados antes de declarar SIN_DATOS: una reconexión breve
 # no dispara la alarma (HU-33/HU-54).
 N_INTERVALOS_SIN_DATOS = 3
-INTERVALO_REPORTE_POR_DEFECTO = 30
 
 
 def umbral_sin_datos(intervalo_segundos: int | None, n_intervalos: int = N_INTERVALOS_SIN_DATOS) -> int:

@@ -184,6 +184,22 @@ def test_downgrade_deshace_la_ultima_migracion(base_temporal):
     )
 
 
+def test_0043_conserva_intervalos_y_aplica_el_nuevo_perfil_solo_al_dar_de_alta(base_temporal):
+    config = _configuracion_alembic(base_temporal)
+    engine = create_engine(base_temporal)
+    command.upgrade(config, "0042_bigint_identidad")
+    with engine.begin() as conexion:
+        conexion.exec_driver_sql("INSERT INTO devices (id) VALUES ('ANTERIOR')")
+        conexion.exec_driver_sql("INSERT INTO devices (id, intervalo_reporte_segundos) VALUES ('MANUAL', 60)")
+    command.upgrade(config, "0043_intervalo_inicial_10s")
+    with engine.begin() as conexion:
+        conexion.exec_driver_sql("INSERT INTO devices (id) VALUES ('NUEVO')")
+        intervalos = dict(conexion.exec_driver_sql(
+            "SELECT id, intervalo_reporte_segundos FROM devices WHERE id IN ('ANTERIOR', 'MANUAL', 'NUEVO')"
+        ).all())
+    assert intervalos == {"ANTERIOR": 30, "MANUAL": 60, "NUEVO": 10}
+
+
 def test_tablas_de_evidencia_son_de_solo_anexado(base_temporal):
     """BE-007: tras migrar, la base rechaza borrar o reescribir evidencia y
     sigue admitiendo las únicas modificaciones legítimas (marcas de

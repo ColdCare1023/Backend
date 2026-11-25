@@ -40,6 +40,7 @@ from src.domain.repositories.i_incidente_repository import (
     IncidenteOperativo,
 )
 from src.domain.value_objects.device_id import PATRON_DEVICE_ID
+from src.domain.value_objects.intervalo_reporte import INTERVALO_REPORTE_POR_DEFECTO
 from src.domain.value_objects.resultado_auditoria import ResultadoAuditoria
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.database.repositories.audit_log_repository import SQLAlchemyAuditLogRepository
@@ -352,7 +353,7 @@ def _estado_operativo(
 
     HU-54: el umbral es N x el intervalo de captura del propio nodo, y el
     incidente SIN_DATOS es el persistente que abre la tarea periódica."""
-    intervalo = device.get("intervalo_reporte_segundos") or 30
+    intervalo = device.get("intervalo_reporte_segundos") or INTERVALO_REPORTE_POR_DEFECTO
     umbral = umbral_sin_datos(intervalo, n_intervalos)
     ultimo_reporte = _como_utc(ultima.received_at or ultima.timestamp) if ultima else None
     sensores: list[SensorIoTResponse] = []

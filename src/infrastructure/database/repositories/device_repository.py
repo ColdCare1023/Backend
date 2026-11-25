@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.repositories.i_device_repository import IDeviceRepository
+from src.domain.value_objects.intervalo_reporte import INTERVALO_REPORTE_POR_DEFECTO
 from src.infrastructure.database.models import DeviceConfigHistoryModel, DeviceModel
 
 
@@ -49,7 +50,7 @@ def _to_dict(model: DeviceModel) -> dict:
         "posesion_pendiente": bool(model.rotacion_por_compromiso and not model.broker_pendiente),
         "sesion_expulsada_en": model.sesion_expulsada_en,
         "sesion_expulsada_motivo": model.sesion_expulsada_motivo,
-        "intervalo_reporte_segundos": model.intervalo_reporte_segundos or 30,
+        "intervalo_reporte_segundos": model.intervalo_reporte_segundos or INTERVALO_REPORTE_POR_DEFECTO,
         "ultimo_latido_en": model.ultimo_latido_en,
     }
 
