@@ -26,7 +26,7 @@ async def _sembrar(factory, inicio: datetime, n: int, paso_s: int, device_id: st
     """Inserta `n` lecturas del nodo cada `paso_s` segundos desde `inicio`."""
     async with factory() as session:
         if await session.get(DeviceModel, device_id) is None:
-            session.add(DeviceModel(id=device_id, created_at=inicio - timedelta(days=30)))
+            session.add(DeviceModel(id=device_id, intervalo_reporte_segundos=paso_s, created_at=inicio - timedelta(days=30)))
             await session.flush()
         filas = [
             {
