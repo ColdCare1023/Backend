@@ -85,7 +85,7 @@ class IniciarLoginConCodigoUseCase:
     ) -> None:
         self._codigos = codigos
         self._logo_url = logo_url
-        # Origen del frontend para el botón «Copiar código» del correo.
+        # Origen del icono del correo si no se proporciona una URL de marca.
         self._base_frontend = base_frontend
 
     async def execute(self, usuario: Usuario, ip: str | None = None) -> DesafioLogin:

@@ -333,44 +333,6 @@ def test_el_bloque_del_codigo_es_grande_tabular_y_seleccionable_de_un_toque():
     assert "Copiar código" not in html and "copiar-codigo" not in html  # sin URL no hay botón
 
 
-def test_el_boton_copiar_codigo_lleva_el_codigo_en_el_fragmento():
-    from src.infrastructure.notifications.plantillas_correo import AZUL_MARCA
-
-    url = "https://coldcare.example/copiar-codigo#048213"
-    html = _correo(tono="marca", codigo="048213", codigo_copiar_url=url)
-    boton = re.search(r'<a href="([^"]*)"[^>]*aria-label="Copiar el código 0 4 8 2 1 3"[^>]*>(.*?)</a>', html)
-    assert boton and boton.group(1) == url
-    assert '<span class="gmail-screen"><span class="gmail-diff">Copiar código</span></span>' in boton.group(2)
-    assert f'bgcolor="{AZUL_MARCA}"' in html  # fondo sólido en la celda (Outlook)
-    assert html.count("copiar-codigo#") == 1
-    # Sin código no se dibuja el botón aunque llegue la URL; una URL que no es http nunca llega al href.
-    assert "copiar-codigo" not in _correo(codigo_copiar_url=url)
-    malo = _correo(tono="marca", codigo="048213", codigo_copiar_url="javascript:alert(1)")
-    assert "javascript:" not in malo and "Copiar código" not in malo
-
-
-def test_url_copiar_codigo_usa_el_origen_del_frontend_y_el_fragmento():
-    from src.infrastructure.notifications.plantillas_correo import url_copiar_codigo
-
-    assert url_copiar_codigo("https://coldcare.vercel.app", "123456") == "https://coldcare.vercel.app/copiar-codigo#123456"
-    assert url_copiar_codigo("https://coldcare.vercel.app/", "123456") == "https://coldcare.vercel.app/copiar-codigo#123456"
-    assert url_copiar_codigo("https://coldcare.vercel.app/recuperar-contrasena?email=a%40x.pe&modo=activar", "007123") == (
-        "https://coldcare.vercel.app/copiar-codigo#007123"
-    )
-    assert url_copiar_codigo("https://u:p@coldcare.vercel.app", "123456") == "https://coldcare.vercel.app/copiar-codigo#123456"
-    # http solo en desarrollo local.
-    assert url_copiar_codigo("http://localhost:5173", "123456") == "http://localhost:5173/copiar-codigo#123456"
-    assert url_copiar_codigo("http://127.0.0.1:8000/x", "123456") == "http://127.0.0.1:8000/copiar-codigo#123456"
-    assert url_copiar_codigo("http://[::1]:5173", "123456") == "http://[::1]:5173/copiar-codigo#123456"
-    for malo in ("", None, "javascript:alert(1)", "//evil.example", "ftp://x.pe", "coldcare.vercel.app",
-                 "http://coldcare.vercel.app", "http://localhost.evil.example", "http://[::1"):
-        assert url_copiar_codigo(malo, "123456") is None, malo
-    # Solo 4 a 12 letras o cifras ASCII.
-    for malo in ("", None, "123", "1234567890123", "a b&c", "12-456", "١٢٣٤٥٦", "123456\n"):
-        assert url_copiar_codigo("https://x.pe", malo) is None, malo
-    assert url_copiar_codigo("https://x.pe", "AB12cd") == "https://x.pe/copiar-codigo#AB12cd"
-
-
 def test_con_codigo_en_fragmento_solo_agrega_un_codigo_valido_a_un_enlace_http():
     from src.infrastructure.notifications.plantillas_correo import con_codigo_en_fragmento
 
@@ -430,46 +392,41 @@ def test_vigencias_en_minutos_y_horas():
     assert "48 horas" in correo_activacion_cuenta("Ana", "a@x.pe", "123456", 48, "https://x.pe/r").cuerpo
 
 
-def _correos_con_codigo_y_frontend():
+def _correos_con_codigo_y_frontend(codigo="123456"):
     from src.infrastructure.notifications import correos_cuenta as c
 
     base = "https://coldcare.example"
     pagina = f"{base}/recuperar-contrasena"
     return {
-        "login": c.correo_codigo_login("Ana", "123456", 10, base_frontend=base),
-        "recuperacion": c.correo_codigo_recuperacion("Ana", "123456", 10, f"{pagina}?email=a%40x.pe&modo=recuperar"),
+        "login": c.correo_codigo_login("Ana", codigo, 10, base_frontend=base),
+        "recuperacion": c.correo_codigo_recuperacion("Ana", codigo, 10, f"{pagina}?email=a%40x.pe&modo=recuperar"),
         "activacion": c.correo_activacion_cuenta(
-            "Ana", "a@x.pe", "123456", 48, f"{pagina}?email=a%40x.pe&modo=activar", f"{base}/"
+            "Ana", "a@x.pe", codigo, 48, f"{pagina}?email=a%40x.pe&modo=activar", f"{base}/"
         ),
     }
 
 
 @pytest.mark.parametrize("tipo", ["login", "recuperacion", "activacion"])
-def test_los_correos_con_codigo_traen_el_boton_copiar_codigo(tipo):
-    correo = _correos_con_codigo_y_frontend()[tipo]
-    assert 'href="https://coldcare.example/copiar-codigo#123456"' in correo.html
-    assert correo.html.count("Copiar código") == 1 and "user-select:all" in correo.html
-    assert "123456" not in correo.asunto
-    preheader = re.search(r'<span style="display:none[^>]*>([^<]*)</span>', correo.html).group(1)
-    assert "123456" not in preheader
-    assert "copiar-codigo" not in correo.cuerpo  # el texto plano ya trae el código a la vista
-    assert correo.html.count("display:none") == 1  # sin texto oculto extra
-    if tipo != "login":
-        # El botón de la página pasa a secundario: la acción principal es el código.
-        assert re.search(r'class="cc-boton2"', correo.html)
+def test_los_correos_permiten_copiar_el_codigo_directamente(tipo):
+    from src.infrastructure.notifications.plantillas_correo import bloque_codigo
 
-
-def test_el_boton_copiar_codigo_es_la_accion_principal_con_area_tactil_de_44_px():
-    """Píldora azul sólida (la mezcla de Gmail incluida) de 12 + 20 + 12 px de alto, y el botón de la
-    pantalla, con borde y secundario. El rótulo del código cabe en una línea a 320 px sin `<style>`."""
-    for tipo, correo in _correos_con_codigo_y_frontend().items():
-        boton = re.search(r'<a href="[^"]*copiar-codigo#123456"[^>]*>', correo.html).group(0)
-        assert "padding:12px 24px" in boton and "line-height:20px" in boton, tipo
-        assert "mso-padding-alt:12px 24px" in correo.html, tipo
-        rotulo = re.search(r'<p class="cc-fg3 cc-rotulo" style="([^"]*)">([^<]*)</p>', correo.html)
-        assert "letter-spacing:.6px" in rotulo.group(1), tipo
-        assert rotulo.group(2) == ("Tu código de activación" if tipo == "activacion" else "Tu código de verificación")
-    assert ".cc-rotulo { letter-spacing:1.2px !important; }" in correo.html  # más aire en escritorio
+    codigo = "007123"
+    rotulo = "Tu código de activación" if tipo == "activacion" else "Tu código de verificación"
+    vigencia = "48 horas" if tipo == "activacion" else "10 minutos"
+    bloque = bloque_codigo(codigo, f"Vence en {vigencia} · funciona una sola vez", rotulo)
+    correo = _correos_con_codigo_y_frontend(codigo)[tipo]
+    assert bloque in correo.html
+    nodo = re.search(r'<p class="cc-codigo"([^>]*)>([^<]*)</p>', bloque)
+    assert nodo and nodo.group(2) == codigo
+    assert 'aria-label="0 0 7 1 2 3"' in nodo.group(1) and "user-select:all" in nodo.group(1)
+    assert "Selecciona el código y elige Copiar." in bloque
+    assert not re.search(r"<(?:a|button|script)\b|\bhref\s*=", bloque, re.I)
+    assert "/copiar-codigo" not in correo.html and "/copiar-codigo" not in correo.cuerpo
+    assert codigo in correo.cuerpo and codigo not in correo.asunto
+    assert codigo not in re.search(r'<span[^>]*display:none[^>]*>(.*?)</span>', correo.html, re.S).group(1)
+    if tipo == "login":
+        assert "<a href=" not in correo.html
+    assert "letter-spacing:.6px" in bloque and ".cc-rotulo { letter-spacing:1.2px !important; }" in correo.html
 
 
 @pytest.mark.parametrize("tipo", ["recuperacion", "activacion"])
@@ -530,7 +487,8 @@ def test_el_caso_de_uso_de_login_pasa_el_frontend_al_correo():
     emitido = CodigoEmitido(codigo="654321", registro=None, desafio="d", vigencia=timedelta(minutes=10))
     servicio = SimpleNamespace(politica=SimpleNamespace(reenvio=timedelta(seconds=60)))
     desafio = _desafio(usuario, "d", emitido, servicio, None, "https://coldcare.example")
-    assert 'href="https://coldcare.example/copiar-codigo#654321"' in desafio.html
+    assert 'src="https://coldcare.example/email/coldcare-icon-96.png"' in desafio.html
+    assert "<a href=" not in desafio.html and ">654321</p>" in desafio.html
     assert "654321" not in desafio.asunto
     sin = _desafio(usuario, "d", emitido, servicio)
     assert "copiar-codigo" not in sin.html and "654321" in sin.html
