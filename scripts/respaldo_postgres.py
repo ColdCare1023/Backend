@@ -11,8 +11,8 @@ Uso (servicio cron de Railway, docs/operacion/RESPALDO_RAILWAY.md):
 3. Dentro de la MISMA transacción calcula la huella (filas + SHA-256 por
    tabla) de las tablas de evidencia (`TABLAS_EVIDENCIA`): thermal_readings,
    traceability_records (con el contenido de cada eslabón), audit_logs, users,
-   devices, thermal_alerts, corrective_actions, device_config_history y
-   ai_model_versions. Volcado y huella describen el
+   roles, devices, thermal_alerts, corrective_actions, device_config_history,
+   ai_model_versions y predicciones_preventivas. Volcado y huella describen el
    mismo instante aunque el nodo siga publicando: una lectura que entre
    durante o después del pg_dump no está en ninguno de los dos.
 4. Escribe el manifiesto (SHA-256 del archivo, huellas y columnas), que es lo
@@ -53,7 +53,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from src.infrastructure.config import get_settings
 from src.infrastructure.database.repositories.audit_log_repository import SQLAlchemyAuditLogRepository
 from src.infrastructure.database.session import build_engine, build_session_factory
-from src.infrastructure.respaldo.huellas import TABLAS_EVIDENCIA, huellas_evidencia
+from src.infrastructure.respaldo.huellas import TABLAS_EVIDENCIA, VERSION_HUELLA, huellas_evidencia
 
 logger = logging.getLogger("respaldo")
 CODIGO_FALLO = 2
@@ -83,7 +83,7 @@ async def _conexion_snapshot(conexion: AsyncConnection) -> AsyncConnection:
     return await conexion.execution_options(isolation_level="REPEATABLE READ", postgresql_readonly=True)
 
 
-async def _huellas(database_url: str, columnas: dict | None = None) -> dict:
+async def _huellas(database_url: str, columnas: dict | None = None, *, version: int = VERSION_HUELLA) -> dict:
     """Huella de una base (la restaurada, en la verificación), leída en un
     único snapshot."""
     engine = build_engine(database_url)
@@ -91,7 +91,7 @@ async def _huellas(database_url: str, columnas: dict | None = None) -> dict:
         async with engine.connect() as conexion:
             conexion = await _conexion_snapshot(conexion)
             async with conexion.begin():
-                return await huellas_evidencia(conexion, columnas)
+                return await huellas_evidencia(conexion, columnas, version=version)
     finally:
         await engine.dispose()
 
@@ -203,6 +203,7 @@ async def respaldar(database_url: str, destino: Path, marca: str | None = None) 
         # Volcado y huella salen del mismo snapshot exportado.
         "consistencia": "snapshot_exportado_repeatable_read",
         "postgres_servidor": version_servidor,
+        "version_huella": VERSION_HUELLA,
         "huellas": huellas,
         # La verificación recalcula la huella con estas mismas columnas.
         "columnas": {tabla: list(cols) for tabla, cols in TABLAS_EVIDENCIA.items()},

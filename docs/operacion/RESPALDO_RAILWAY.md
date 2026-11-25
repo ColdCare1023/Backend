@@ -14,7 +14,7 @@ nada de esto se crea desde el código. Las evidencias que hay que archivar está
 3. Ejecuta `pg_dump --format=custom --snapshot=<id>` sobre ese snapshot.
 4. Dentro de la misma transacción calcula la huella (filas y SHA-256 en orden de clave) de
    `thermal_readings`, `traceability_records`, `audit_logs`, `users`, `devices`, `thermal_alerts`,
-   `corrective_actions`, `device_config_history` y `ai_model_versions` (9 tablas; en los eslabones
+   `corrective_actions`, `device_config_history`, `ai_model_versions`, `roles` y `predicciones_preventivas` (11 tablas; en los eslabones
    entra también su contenido: payload, hora y `chain_seq`). Las tablas se recorren por clave, no con OFFSET.
    El volcado y la huella describen el mismo instante aunque el nodo siga publicando.
 5. Escribe `coldcare_<UTC>.dump` y `coldcare_<UTC>.manifiesto.json` y deja `RESPALDO_COMPLETADO`
@@ -167,7 +167,7 @@ cuenta lo que esté en el panel de cada servicio.
 ### Comprobación del escenario 1
 
 - Logs de la ejecución: `Respaldo completado: coldcare_<UTC>.dump (<bytes> bytes)`.
-- Fila `RESPALDO_COMPLETADO` en Auditoría, con el SHA-256 y el número de filas de las 9 tablas.
+- Fila `RESPALDO_COMPLETADO` en Auditoría, con el SHA-256 y el número de filas de las 11 tablas.
 - Contenido del volumen (con el servicio vinculado mediante `railway link` y `railway service`):
   `railway volume files list /`.
 
@@ -246,7 +246,7 @@ genera un respaldo local con el mismo código. Después se siguen los pasos 2 a 
   ejecuta el cron (`main`) contra esa base: un fallo de almacenamiento deja `RESPALDO_FALLIDO` y el
   vigilante de la API escribe la alerta crítica (`test_un_fallo_del_cron_llega_al_log_del_backend`),
   y un `.dump` cortado se borra y no cuenta para la retención.
-- `tests/integration/test_hu29_respaldo_restauracion.py`: comprueba la huella, las 9 tablas, el contenido de los eslabones, la
+- `tests/integration/test_hu29_respaldo_restauracion.py`: comprueba la huella, las 11 tablas, el contenido de los eslabones, la
   paginación por clave, los manifiestos antiguos y el fallo crítico.
 - `tests/unit/test_hu29_servicio_cron_respaldo.py`: comprueba `Dockerfile.respaldo` (cliente 18,
   usuario `app` con `HOME=/tmp`), `railway.respaldo.json`, la retención y que esta guía mantenga la

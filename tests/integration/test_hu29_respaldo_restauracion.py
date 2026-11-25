@@ -171,11 +171,64 @@ async def test_la_huella_cubre_el_registro_de_versiones_del_modelo(db_session_fa
         ))
         await session.commit()
         antes = await huellas_evidencia(session)
-        await session.execute(ModeloIAVersionModel.__table__.update().values(activa=False))
+        await session.execute(ModeloIAVersionModel.__table__.update().values(metricas={"f1_macro": 0.85}))
         despues = await huellas_evidencia(session)
 
     assert antes["ai_model_versions"]["filas"] == 1
     assert comparar_huellas(antes, despues)["tablas"]["ai_model_versions"]["coincide_huella"] is False
+
+
+async def test_la_huella_distingue_probabilidades_sin_redondeo_y_lee_la_precision_legada(db_session_factory):
+    from sqlalchemy import select
+
+    from src.infrastructure.database.models import PrediccionPreventivaModel
+
+    await _poblar(db_session_factory)
+    async with db_session_factory() as session:
+        lectura = (await session.scalars(select(ThermalReadingModel))).one()
+        prediccion = PrediccionPreventivaModel(
+            lectura_id=lectura.id, device_id=lectura.device_id, timestamp_inferencia=lectura.timestamp,
+            modo="sombra", estado="ok", clase="normal", puntuacion=0.12345671,
+        )
+        session.add(prediccion)
+        await session.flush()
+        lectura.confianza_ia = 0.12345671
+        await session.flush()
+        antes = await huellas_evidencia(session)
+        columnas_antiguas = {"thermal_readings": ("id", "confianza_ia")}
+        antiguo = await huellas_evidencia(session, columnas_antiguas, version=1)
+        lectura.confianza_ia = prediccion.puntuacion = 0.12345672
+        await session.flush()
+        despues = await huellas_evidencia(session)
+        assert await huellas_evidencia(session, columnas_antiguas, version=1) == antiguo
+    detalle = comparar_huellas(antes, despues)["tablas"]
+    for tabla in ("thermal_readings", "predicciones_preventivas"):
+        assert detalle[tabla]["coinciden_filas"] is True
+        assert detalle[tabla]["coincide_huella"] is False
+
+
+def test_verificar_un_respaldo_anterior_usa_sus_columnas_y_su_normalizacion(tmp_path, monkeypatch):
+    import json
+
+    from scripts import verificar_restauracion
+
+    archivo = tmp_path / "anterior.dump"
+    archivo.write_bytes(b"respaldo de prueba")
+    columnas = {"thermal_readings": ("id", "temperatura_interna")}
+    huella = {"thermal_readings": {"filas": 1, "sha256": "b" * 64}}
+    ruta = tmp_path / "anterior.manifiesto.json"
+    ruta.write_text(json.dumps({
+        "archivo": archivo.name, "sha256": respaldo_postgres.sha256_archivo(archivo),
+        "huellas": huella, "columnas": columnas,
+    }))
+
+    async def recalcular(_url, seleccion, *, version):
+        assert seleccion == columnas and version == 1
+        return huella
+
+    monkeypatch.setattr(verificar_restauracion, "restaurar", lambda *_args: None)
+    monkeypatch.setattr(verificar_restauracion, "_huellas", recalcular)
+    assert verificar_restauracion.verificar(ruta, "postgresql://localhost/aislada", None)["coincide"]
 
 
 async def test_un_manifiesto_v2_se_sigue_verificando_con_sus_columnas(db_session_factory):
@@ -183,7 +236,7 @@ async def test_un_manifiesto_v2_se_sigue_verificando_con_sus_columnas(db_session
     contenido de los eslabones ni ai_model_versions): se verifican con ellas."""
     await _poblar(db_session_factory)
     columnas_v2 = {
-        tabla: list(cols) for tabla, cols in TABLAS_EVIDENCIA.items() if tabla != "ai_model_versions"
+        tabla: list(cols) for tabla, cols in TABLAS_EVIDENCIA.items() if tabla not in {"ai_model_versions", "roles", "predicciones_preventivas"}
     }
     columnas_v2["traceability_records"] = list(TABLAS_EVIDENCIA_LEGADO["traceability_records"])
     columnas_v2["thermal_readings"] = list(TABLAS_EVIDENCIA_LEGADO["thermal_readings"])

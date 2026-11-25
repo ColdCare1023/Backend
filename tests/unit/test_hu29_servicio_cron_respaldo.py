@@ -173,13 +173,13 @@ def _seccion(texto: str, titulo: str) -> str:
     return texto[inicio: inicio + siguiente.start()] if siguiente else texto[inicio:]
 
 
-def test_la_verificacion_de_restauracion_documenta_las_9_tablas():
+def test_la_verificacion_de_restauracion_documenta_las_tablas_actuales():
     from scripts import verificar_restauracion
     from src.infrastructure.respaldo.huellas import TABLAS_EVIDENCIA
 
     documentacion = verificar_restauracion.__doc__
-    assert len(TABLAS_EVIDENCIA) == 9
-    assert "9 tablas" in documentacion
+    assert len(TABLAS_EVIDENCIA) == 11
+    assert f"{len(TABLAS_EVIDENCIA)} tablas" in documentacion
     assert [tabla for tabla in TABLAS_EVIDENCIA if tabla not in documentacion] == []
 
 
