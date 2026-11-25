@@ -161,6 +161,9 @@ async def test_reenvio_es_duplicate_y_contenido_distinto_va_a_cuarentena(entorno
         {"temp_ds18b20": -127.0, "ds18b20_status": "OK"},  # código de error como número
         {"sensor_fault": True},                      # no refleja los sensores
         {"captured_at": None},                       # null sin unsynced
+        {"temp_ds18b20": "4.25"},                  # número enviado como texto
+        {"door_open": "false"},                    # booleano enviado como texto
+        {"uptime_s": True},                        # un booleano no representa segundos
         {"campo_extra": 1},                          # extra="forbid"
         {"firmware_version": "1.0.0"},               # sin la v
         {"schema_version": "2.0"},                   # HU-07: versión de contrato no soportada
@@ -176,6 +179,21 @@ async def test_mutaciones_invalidas_se_rechazan_con_identidad(entorno, cambios):
     assert (ack["boot_id"], ack["seq_no"]) == (42, 7)
     async with entorno() as session:
         assert await SQLAlchemyLecturaRepository(session).obtener_por_device_boot_seq(DEV, 42, 7) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cambios", [
+    {"device_id": None}, {"device_id": "ESP32_DEMO_01"}, {"seq_no": "7"},
+    {"seq_no": True}, {"seq_no": 7.25}, {"seq_no": 0}, {"boot_id": 2**32},
+])
+async def test_falla_de_esquema_sin_identidad_fiable_solo_se_audita(entorno, cambios):
+    datos = _ejemplo("telemetria_normal", temp_ds18b20="inválida", **cambios)
+    espia = _Espia()
+    await main._procesar_lectura_mqtt(_Mensaje(TOPIC, json.dumps(datos)), _Mudo(), espia)
+    assert espia.acks == []
+    async with entorno() as session:
+        q = select(AuditLogModel).where(AuditLogModel.accion == "LECTURA_RECHAZADA_ESQUEMA")
+        assert (await session.execute(q)).scalar_one().detalle["errores"]
 
 
 @pytest.mark.asyncio

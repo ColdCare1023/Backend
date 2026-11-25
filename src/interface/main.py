@@ -82,6 +82,8 @@ from src.infrastructure.mqtt import contrato_v1
 from src.infrastructure.mqtt.broker_admin import BrokerAdmin
 from src.infrastructure.mqtt.mqtt_client import ESTADO_CONEXION, mqtt_session
 from src.infrastructure.mqtt.payload_schema import (
+    SCHEMA_VERSION_ACTUAL,
+    SCHEMA_VERSIONS_SOPORTADAS,
     MAX_BYTES_PAYLOAD_MQTT,
     EventoDispositivoPayload,
     LecturaPayload,
@@ -846,13 +848,20 @@ async def _rechazar_payload_invalido(
         crudo = json.loads(message.payload)
     except ValueError:
         crudo = None
-    reading_id = crudo.get("reading_id") if isinstance(crudo, dict) else None
+    reading_id = None
     boot_id = seq_no = None
-    if isinstance(crudo, dict):
-        try:
-            boot_id, seq_no = int(crudo["boot_id"]), int(crudo["seq_no"])
-        except (KeyError, TypeError, ValueError):
-            boot_id = seq_no = None
+    if isinstance(crudo, dict) and crudo.get("device_id") == device_id:
+        version = crudo.get("schema_version", SCHEMA_VERSION_ACTUAL)
+        if type(version) is int and version in SCHEMA_VERSIONS_SOPORTADAS:
+            id_legacy = crudo.get("reading_id")
+            if isinstance(id_legacy, str) and 0 < len(id_legacy) <= 100:
+                reading_id = id_legacy
+        boot, seq = crudo.get("boot_id"), crudo.get("seq_no")
+        # Un acuse permite mover el bloque a cuarentena. Su identidad debe
+        # provenir literalmente del mensaje, sin convertir booleanos o decimales.
+        if (type(boot) is int and 0 <= boot <= contrato_v1.UINT32
+                and type(seq) is int and 1 <= seq <= contrato_v1.UINT32):
+            boot_id, seq_no = boot, seq
 
     async with _session_factory() as session:
         await AuditarAccionCriticaUseCase(
@@ -917,7 +926,7 @@ async def _procesar_lectura_mqtt(
                     errores=[{"campo": "payload", "tipo": f"excede_{contrato_v1.PAYLOAD_MAX_BYTES}_bytes"}],
                 )
                 return
-            telemetria_v1 = contrato_v1.TelemetriaV1.model_validate(crudo)
+            telemetria_v1 = contrato_v1.TelemetriaV1.model_validate_json(message.payload, strict=True)
             payload = LecturaPayload.model_validate(
                 contrato_v1.a_lectura_interna(telemetria_v1, datetime.now(timezone.utc))
             )
