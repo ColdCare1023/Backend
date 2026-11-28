@@ -25,6 +25,8 @@ Backend, Frontend e IoT; esta tabla resume lo que cambió en el código.
 `IA_PREVENTIVO_MODO=sombra`, `IA_PREVENTIVO_VERSION=rf-preventivo-h30-termico-puerta-1.0.0`,
 `IA_PREVENTIVO_SHA256` = SHA-256 del `modelo.joblib` de esa versión
 (`docs/operacion/HU-55_despliegue_railway.md`). `IA_LEGADO_MODO=experimental`.
+Los tres valores del modelo preventivo vienen fijados en la imagen
+(`infra-local/backend/Dockerfile`); una variable del servicio en Railway los sobrescribe.
 
 ## Frontend (prototipo OE2.I3)
 
