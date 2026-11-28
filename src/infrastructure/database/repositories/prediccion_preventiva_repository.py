@@ -26,6 +26,8 @@ def _to_entity(model: PrediccionPreventivaModel) -> PrediccionPreventiva:
         modelo_sha256=model.modelo_sha256,
         motivo=model.motivo,
         vector_features=model.vector_features,
+        conjunto_features=model.conjunto_features,
+        inferido_en=model.inferido_en,
         creado_en=model.created_at,
     )
 
@@ -52,6 +54,8 @@ class SQLAlchemyPrediccionPreventivaRepository(IPrediccionPreventivaRepository):
             modelo_sha256=prediccion.modelo_sha256,
             motivo=prediccion.motivo[:200] if prediccion.motivo else None,
             vector_features=prediccion.vector_features,
+            conjunto_features=prediccion.conjunto_features,
+            inferido_en=prediccion.inferido_en,
         )
         self._session.add(model)
         await self._session.flush()
