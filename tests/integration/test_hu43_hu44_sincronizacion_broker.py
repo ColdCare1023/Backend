@@ -25,6 +25,7 @@ class _BrokerApi:
     """EMQX 5 completo/Dedicated: el backend gestiona usuarios y sesiones por API."""
 
     configurado = True
+    gestiona_usuarios = True
 
     def __init__(self) -> None:
         self.credencial: bool | None = True
@@ -129,23 +130,57 @@ async def test_baja_por_api_audita_el_retiro_y_la_expulsion(client, token_admin,
     assert {e.resultado for e in eventos} == {"exitoso"}
 
 
-async def test_rotacion_por_api_audita_aprovisionamiento_y_expulsion(
+async def test_rotacion_por_api_espera_el_relevo_y_lo_carga_al_confirmar(
     client, token_admin, broker, db_session_factory
 ):
+    """HU-44 esc. 2: el token nuevo va PRIMERO al nodo (`mqtt_relevo`) y después al
+    broker. Con el broker por API la rotación no lo carga ni expulsa la sesión:
+    queda «esperando_relevo» hasta que el administrador confirma con el token."""
     _alta(client, token_admin)
+    cabecera = auth_header(token_admin)
 
     respuesta = client.post(
-        f"/api/dispositivos/{DEVICE_ID}/credenciales/rotar", json={"motivo": "programada"},
-        headers=auth_header(token_admin),
+        f"/api/dispositivos/{DEVICE_ID}/credenciales/rotar", json={"motivo": "programada"}, headers=cabecera,
     )
 
     assert respuesta.status_code == 200
-    assert respuesta.json()["sesion_broker_cerrada"] is True
+    cuerpo = respuesta.json()
+    token = cuerpo["token"]
+    assert cuerpo["sesion_broker_cerrada"] is None and cuerpo["credencial_aprovisionada"] is None
+    assert "mqtt_relevo" in cuerpo["mensaje_broker"]
+    # Solo el aprovisionamiento del alta: la rotación todavía no tocó el broker.
+    assert await _operaciones(db_session_factory, "BROKER_OPERACION_SINCRONIZADA") == ["aprovisionar"]
+    dispositivo = next(d for d in client.get("/api/dispositivos", headers=cabecera).json() if d["id"] == DEVICE_ID)
+    assert dispositivo["broker_pendiente"] == "aprovisionar"
+    assert dispositivo["broker_pendiente_motivo"] == "esperando_relevo"
+
+    url = f"/api/dispositivos/{DEVICE_ID}/broker/confirmar"
+    assert client.post(url, json={}, headers=cabecera).status_code == 422  # falta el token
+    assert client.post(url, json={"token": "x" * 43}, headers=cabecera).status_code == 422  # no es el emitido
+    confirmada = client.post(url, json={"token": token, "nota": "relevo cargado"}, headers=cabecera)
+
+    assert confirmada.status_code == 200, confirmada.text
+    assert confirmada.json()["broker_pendiente"] is None
     assert await _operaciones(db_session_factory, "BROKER_OPERACION_SINCRONIZADA") == [
         "aprovisionar", "aprovisionar", "expulsar_sesion",
     ]
-    ultimo = (await _eventos(db_session_factory, "BROKER_OPERACION_SINCRONIZADA"))[-1]
-    assert ultimo.detalle == {"operacion": "expulsar_sesion", "origen": "rotacion", "motivo": "programada"}
+    relevo = (await _eventos(db_session_factory, "BROKER_OPERACION_SINCRONIZADA"))[1]
+    assert relevo.detalle == {"operacion": "aprovisionar", "origen": "relevo_confirmado"}
+
+
+async def test_relevo_rechazado_por_la_api_sigue_pendiente(client, token_admin, broker, db_session_factory):
+    _alta(client, token_admin)
+    cabecera = auth_header(token_admin)
+    token = client.post(
+        f"/api/dispositivos/{DEVICE_ID}/credenciales/rotar", json={"motivo": "programada"}, headers=cabecera,
+    ).json()["token"]
+    broker.credencial = False
+
+    respuesta = client.post(f"/api/dispositivos/{DEVICE_ID}/broker/confirmar", json={"token": token}, headers=cabecera)
+
+    assert respuesta.status_code == 502
+    dispositivo = next(d for d in client.get("/api/dispositivos", headers=cabecera).json() if d["id"] == DEVICE_ID)
+    assert dispositivo["broker_pendiente"] == "aprovisionar"
 
 
 async def test_revocacion_por_api_audita_retiro_y_expulsion(client, token_admin, broker, db_session_factory):
