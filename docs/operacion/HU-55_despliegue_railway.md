@@ -61,6 +61,8 @@ El cron de respaldo (`respaldo-postgres`) ya tiene en su panel `Dockerfile.respa
 | `BROKER_API_URL`, `BROKER_API_KEY`, `BROKER_API_SECRET` | API key de la instancia (expulsión de sesiones). La URL incluye la ruta de la API; el backend la comprueba al arrancar (`GET /clients`) y lo muestra como `broker_api` en `/health/detalle` |
 | `BROKER_USUARIOS_MODO` | `manual` (Serverless no tiene API de usuarios) |
 | `IA_LEGADO_MODO` | `experimental` (o `desactivado`, decisión D-2) |
+| `IA_PREVENTIVO_MODO` | `sombra` (criterios del 20/11/2026, HU-34 y HU-46): predice y guarda evidencia sin cambiar el riesgo efectivo ni abrir alertas; el tablero la rotula «IA en modo sombra» |
+| `IA_PREVENTIVO_VERSION`, `IA_PREVENTIVO_SHA256` | `rf-preventivo-h30-termico-puerta-1.0.0` y `6d5c81c0403f5c96b70accc1b079f6ff6760e45e7cf83abdc12f4c7d49f6aaa6` (SHA-256 del `modelo.joblib` de esa versión) |
 | `FORWARDED_ALLOW_IPS` | ver «Proxy» |
 | `SSE_MAX_STREAMS_POR_USUARIO` | opcional, por defecto `10` (flujos SSE por cuenta; pasado el tope, 429 `demasiados_flujos`) |
 | `CODIGOS_HMAC_KEY`, `OTP_LOGIN_ENABLED`, `PASSWORD_RESET_URL` | ver `docs/operacion/CODIGOS_VERIFICACION.md` y la tabla del README |
