@@ -55,6 +55,7 @@ from src.infrastructure.database.repositories.trazabilidad_repository import (
 from src.infrastructure.database.repositories.usuario_repository import SQLAlchemyUsuarioRepository
 from src.infrastructure.mqtt.broker_admin import BrokerAdmin, obtener_broker_admin
 from src.infrastructure.mqtt.desafio_posesion import PublicadorDesafios, obtener_publicador_desafios
+from src.infrastructure.security.password_hasher import verify_password_async
 from src.interface.api.deps import DbSessionDep, SettingsDep, require_roles
 from src.interface.api.mappers import buffer_to_response, nombre_visible
 from src.interface.api.schemas import (
@@ -104,6 +105,12 @@ async def _anotar_expulsion(session, device_id: str, motivo: str) -> None:
     await session.commit()
 
 
+# HU-44 esc. 2 con el broker administrado por API: el token nuevo va primero al
+# nodo como relevo; el backend lo carga en el broker cuando el administrador
+# confirma (con el token), no en la misma petición de la rotación.
+MOTIVO_ESPERANDO_RELEVO = "esperando_relevo"
+
+
 def _motivo_pendiente(broker: BrokerAdmin, resultado: bool | None) -> str:
     if resultado is False:
         return "api_broker_error"
@@ -121,13 +128,14 @@ async def _registrar_resultado_broker(
     *,
     origen: str,
     motivo_operacion: str | None = None,
+    motivo: str | None = None,
 ) -> bool:
     """HU-44 Escenario 3: tras el COMMIT de la operación, deja persistente (y
     auditado) lo que el broker no confirmó. Devuelve True si quedó pendiente.
 
     HU-43 esc. 4: si la API del broker SÍ la confirmó, el resultado también
     queda auditado y encadenado (BROKER_OPERACION_SINCRONIZADA)."""
-    motivo = _motivo_pendiente(broker, resultado)
+    motivo = motivo or _motivo_pendiente(broker, resultado)
     pendiente = await RegistrarResultadoBrokerUseCase(
         SQLAlchemyDeviceRepository(session), RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session))
     ).execute(device_id, operacion, resultado, motivo, actor_id)
@@ -201,7 +209,9 @@ async def _registrar_expulsion(
     )
 
 
-def _mensaje_aprovisionar(device_id: str, resultado: bool | None, alta: bool = False) -> str | None:
+def _mensaje_aprovisionar(
+    device_id: str, resultado: bool | None, alta: bool = False, relevo_api: bool = False
+) -> str | None:
     """Instrucción cuando el broker no aprovisionó el token por sí solo.
 
     En el alta el nodo aún no tiene token: se carga como `mqtt_token`. En una
@@ -209,6 +219,13 @@ def _mensaje_aprovisionar(device_id: str, resultado: bool | None, alta: bool = F
     como `mqtt_relevo` y después a la consola de EMQX; el nodo, rechazado con
     el viejo, entra con el relevo sin quedar fuera. El nodo prueba el relevo
     primero y, cuando el broker lo acepta, borra el token anterior."""
+    if relevo_api:
+        return (
+            "Rotación en dos pasos (HU-44): 1) En el nodo (consola desbloqueada): "
+            "`nvs set mqtt_relevo <token>`. 2) Confirme la operación en el sistema con este mismo token: "
+            "el backend lo carga en el broker y expulsa la sesión; el nodo entra con el relevo y borra el "
+            "token anterior. Hasta confirmar, el nodo sigue con el token vigente. El token no se mostrará de nuevo."
+        )
     if resultado is True:
         return None
     causa = (
@@ -634,19 +651,31 @@ async def rotar_credencial(
     # que el limitador solo contó en ella queda en una fila de cierre.
     await auditar_suprimidos(auditoria, device_id, LIMITE_AUDITORIA.vaciar(device_id), "rotacion")
     await session.commit()
-    # BE-002: tras el COMMIT. Primero se aprovisiona el token nuevo en el broker
-    # (autenticación integrada de EMQX) y luego se expulsa la sesión anterior,
-    # para que la reconexión ya use la credencial nueva.
-    aprovisionada = await broker.aprovisionar_credencial(device_id, token)
-    if aprovisionada is not True:
-        logger.warning("Credencial de %s rotada, pero no se aprovisionó en el broker.", device_id)
-    await _anotar_expulsion(session, device_id, "rotacion")
-    cerrada = await broker.desconectar_cliente(device_id)
-    pendiente = await _registrar_resultado_broker(
-        session, broker, device_id, OPERACION_BROKER_APROVISIONAR, aprovisionada, admin.id, ip,
-        origen="rotacion", motivo_operacion=body.motivo,
-    )
-    await _registrar_expulsion(session, device_id, cerrada, admin.id, ip, "rotacion", body.motivo)
+    relevo_api = bool(getattr(broker, "gestiona_usuarios", False))
+    if relevo_api:
+        # HU-44 esc. 2: con el broker administrado por API el token NO se carga
+        # todavía: primero va al nodo como `mqtt_relevo`. Queda pendiente hasta
+        # que el administrador confirme con el token (`confirmar_operacion_broker`).
+        aprovisionada = None
+        cerrada = None
+        pendiente = await _registrar_resultado_broker(
+            session, broker, device_id, OPERACION_BROKER_APROVISIONAR, None, admin.id, ip,
+            origen="rotacion", motivo_operacion=body.motivo, motivo=MOTIVO_ESPERANDO_RELEVO,
+        )
+    else:
+        # BE-002: tras el COMMIT. Primero se aprovisiona el token nuevo en el broker
+        # (autenticación integrada de EMQX) y luego se expulsa la sesión anterior,
+        # para que la reconexión ya use la credencial nueva.
+        aprovisionada = await broker.aprovisionar_credencial(device_id, token)
+        if aprovisionada is not True:
+            logger.warning("Credencial de %s rotada, pero no se aprovisionó en el broker.", device_id)
+        await _anotar_expulsion(session, device_id, "rotacion")
+        cerrada = await broker.desconectar_cliente(device_id)
+        pendiente = await _registrar_resultado_broker(
+            session, broker, device_id, OPERACION_BROKER_APROVISIONAR, aprovisionada, admin.id, ip,
+            origen="rotacion", motivo_operacion=body.motivo,
+        )
+        await _registrar_expulsion(session, device_id, cerrada, admin.id, ip, "rotacion", body.motivo)
     # HU-44: si el token anterior se filtró y la consola sigue sin cambiar, el
     # broker aún lo acepta y el backend no distingue al nodo de quien lo tenga.
     # Hasta la confirmación, la ingesta retiene la telemetría sin acuse.
@@ -681,7 +710,7 @@ async def rotar_credencial(
             broadcaster = getattr(request.app.state, "sse_broadcaster", None)
             if broadcaster is not None:
                 await broadcaster.publicar(cambio.como_evento_sse(), cambio.incidente.tipo)
-    mensaje = _mensaje_aprovisionar(device_id, aprovisionada)
+    mensaje = _mensaje_aprovisionar(device_id, aprovisionada, relevo_api=relevo_api)
     if retenida and mensaje:
         mensaje += (
             " Rotación por compromiso: el sistema retiene la telemetría del nodo (sin acuse; queda en "
@@ -768,7 +797,42 @@ async def confirmar_operacion_broker(
     Rotación por compromiso: confirmar NO termina la retención. Si la consola
     no se cambió (o el cambio no se guardó), el broker seguiría aceptando el
     token filtrado. Se envía un desafío y la retención termina cuando el nodo
-    lo firma con el token nuevo (`posesion_pendiente` hasta entonces)."""
+    lo firma con el token nuevo (`posesion_pendiente` hasta entonces).
+
+    HU-44 esc. 2 con el broker administrado por API: la rotación quedó
+    esperando el relevo; aquí, con el token ya cargado en el nodo, el backend
+    comprueba que es el emitido (contra su hash), lo carga en el broker y recién
+    entonces expulsa la sesión."""
+    repositorio_previo = SQLAlchemyDeviceRepository(session)
+    previo = await repositorio_previo.obtener(device_id)
+    if (
+        previo is not None
+        and previo.get("broker_pendiente") == OPERACION_BROKER_APROVISIONAR
+        and previo.get("broker_pendiente_motivo") == MOTIVO_ESPERANDO_RELEVO
+    ):
+        if not body.token:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Falta el token: con el broker por API se confirma con el token ya cargado en el nodo.",
+            )
+        credencial = await repositorio_previo.obtener_credencial(device_id) or {}
+        hash_vigente = credencial.get("mqtt_token_hash")
+        if not hash_vigente or not await verify_password_async(body.token, hash_vigente):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="El token no corresponde a la credencial vigente del dispositivo.",
+            )
+        ip_relevo = request.client.host if request.client else None
+        cargado = await broker.aprovisionar_credencial(device_id, body.token)
+        await _registrar_sincronizacion(
+            session, device_id, OPERACION_BROKER_APROVISIONAR, cargado is True, admin.id, ip_relevo,
+            "relevo_confirmado",
+        )
+        if cargado is not True:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="La API del broker no aceptó el token; la operación sigue pendiente.",
+            )
     use_case = ConfirmarOperacionBrokerUseCase(
         SQLAlchemyDeviceRepository(session), RegistrarHashEncadenadoUseCase(SQLAlchemyTrazabilidadRepository(session))
     )

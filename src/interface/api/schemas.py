@@ -791,9 +791,11 @@ class DispositivoAltaResponse(DispositivoResponse):
 
 class ConfirmarBrokerRequest(_PeticionEstricta):
     """HU-43/HU-44: el administrador confirma que hizo la operación pendiente
-    en la consola del broker."""
+    en la consola del broker. Con el broker administrado por API, la rotación se
+    confirma con el token ya cargado en el nodo (HU-44 esc. 2)."""
 
     nota: str | None = Field(default=None, max_length=500)
+    token: str | None = Field(default=None, min_length=16, max_length=200)
 
 
 class IntervaloReporteRequest(_PeticionEstricta):
