@@ -11,6 +11,7 @@ from src.application.use_cases.gestionar_dispositivos import (
     OPERACION_BROKER_RETIRAR,
     ActualizarIntervaloReporteUseCase,
     ActualizarResponsableDispositivoUseCase,
+    ActualizarSensoresHabilitadosUseCase,
     ActualizarUbicacionYMetadatosInstalacionUseCase,
     ConfirmarOperacionBrokerUseCase,
     ConsultarEstadoCalibracionUseCase,
@@ -74,6 +75,7 @@ from src.interface.api.schemas import (
     ResponsableDispositivoRequest,
     RevocarCredencialRequest,
     RotarCredencialRequest,
+    SensoresHabilitadosRequest,
     SensorIoTResponse,
 )
 from src.interface.limitador_auditoria import LIMITE_AUDITORIA, auditar_suprimidos
@@ -782,7 +784,7 @@ async def confirmar_operacion_broker(
         usuario_id=admin.id,
         accion="BROKER_CONSOLA_CONFIRMADA",
         recurso=f"dispositivos/{device_id}/broker",
-        detalle={"operacion": operacion, "nota": body.nota},
+        detalle={"operacion": operacion, "nota": body.nota, "ventana_s": use_case.ventana_s},
         ip_origen=request.client.host if request.client else None,
         device_id=device_id,
     )
@@ -882,6 +884,41 @@ async def actualizar_intervalo_reporte(
             accion="INTERVALO_REPORTE_ACTUALIZADO",
             recurso=f"dispositivos/{device_id}/intervalo",
             detalle={"segundos": body.segundos},
+            ip_origen=request.client.host if request.client else None,
+            device_id=device_id,
+        )
+        await session.commit()
+    return DispositivoResponse(**(actualizado or await repositorio.obtener(device_id)))
+
+
+@router.patch("/{device_id}/sensores", response_model=DispositivoResponse)
+async def actualizar_sensores_habilitados(
+    device_id: DeviceIdRuta,
+    body: SensoresHabilitadosRequest,
+    session: DbSessionDep,
+    request: Request,
+    admin=Depends(router_dep),
+) -> DispositivoResponse:
+    """HU-49 esc. 1: cambia los sensores habilitados (p. ej. MC-38 instalado o
+    retirado). El cambio queda en el historial de configuración y en la
+    bitácora; la telemetría anterior y sus hashes no se tocan (esc. 3)."""
+    repositorio = SQLAlchemyDeviceRepository(session)
+    try:
+        actualizado = await ActualizarSensoresHabilitadosUseCase(repositorio).execute(
+            device_id, list(body.sensores_habilitados), admin.id
+        )
+    except RecursoNoEncontradoError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DomainError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    if actualizado is not None:
+        await AuditarAccionCriticaUseCase(
+            SQLAlchemyAuditLogRepository(session), SQLAlchemyTrazabilidadRepository(session)
+        ).execute(
+            usuario_id=admin.id,
+            accion="SENSORES_HABILITADOS_ACTUALIZADOS",
+            recurso=f"dispositivos/{device_id}/sensores",
+            detalle={"sensores_habilitados": list(body.sensores_habilitados)},
             ip_origen=request.client.host if request.client else None,
             device_id=device_id,
         )

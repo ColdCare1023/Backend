@@ -193,6 +193,16 @@ async def listar_predicciones_preventivas(
             "umbral": p.umbral,
             "horizonte_min": p.horizonte_min,
             "modelo_version": p.modelo_version,
+            # HU-18 esc. 1 y 4: SHA-256, esquema de features, hora de inferencia y
+            # probabilidad de ambas clases (el modelo es binario: normal = 1 - p).
+            "modelo_sha256": p.modelo_sha256,
+            "conjunto_features": p.conjunto_features,
+            "inferido_en": p.inferido_en or p.creado_en,
+            "probabilidades": (
+                {"normal": round(1 - p.puntuacion, 6), "riesgo_preventivo": p.puntuacion}
+                if p.puntuacion is not None
+                else None
+            ),
             "motivo": p.motivo,
         }
         for p in predicciones
