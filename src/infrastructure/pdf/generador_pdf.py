@@ -27,6 +27,12 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+# HU-38 esc. 4: declaración de alcance del reporte (portada y cierre).
+ALCANCE_REPORTE = (
+    "Este documento constituye evidencia del monitoreo y de la trazabilidad de los registros; no"
+    " es una declaración de cumplimiento sanitario integral ni de conformidad DIGEMID."
+)
+
 # Paleta alineada con la identidad visual del dashboard (verde pino sobre
 # crema): el PDF debe leerse como el mismo producto, no como un anexo ajeno.
 PINO = colors.HexColor("#1F4D3D")
@@ -262,6 +268,8 @@ class GeneradorReporteBPAPDF:
                 f"<br/>Emitido por: {_texto(contexto['usuario'])}",
                 e["subtitulo"],
             ),
+            # HU-38 esc. 4: el alcance se declara desde la portada, no solo al cierre.
+            Paragraph(ALCANCE_REPORTE, e["nota"]),
         ]
         return bloques
 
@@ -805,9 +813,9 @@ class GeneradorReporteBPAPDF:
                 "sobre la cadena verificada, con su referencia reproducible completa. "
                 "Elaborado en el marco de la tesis de monitoreo IoT de cadena de frío farmacéutica, como "
                 "referencia frente al Manual de Buenas Prácticas de Almacenamiento (RM N.º 132-2015/MINSA).<br/><br/>"
-                "<b>Este documento constituye evidencia del monitoreo y la trazabilidad térmica del período "
-                "indicado; no declara por sí mismo cumplimiento sanitario integral.</b> La certificación "
-                "sanitaria corresponde exclusivamente a la autoridad competente (DIGEMID).",
+                # HU-38 esc. 4: declaración de alcance explícita.
+                f"<b>{ALCANCE_REPORTE}</b> La certificación sanitaria corresponde exclusivamente a la "
+                "autoridad competente (DIGEMID).",
                 e["nota"],
             ),
         ]
