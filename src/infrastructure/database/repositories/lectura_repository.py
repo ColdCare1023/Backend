@@ -24,6 +24,17 @@ _FUERA_DE_RANGO = or_(
     _T.temperatura_interna < RANGO_TERMICO_BPA.minimo_celsius,
     _T.temperatura_interna > RANGO_TERMICO_BPA.maximo_celsius,
 )
+# Orden «más reciente primero» con desempate determinista. El firmware puede
+# repetir `timestamp` (sin NTP, o varias lecturas en el mismo segundo): solo con
+# `timestamp DESC` PostgreSQL devolvía cualquiera de las empatadas y la «última
+# temperatura» del dashboard podía ser una anterior. Dentro del mismo arranque
+# manda `seq_no` (orden de captura del nodo); después, la hora de llegada.
+_MAS_RECIENTE_PRIMERO = (
+    _T.timestamp.desc(),
+    _T.seq_no.desc().nulls_last(),
+    _T.received_at.desc().nulls_last(),
+    _T.id.desc(),
+)
 
 
 def _como_utc(instante: datetime | str | None) -> datetime | None:
@@ -212,7 +223,7 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
             stmt = stmt.where(ThermalReadingModel.timestamp >= desde)
         if hasta:
             stmt = stmt.where(ThermalReadingModel.timestamp <= hasta)
-        stmt = stmt.order_by(ThermalReadingModel.timestamp.desc()).limit(limite).offset(offset)
+        stmt = stmt.order_by(*_MAS_RECIENTE_PRIMERO).limit(limite).offset(offset)
         result = await self._session.execute(stmt)
         return [_to_entity(m) for m in result.scalars().all()]
 
@@ -256,7 +267,7 @@ class SQLAlchemyLecturaRepository(ILecturaRepository):
             # ventana + 3 min de segmentación + 90 s de agregación). Con solo
             # un tope de filas, un nodo a 5 s dejaba fuera parte de la ventana.
             stmt = stmt.where(ThermalReadingModel.timestamp >= desde)
-        stmt = stmt.order_by(ThermalReadingModel.timestamp.desc()).limit(limite)
+        stmt = stmt.order_by(*_MAS_RECIENTE_PRIMERO).limit(limite)
         result = await self._session.execute(stmt)
         return [_to_entity(m) for m in result.scalars().all()]
 
