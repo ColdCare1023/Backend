@@ -231,3 +231,27 @@ def test_esc4_el_rango_2_8_no_se_puede_configurar(
 def test_esc4_el_rango_es_inmutable_en_el_dominio():
     with pytest.raises(dataclasses.FrozenInstanceError):
         RANGO_TERMICO_BPA.maximo_celsius = 10.0  # type: ignore[misc]
+
+
+def test_esc1_el_cambio_de_sensores_habilitados_queda_con_actor(client, token_admin, token_auditor, token_tecnico):
+    """HU-49 esc. 1: instalar el MC-38 (sensores habilitados) queda en el historial
+    con valor anterior, valor nuevo, actor y hora; solo el administrador lo cambia."""
+    _alta(client, token_admin)
+    url = f"/api/dispositivos/{DEVICE}/sensores"
+    assert client.patch(url, json={"sensores_habilitados": ["DS18B20", "SHT31", "MC-38"]},
+                        headers=auth_header(token_tecnico)).status_code == 403
+    assert client.patch(url, json={"sensores_habilitados": ["SHT31"]},
+                        headers=auth_header(token_admin)).status_code == 422  # el DS18B20 es obligatorio
+    respuesta = client.patch(url, json={"sensores_habilitados": ["DS18B20", "SHT31", "MC-38"]},
+                             headers=auth_header(token_admin))
+    assert respuesta.status_code == 200, respuesta.text
+    assert respuesta.json()["sensores_habilitados"] == ["DS18B20", "SHT31", "MC-38"]
+
+    [fila] = [f for f in _historial(client, token_auditor) if f["campo"] == "sensores_habilitados (administrador)"]
+    assert fila["valor_anterior"] == "ds18b20" and fila["valor_nuevo"] == "DS18B20, SHT31, MC-38"
+    assert fila["actor_id"] == _admin_id(client, token_admin)
+    assert fila["categoria"] == "sensores" and fila["origen"] == "administrador"
+    # Repetir el mismo valor no agrega otra fila.
+    client.patch(url, json={"sensores_habilitados": ["MC-38", "SHT31", "DS18B20"]}, headers=auth_header(token_admin))
+    assert len([f for f in _historial(client, token_auditor) if f["campo_base"] == "sensores_habilitados"
+                and f["origen"] == "administrador"]) == 1

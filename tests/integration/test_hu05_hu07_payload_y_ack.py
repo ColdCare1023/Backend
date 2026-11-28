@@ -294,6 +294,34 @@ async def test_misma_identidad_con_valores_distintos_es_conflicto(entorno):
 
 
 @pytest.mark.asyncio
+async def test_misma_identidad_con_otra_duracion_de_puerta_es_conflicto(entorno):
+    """HU-22 esc. 4: el conflicto también cubre la duración de la apertura."""
+    cliente = _ClienteEspia()
+    ts = (_AHORA - timedelta(hours=2, minutes=-3)).isoformat()
+    original = _payload(reading_id="cp", timestamp=ts, boot_id=6, seq_no=2, apertura_refrigerador=True,
+                        duracion_apertura_segundos=12)
+    alterada = _payload(reading_id="cp", timestamp=ts, boot_id=6, seq_no=2, apertura_refrigerador=True,
+                        duracion_apertura_segundos=95)
+
+    await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, original), _BroadcasterMudo(), cliente)
+    await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, alterada), _BroadcasterMudo(), cliente)
+
+    assert cliente.publicados[1][1]["estado"] == "conflicto_payload"
+
+
+@pytest.mark.asyncio
+async def test_payload_anterior_al_contrato_mayor_a_768_bytes_se_acusa_rejected(entorno):
+    """HU-15 esc. 3: el límite de 768 B también rige fuera del contrato v1.0."""
+    cliente = _ClienteEspia()
+    cuerpo = _payload(reading_id="grande", boot_id=9, seq_no=1) + " " * 800
+
+    await main._procesar_lectura_mqtt(_MensajeFalso(TOPIC, cuerpo), _BroadcasterMudo(), cliente)
+
+    (acuse,) = cliente.publicados
+    assert acuse[1]["status"] == "rejected"
+
+
+@pytest.mark.asyncio
 async def test_reenvio_identico_no_es_conflicto(entorno):
     cliente = _ClienteEspia()
     cuerpo = _payload(reading_id="d", boot_id=7, seq_no=3)

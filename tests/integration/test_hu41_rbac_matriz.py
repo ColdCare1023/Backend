@@ -67,6 +67,7 @@ MATRIZ_ESPERADA: dict[tuple[str, str], frozenset[str] | str] = {
     ("POST", "/api/dispositivos/{device_id}/broker/confirmar"): frozenset({A}),
     ("POST", "/api/dispositivos/{device_id}/credenciales/reenviar-desafio"): frozenset({A}),
     ("PATCH", "/api/dispositivos/{device_id}/intervalo"): frozenset({A}),
+    ("PATCH", "/api/dispositivos/{device_id}/sensores"): frozenset({A}),
     ("GET", "/api/dispositivos/{device_id}/historial-configuracion"): frozenset({A, AU}),
     ("POST", "/api/firmware/releases"): frozenset({A}),
     ("GET", "/api/firmware/releases"): frozenset({A}),

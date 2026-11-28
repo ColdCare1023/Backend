@@ -256,3 +256,32 @@ async def test_sombra_con_el_legado_experimental_guarda_predicciones_sin_alerta(
             select(ThermalAlertModel).where(ThermalAlertModel.device_id == "ESP32-PREV-SOMBRAEXP")
         )).scalars().all()
     assert alertas == []
+
+
+async def test_sombra_rotula_la_clase_sin_cambiar_el_riesgo_y_guarda_la_evidencia(db_session_factory, tmp_path):
+    """HU-34 esc. 2: en sombra la clase viaja rotulada («IA en modo sombra») y el
+    riesgo efectivo sigue siendo el de la regla 2-8 °C. HU-18 esc. 1 y 4: cada
+    inferencia guarda su hora y el esquema de características."""
+    from src.interface.api.mappers import lectura_to_response
+
+    _registrar_modelo(tmp_path, aprobado=False)
+    servicio = ServicioPrediccionPreventiva(MODO_SOMBRA, VERSION, raiz=tmp_path)
+    temps = [5.0] * 20 + [5.0 + 0.12 * i for i in range(1, 6)]
+    lecturas = await _ingestar_serie(db_session_factory, "ESP32-PREV-ROTULO", servicio, temps)
+
+    ultima = lecturas[-1]
+    assert ultima.riesgo_efectivo == NivelRiesgo.NORMAL
+    respuesta = lectura_to_response(ultima)
+    assert respuesta.ia_sombra is not None
+    assert respuesta.ia_sombra.clase == NivelRiesgo.RIESGO_PREVENTIVO.value
+    assert respuesta.ia_sombra.modelo_version == VERSION
+    assert lectura_to_response(lecturas[0]).ia_sombra is None  # sin historial no hay clase
+    async with db_session_factory() as session:
+        alertas = (await session.execute(
+            select(ThermalAlertModel).where(ThermalAlertModel.device_id == "ESP32-PREV-ROTULO")
+        )).scalars().all()
+    assert alertas == []
+
+    preds = await _predicciones(db_session_factory, "ESP32-PREV-ROTULO")
+    assert preds[-1].inferido_en is not None
+    assert preds[-1].conjunto_features == "termico_minimo"
