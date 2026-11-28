@@ -671,6 +671,9 @@ class PrediccionPreventivaModel(Base):
     modelo_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     motivo: Mapped[str | None] = mapped_column(String(200), nullable=True)
     vector_features: Mapped[dict | None] = mapped_column(JSONVariant, nullable=True)
+    # HU-18 esc. 1 y 4 (migración 0044): hora de la inferencia y esquema de features.
+    inferido_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    conjunto_features: Mapped[str | None] = mapped_column(String(40), nullable=True)
     created_at: Mapped[datetime] = _created_at_column()
 
 
