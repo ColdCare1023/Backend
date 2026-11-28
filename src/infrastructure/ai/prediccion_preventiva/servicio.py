@@ -574,6 +574,10 @@ class ServicioPrediccionPreventiva:
             modelo_version=manifiesto.get("version", self._version),
             modelo_sha256=(manifiesto.get("artefacto") or {}).get("sha256"),
             puntuacion_calibrada=bool(manifiesto.get("puntuacion_calibrada", False)),
+            # HU-18 esc. 1 y 4: `timestamp_inferencia` es el instante evaluado (t de las
+            # features); `inferido_en`, cuándo corrió el modelo.
+            conjunto_features=manifiesto.get("conjunto_features"),
+            inferido_en=datetime.now(timezone.utc),
             **extra,
         )
 

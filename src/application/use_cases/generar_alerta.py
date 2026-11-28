@@ -35,6 +35,8 @@ MINUTOS_NORMALES_RESOLVER_PREVENTIVA = 10
 TRANSICION_CREACION = "creacion"
 TRANSICION_ACTUALIZACION = "actualizacion"
 TRANSICION_REAPERTURA = "reapertura"
+# HU-20 esc. 4: estado anterior registrado al reabrir un episodio cerrado.
+ESTADO_ANTERIOR_EPISODIO_CERRADO = "episodio_cerrado"
 TRANSICION_NORMALIZACION = "normalizacion_en_curso"
 # Motivo del cierre (payload de ALERTA_CERRADA).
 CIERRE_RECUPERACION = "recuperacion"
@@ -154,6 +156,8 @@ class GenerarAlertaUseCase:
         self.motivos_cierre: dict[UUID, str] = {}
         # HU-20 esc. 4: qué le pasó al episodio con la última lectura.
         self.transicion: str | None = None
+        # HU-20 esc. 4: estado de la alerta ANTES de la transición (None al crearla).
+        self.estado_anterior: str | None = None
 
     @property
     def minutos_normales_preventiva(self) -> int:
@@ -256,6 +260,7 @@ class GenerarAlertaUseCase:
         (`LecturaTermica.estado_riesgo`), no como «Sin clasificación IA». Los
         valores por defecto conservan el comportamiento anterior."""
         self.transicion = None
+        self.estado_anterior = None
         episodio_abierto = await self._alerta_repository.obtener_episodio_abierto(device_id)
         # Capturada antes que la última lectura del episodio: no puede decir
         # que el equipo volvió a rango ni que la excursión se cortó (el
@@ -276,6 +281,7 @@ class GenerarAlertaUseCase:
                 if self._es_diferida(timestamp, received_at):
                     episodio_abierto.historica = True
                 self.transicion = TRANSICION_ACTUALIZACION
+                self.estado_anterior = episodio_abierto.estado.value
                 return await self._alerta_repository.actualizar(episodio_abierto)
             if _GRAVEDAD[nivel_riesgo] < _GRAVEDAD[episodio_abierto.nivel_riesgo]:
                 return None
@@ -305,6 +311,7 @@ class GenerarAlertaUseCase:
                 if self._es_diferida(timestamp, received_at):
                     episodio_abierto.historica = True
                 self.transicion = TRANSICION_ACTUALIZACION
+                self.estado_anterior = episodio_abierto.estado.value
                 return await self._alerta_repository.actualizar(episodio_abierto)
             # Escalamiento/desescalamiento: cierra el episodio anterior antes
             # de evaluar si corresponde abrir/reabrir uno del nuevo tipo.
@@ -323,6 +330,8 @@ class GenerarAlertaUseCase:
             and (_a_utc(timestamp) - _a_utc(ultimo_cerrado.cerrada_en))
             <= timedelta(minutes=self._ventana_normalizacion_minutos)
         ):
+            # Antes de reabrir: la alerta venía de un episodio cerrado.
+            self.estado_anterior = ESTADO_ANTERIOR_EPISODIO_CERRADO
             ultimo_cerrado.reabrir(reading_id, timestamp)
             if ultimo_cerrado.iniciada_en is None:
                 ultimo_cerrado.iniciada_en = timestamp

@@ -31,6 +31,9 @@ class PrediccionPreventiva:
     modelo_sha256: str | None = None
     motivo: str | None = None
     vector_features: dict[str, float] | None = None
+    # HU-18 esc. 1 y 4: cuándo corrió el modelo y con qué esquema de features.
+    conjunto_features: str | None = None
+    inferido_en: datetime | None = None
     lectura_id: UUID | None = None
     id: UUID | None = None
     creado_en: datetime | None = None

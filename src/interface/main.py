@@ -198,17 +198,26 @@ async def _publicar_ack_lectura(
 
 
 def _payload_en_conflicto(existente, nueva) -> bool:
-    """True si dos lecturas con la misma identidad traen valores distintos."""
+    """True si dos lecturas con la misma identidad traen valores distintos
+    (HU-11 esc. 3 / HU-22 esc. 4): sensores, puerta y duración de la apertura.
+    `captured_at` queda fuera a propósito: el firmware lo vuelve a serializar
+    al reintentar (docs/evidencias/HU-11_evidencia.md), y un reintento con
+    boot_id+seq_no iguales es un duplicado, no un conflicto."""
     def distinto(a, b) -> bool:
         if a is None or b is None:
             return a is not b
         return abs(float(a) - float(b)) > 0.005
+
+    def duracion_puerta(lectura) -> int | None:
+        valor = (lectura.payload or {}).get("duracion_apertura_segundos")
+        return int(valor) if isinstance(valor, (int, float)) and not isinstance(valor, bool) else None
 
     return (
         distinto(existente.temperatura_interna, nueva.temperatura_interna)
         or distinto(existente.temperatura_ambiental, nueva.temperatura_ambiental)
         or distinto(existente.humedad_ambiental, nueva.humedad_ambiental)
         or existente.apertura_refrigerador != nueva.apertura_refrigerador
+        or duracion_puerta(existente) != duracion_puerta(nueva)
     )
 
 
@@ -931,6 +940,15 @@ async def _procesar_lectura_mqtt(
                 contrato_v1.a_lectura_interna(telemetria_v1, datetime.now(timezone.utc))
             )
         else:
+            # HU-15 esc. 3: el límite de 768 B del contrato vale también para el
+            # formato anterior (el firmware vigente solo emite v1.0). Con identidad
+            # recuperable se acusa `rejected`; sin ella no se inventa un acuse.
+            if len(message.payload) > contrato_v1.PAYLOAD_MAX_BYTES:
+                await _rechazar_payload_invalido(
+                    message, None, client,
+                    errores=[{"campo": "payload", "tipo": f"excede_{contrato_v1.PAYLOAD_MAX_BYTES}_bytes"}],
+                )
+                return
             payload = LecturaPayload.model_validate_json(message.payload)
     except ValidationError as exc:
         await _rechazar_payload_invalido(message, exc, client)

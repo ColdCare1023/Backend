@@ -226,6 +226,13 @@ class LecturaIngestRequest(_PeticionEstricta):
     duracion_apertura_segundos: int = Field(default=0, ge=0)
 
 
+class IaSombraResponse(BaseModel):
+    """HU-34 esc. 2: salida del modelo preventivo en modo sombra (sin efecto operativo)."""
+
+    clase: Literal["normal", "riesgo_preventivo"]
+    modelo_version: str | None = None
+
+
 class LecturaResponse(BaseModel):
     id: UUID | None = None
     device_id: str
@@ -265,6 +272,9 @@ class LecturaResponse(BaseModel):
     # HU-20: la clase la produjo el modelo legado (datos sintéticos) en modo
     # experimental. El tablero la rotula y no abre alertas preventivas por ella.
     ia_experimental: bool = False
+    # HU-34 esc. 2: clase del modelo preventivo en modo sombra (IA_PREVENTIVO_MODO=sombra).
+    # Es solo evidencia rotulada: no cambia `riesgo_efectivo` ni abre alertas.
+    ia_sombra: IaSombraResponse | None = None
     estado_sensores: dict[str, str] | None = None
     # HU-05: identidad lógica declarada por el firmware (None en payloads
     # de dispositivos aún no actualizados) y versión del contrato de payload.
@@ -790,6 +800,12 @@ class IntervaloReporteRequest(_PeticionEstricta):
     """HU-54: intervalo de captura del nodo, en segundos."""
 
     segundos: int = Field(ge=5, le=3600)
+
+
+class SensoresHabilitadosRequest(_PeticionEstricta):
+    """HU-49: sensores habilitados del nodo (DS18B20 obligatorio)."""
+
+    sensores_habilitados: list[str] = Field(min_length=1, max_length=3)
 
 
 class RegistrarVersionModeloRequest(_PeticionEstricta):

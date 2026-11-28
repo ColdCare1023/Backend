@@ -522,9 +522,7 @@ class RegistrarLecturaTermicaUseCase:
                         "confianza_ia": lectura_guardada.confianza_ia,
                         "episodio_abierto": alerta.episodio_abierto,
                         # HU-20 esc. 4: transición y proceso que la originó.
-                        "estado_anterior": (
-                            None if alerta.lectura_inicial_id == lectura_guardada.id else alerta.estado.value
-                        ),
+                        "estado_anterior": self._generar_alerta.estado_anterior,
                         "estado_nuevo": alerta.estado.value,
                         "origen_transicion": "motor_riesgo",
                         # creacion | actualizacion | reapertura

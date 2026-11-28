@@ -391,6 +391,13 @@ class SQLAlchemyDeviceRepository(IDeviceRepository):
         await self._session.flush()
         return _to_dict(model)
 
+    # ── HU-49: sensores habilitados del nodo ───────────────────────────────
+    async def actualizar_sensores_habilitados(self, device_id: str, sensores: list[str]) -> dict:
+        model = await self._requerir(device_id)
+        model.sensores_habilitados = {"habilitados": sensores}
+        await self._session.flush()
+        return _to_dict(model)
+
     async def registrar_latido(self, device_id: str, cuando: datetime) -> None:
         model = await self._requerir(device_id)
         model.ultimo_latido_en = cuando

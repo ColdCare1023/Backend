@@ -23,6 +23,7 @@ from src.interface.api.schemas import (
     BucketSerieResponse,
     BufferLittleFSResponse,
     EstadisticaMagnitudResponse,
+    IaSombraResponse,
     LecturaResponse,
     ResumenSerieResponse,
     SerieTermicaResponse,
@@ -83,6 +84,14 @@ def origen_hora(lectura: LecturaTermica) -> str:
     return "nodo"
 
 
+def _ia_sombra(payload: dict | None) -> IaSombraResponse | None:
+    """HU-34 esc. 2: la clase preventiva en sombra, si la lectura la trae."""
+    valor = (payload or {}).get("ia_sombra")
+    if not isinstance(valor, dict) or valor.get("clase") not in ("normal", "riesgo_preventivo"):
+        return None
+    return IaSombraResponse(clase=valor["clase"], modelo_version=valor.get("modelo_version"))
+
+
 def lectura_to_response(lectura: LecturaTermica) -> LecturaResponse:
     return LecturaResponse(
         id=lectura.id,
@@ -106,6 +115,7 @@ def lectura_to_response(lectura: LecturaTermica) -> LecturaResponse:
         estado_inferencia=lectura.estado_inferencia,
         motivo_no_inferencia=lectura.motivo_no_inferencia,
         ia_experimental=bool((lectura.payload or {}).get("ia_experimental")),
+        ia_sombra=_ia_sombra(lectura.payload),
         reading_id=lectura.reading_id,
         schema_version=lectura.schema_version,
         excursion_confirmada=lectura.excursion_confirmada,

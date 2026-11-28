@@ -234,7 +234,7 @@ def test_la_seccion_de_integridad_distingue_no_concluida_y_no_sobredeclara():
 def test_el_cierre_y_la_marca_son_coldcare():
     texto = _textos(GeneradorReporteBPAPDF()._cierre())
     assert "ColdCare" in texto and "ThermoTrace" not in texto
-    assert "no declara por sí mismo cumplimiento sanitario integral" in texto
+    assert "no es una declaración de cumplimiento sanitario integral ni de conformidad DIGEMID" in texto
     assert "DIGEMID" in texto
     checklist = _textos(GeneradorReporteBPAPDF()._seccion_checklist([]))
     assert "(HU-37)" not in checklist

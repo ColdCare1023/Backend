@@ -19,6 +19,7 @@ from src.application.use_cases.generar_alerta import (
     CIERRE_CAMBIO_NIVEL,
     CIERRE_NORMALIZACION,
     CIERRE_RECUPERACION,
+    ESTADO_ANTERIOR_EPISODIO_CERRADO,
     TRANSICION_ACTUALIZACION,
     TRANSICION_CREACION,
     TRANSICION_NORMALIZACION,
@@ -155,6 +156,18 @@ async def test_reaparecer_dentro_del_cooldown_reabre_la_misma_alerta():
     assert len(repo.filas) == 1
     assert transiciones[-1] == TRANSICION_REAPERTURA
     assert repo.filas[0].episodio_abierto is True and repo.filas[0].normalizacion_desde is None
+    # HU-20 esc. 4: la transición registra el estado ANTES de reabrir, no el nuevo.
+    assert uc.estado_anterior == ESTADO_ANTERIOR_EPISODIO_CERRADO
+
+
+async def test_estado_anterior_de_cada_transicion():
+    repo = _RepoEnMemoria()
+    uc = GenerarAlertaUseCase(repo, minutos_normales_preventiva=5)
+
+    await _secuencia(uc, [(0, P)])
+    assert uc.transicion == TRANSICION_CREACION and uc.estado_anterior is None
+    await _secuencia(uc, [(1, P)])
+    assert uc.transicion == TRANSICION_ACTUALIZACION and uc.estado_anterior == "pendiente"
 
 
 def test_el_valor_por_defecto_de_la_ventana():
