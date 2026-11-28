@@ -17,6 +17,8 @@ Backend, Frontend e IoT; esta tabla resume lo que cambió en el código.
 | HU-34 esc. 2 | En `IA_PREVENTIVO_MODO=sombra` la clase del modelo viaja como `ia_sombra` en la lectura (API y SSE) y el tablero la rotula «IA en modo sombra»; el riesgo efectivo no cambia y no se abre alerta. |
 | HU-38 esc. 4 | El PDF declara en portada y cierre: «Este documento constituye evidencia del monitoreo y de la trazabilidad de los registros; no es una declaración de cumplimiento sanitario integral ni de conformidad DIGEMID.» |
 | HU-44 esc. 1 | La confirmación en la consola del broker mide y encadena `ventana_s` (segundos entre la operación y su confirmación). |
+| HU-44 esc. 2 | Con el broker administrado por API (EMQX 5 completo) la rotación ya no carga el token en el broker en la misma petición: queda `esperando_relevo`; el administrador carga el token en el nodo (`mqtt_relevo`) y confirma con él; el backend comprueba que es el emitido, lo carga en el broker y recién entonces expulsa la sesión. Con EMQX Serverless (manual) el orden ya era ese. |
+| HU-34 esc. 2 (producción) | La imagen fija `IA_PREVENTIVO_MODO=sombra` con la versión y su SHA-256: el rótulo «IA en modo sombra» no depende de variables de Railway. |
 | HU-49 esc. 1 | `PATCH /api/dispositivos/{id}/sensores` (solo administrador): cambia los sensores habilitados (DS18B20 obligatorio) con valor anterior, nuevo, actor y hora en el historial de configuración. |
 | HU-14 esc. 3 | Evidencia de observabilidad de intentos no autorizados sin canal en texto plano (`docs/evidencias/HU-14_evidencia.md`). |
 
@@ -41,8 +43,5 @@ conexión (RF-12). Curva cortada a los 30 s sin datos (3 × 10 s, HU-54).
 
 - Verificaciones en hardware y en el entorno desplegado que el Anexo 05 deja en la columna
   «Trabajo pendiente para cumplir DoD» (MAE/sesgo, LittleFS, broker real, SMTP real).
-- HU-09 esc. 2 (certificado vencido) depende de compilar mbedTLS con hora en el firmware: decisión
-  de alcance pendiente del equipo.
-- HU-44 esc. 2 con un broker administrado por API (EMQX 5 completo): la rotación cambia el token en
-  el broker en la misma petición. En producción (EMQX Cloud Serverless, `BROKER_USUARIOS_MODO=manual`)
-  el orden exigido —token primero al nodo como relevo y después a la consola— se cumple.
+- HU-09 esc. 2 (certificado vencido): implementado en el firmware (ColdCare1023/IoT); falta grabarlo
+  en el ESP32 y probarlo contra un certificado vencido.
