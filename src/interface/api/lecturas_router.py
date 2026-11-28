@@ -14,6 +14,7 @@ from src.application.use_cases.registrar_lectura_termica import RegistrarLectura
 from src.domain.entities.lectura_termica import ORIGEN_MANUAL, LecturaTermica
 from src.domain.exceptions import DispositivoNoAutorizadoError, LecturaInvalidaError
 from src.domain.value_objects.device_id import PATRON_DEVICE_ID
+from src.domain.value_objects.intervalo_reporte import INTERVALO_REPORTE_POR_DEFECTO
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 from src.domain.value_objects.rol import Rol
 from src.infrastructure.ai import gobierno
@@ -260,7 +261,7 @@ async def serie_termica(
             device_id,
             desde,
             hasta,
-            intervalo_reporte_segundos=device.get("intervalo_reporte_segundos") or 30,
+            intervalo_reporte_segundos=device.get("intervalo_reporte_segundos") or INTERVALO_REPORTE_POR_DEFECTO,
             n_intervalos_sin_datos=settings.sin_datos_n_intervalos,
             bucket_segundos=None if bucket == "auto" else int(bucket),
             registrado_en=device.get("created_at"),

@@ -22,6 +22,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
+from src.domain.value_objects.intervalo_reporte import INTERVALO_REPORTE_POR_DEFECTO
 from src.infrastructure.database.base import Base
 
 # JSON portable: JSONB en PostgreSQL, JSON plano en otros dialectos (usado en tests con SQLite).
@@ -146,7 +147,7 @@ class DeviceModel(Base):
     # HU-54: intervalo de captura del nodo (el umbral SIN_DATOS es N veces este
     # valor) y último `estado_nodo` recibido (latido).
     intervalo_reporte_segundos: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=30, server_default="30"
+        Integer, nullable=False, default=INTERVALO_REPORTE_POR_DEFECTO, server_default=str(INTERVALO_REPORTE_POR_DEFECTO)
     )
     ultimo_latido_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

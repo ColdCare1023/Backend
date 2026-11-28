@@ -50,10 +50,10 @@ class _TransporteEspia:
 
 @pytest_asyncio.fixture
 async def nodo(db_session_factory):
-    """Nodo activo con intervalo de 10 s (banco) y una lectura de hace 40 s."""
+    """Nodo recién registrado con el intervalo inicial y una lectura de hace 40 s."""
     ahora = datetime.now(tz=timezone.utc)
     async with db_session_factory() as session:
-        session.add(DeviceModel(id=DEVICE_ID, activo=True, intervalo_reporte_segundos=10))
+        session.add(DeviceModel(id=DEVICE_ID, activo=True))
         await session.flush()
         session.add(ThermalReadingModel(
             device_id=DEVICE_ID, timestamp=ahora - timedelta(seconds=40), received_at=ahora - timedelta(seconds=40),
@@ -74,7 +74,7 @@ async def _incidentes(db_session_factory) -> list[IncidenteOperativoModel]:
 
 async def test_el_umbral_es_n_veces_el_intervalo_del_nodo(db_session_factory, nodo):
     broadcaster, despachador = _Broadcaster(), _Despachador()
-    # 40 s de silencio ≥ 3 x 10 s: con el intervalo de fábrica (90 s) no habría incidente.
+    # 40 s de silencio ≥ 3 x 10 s: con el perfil anterior de 30 s (umbral 90 s) no habría incidente.
     cambios = await _vigilante(db_session_factory, broadcaster, despachador).ejecutar_una_vez(nodo)
 
     assert [c.tipo for c in cambios] == ["abierto"]
@@ -92,7 +92,7 @@ async def test_no_duplica_el_incidente_abierto(db_session_factory, nodo):
     assert len(await _incidentes(db_session_factory)) == 1
 
 
-async def test_con_intervalo_de_fabrica_no_hay_incidente_a_los_40_s(db_session_factory, nodo):
+async def test_con_intervalo_configurado_de_30_s_no_hay_incidente_a_los_40_s(db_session_factory, nodo):
     async with db_session_factory() as session:
         (await session.get(DeviceModel, DEVICE_ID)).intervalo_reporte_segundos = 30
         await session.commit()

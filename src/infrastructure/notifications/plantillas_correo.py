@@ -91,9 +91,6 @@ _RESPLANDOR = (
 MARCA = "ColdCare"
 LEMA = "Monitoreo de cadena de frío"
 RUTA_LOGO = "/email/coldcare-icon-96.png"
-RUTA_COPIAR_CODIGO = "/copiar-codigo"
-# http solo para desarrollo local; en cualquier otro host el enlace del código exige https.
-_HOSTS_LOCALES = frozenset({"localhost", "127.0.0.1", "::1"})
 # Códigos que pueden viajar en un enlace: solo letras y cifras ASCII (el código es de 6 cifras).
 _CODIGO_EN_ENLACE = re.compile(r"[0-9A-Za-z]{4,12}")
 
@@ -124,51 +121,22 @@ def _url_segura(url: str) -> str:
     return _e(url) if url.lower().startswith(("http://", "https://")) else "#"
 
 
-def _origen(url: str | None, esquemas: tuple[str, ...]) -> str | None:
-    """`esquema://host[:puerto]` de cualquier URL del frontend, o None si no es de un esquema aceptado."""
-    if not url:
-        return None
-    try:
-        partes = urlsplit(url.strip())
-        nombre_host = partes.hostname or ""
-    except ValueError:  # p. ej. «http://[::1» (IPv6 sin cerrar)
-        return None
-    esquema = partes.scheme.lower()
-    host = partes.netloc.rpartition("@")[2]  # sin «usuario:clave@»
-    if esquema not in esquemas or not host:
-        return None
-    if esquema == "http" and nombre_host not in _HOSTS_LOCALES:
-        return None
-    return f"{esquema}://{host}"
-
-
 def _codigo_para_enlace(codigo: str | None) -> bool:
     return bool(codigo) and _CODIGO_EN_ENLACE.fullmatch(codigo or "") is not None
 
 
 def url_logo(frontend_url: str | None) -> str | None:
-    """URL pública del icono de marca servido por el frontend, solo si es https.
-
-    Acepta el origen del frontend o cualquier página suya: se queda con el esquema y el host."""
-    origen = _origen(frontend_url, ("https",))
-    return f"{origen}{RUTA_LOGO}" if origen else None
-
-
-def url_copiar_codigo(frontend_url: str | None, codigo: str | None) -> str | None:
-    """Enlace del botón «Copiar código»: `<origen del frontend>/copiar-codigo#<código>`.
-
-    Los clientes de correo no ejecutan JavaScript, así que el botón abre una página del frontend que
-    copia el código al portapapeles. El código va en el fragmento (#): el navegador no lo envía al
-    servidor, así que no queda en los registros de acceso ni en el Referer. Acepta el origen del
-    frontend o cualquier página suya (como `url_logo`). Solo https, o http en localhost, 127.0.0.1 o
-    ::1 (desarrollo), y solo códigos de 4 a 12 letras o cifras. Si no, None: el correo sale sin el
-    botón y el código sigue siendo texto seleccionable."""
-    if not _codigo_para_enlace(codigo):
+    """URL HTTPS del icono de marca, sin credenciales, consulta ni fragmento."""
+    if not frontend_url:
         return None
-    origen = _origen(frontend_url, ("https", "http"))
-    if origen is None:
+    try:
+        partes = urlsplit(frontend_url.strip())
+        host = partes.netloc.rpartition("@")[2]
+        if partes.scheme != "https" or not partes.hostname:
+            return None
+    except ValueError:
         return None
-    return f"{origen}{RUTA_COPIAR_CODIGO}#{quote(codigo or '', safe='')}"
+    return f"https://{host}{RUTA_LOGO}"
 
 
 def con_codigo_en_fragmento(url: str, codigo: str | None) -> str:
@@ -389,28 +357,26 @@ def _detalles(filas: list[tuple[str, str]]) -> str:
     return _bloque(_tabla("".join(celdas)), padding="6px 20px")
 
 
-def _boton_azul(texto: str, url: str, *, tam: int = 15, padding: str = "14px 24px", radio: str = "10px",
-                alinear: str = "left", margen: str = "0", extra_a: str = "") -> str:
+def _boton_azul(texto: str, url: str) -> str:
     """Botón a prueba de clientes: el fondo va también en la celda (Outlook ignora el del enlace).
 
     La etiqueta va dentro de `gmail-screen` > `gmail-diff`: en la app de Gmail (que ignora
     `prefers-color-scheme` e invierte los colores por su cuenta) las dos mezclas devuelven el texto
     a blanco sobre el azul. Fuera de Gmail el selector `u + .body` no coincide y no cambia nada."""
-    centro = ' align="center"' if alinear == "center" else ""
     return (
-        f'<table role="presentation" cellspacing="0" cellpadding="0" border="0"{centro} style="margin:{margen};">'
-        f'<tr><td align="center" bgcolor="{AZUL_MARCA}" class="cc-boton" style="border-radius:{radio};'
-        f'background-color:{AZUL_MARCA};mso-padding-alt:{padding};">'
-        f'<a href="{_url_segura(url)}" target="_blank" class="cc-boton"{extra_a} '
-        f'style="display:inline-block;padding:{padding};border-radius:{radio};background-color:{AZUL_MARCA};'
-        f"font-family:{_FUENTE};font-size:{tam}px;line-height:20px;font-weight:600;color:#FFFFFF;"
+        f'<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0;">'
+        f'<tr><td align="center" bgcolor="{AZUL_MARCA}" class="cc-boton" style="border-radius:10px;'
+        f'background-color:{AZUL_MARCA};mso-padding-alt:14px 24px;">'
+        f'<a href="{_url_segura(url)}" target="_blank" class="cc-boton" '
+        f'style="display:inline-block;padding:14px 24px;border-radius:10px;background-color:{AZUL_MARCA};'
+        f"font-family:{_FUENTE};font-size:15px;line-height:20px;font-weight:600;color:#FFFFFF;"
         f'text-decoration:none;text-align:center;">'
         f'<span class="gmail-screen"><span class="gmail-diff">{_e(texto)}</span></span></a></td></tr></table>'
     )
 
 
 def _boton_secundario(boton: Boton) -> str:
-    """Botón grafito con borde, para cuando la acción principal es el código («Copiar código»).
+    """Botón grafito con borde, para cuando la acción principal es el código de verificación.
 
     Sin la mezcla de Gmail: si la app invierte el fondo, también invierte el texto y siguen contrastando."""
     return (
@@ -447,25 +413,10 @@ def _enlace_respaldo(boton: Boton) -> str:
 ROTULO_CODIGO = "Tu código de verificación"
 
 
-def bloque_codigo(
-    codigo: str, vigencia: str | None = None, copiar_url: str | None = None, rotulo: str = ROTULO_CODIGO
-) -> str:
-    """Código de un solo uso en grande, con cifras tabulares, en un bloque grafito.
-
-    Sin imágenes: el código es texto seleccionable (se puede copiar y lo lee un lector de pantalla).
-    `user-select:all` lo selecciona entero con un toque; el `aria-label` lo deletrea dígito a dígito.
-    `copiar_url` (ver `url_copiar_codigo`) añade el botón «Copiar código», de 44 px de alto (área
-    táctil mínima): los correos no ejecutan JavaScript, así que abre una página del frontend que lo
-    copia. En línea va a 38 px con 5 px de espaciado: cabe en 320 px aunque el cliente descarte el
-    `<style>`; en escritorio, la media query lo sube a 44 px. El `rotulo` va con 0,6 px de espaciado
-    en línea (cabe en una línea a 320 px sin `<style>`) y 1,2 px con la media query."""
+def bloque_codigo(codigo: str, vigencia: str | None = None, rotulo: str = ROTULO_CODIGO) -> str:
+    """Las cifras forman un solo texto seleccionable; el lector de pantalla las deletrea."""
     deletreo = " ".join(codigo)
-    boton = (
-        _boton_azul("Copiar código", copiar_url, tam=14, padding="12px 24px", radio="999px", alinear="center",
-                    margen="20px auto 0 auto", extra_a=f' aria-label="Copiar el código {_e(deletreo)}"')
-        if copiar_url and _url_segura(copiar_url) != "#"
-        else ""
-    )
+    instruccion = _texto("Selecciona el código y elige Copiar.", tam=13, alto=20, margen="10px 0 0 0", alinear="center")
     pie = (
         _texto(_e(vigencia), tam=12, alto=18, color=_FG3, clase="cc-fg3", margen="14px 0 0 0", alinear="center")
         if vigencia
@@ -478,7 +429,7 @@ def bloque_codigo(
         f"font-size:38px;line-height:48px;font-weight:600;letter-spacing:5px;padding-left:5px;color:{_FG};"
         f"text-align:center;white-space:nowrap;font-variant-numeric:tabular-nums;font-feature-settings:'tnum' 1;"
         f'-webkit-user-select:all;user-select:all;">{_e(codigo)}</p>'
-        + boton
+        + instruccion
         + pie,
         padding="26px 16px 22px 16px",
     )
@@ -559,12 +510,10 @@ def renderizar(
     codigo: str | None = None,
     codigo_vigencia: str | None = None,
     logo_url: str | None = None,
-    codigo_copiar_url: str | None = None,
     codigo_rotulo: str = ROTULO_CODIGO,
 ) -> str:
     """Devuelve el documento HTML completo. `escala` es HTML ya generado por `escala_termica`.
     `codigo`: código de verificación de un solo uso, mostrado en grande (ver `bloque_codigo`).
-    `codigo_copiar_url`: enlace del botón «Copiar código» (ver `url_copiar_codigo`); solo con `codigo`.
     `codigo_rotulo`: rótulo sobre el código («Tu código de activación» en la activación).
     `logo_url`: icono de marca (https o ruta relativa de vista previa); sin él, marca con celdas."""
     if tono not in TONOS:
@@ -625,7 +574,7 @@ def renderizar(
                 {_encabezado_estado(tono, etiqueta)}
                 <h1 class="cc-titular" style="margin:0 0 14px 0;font-family:{_FUENTE};font-size:30px;line-height:36px;font-weight:700;letter-spacing:-.7px;color:{_FG};text-align:left;">{_e(titulo)}</h1>
                 {cuerpo_parrafos}
-                {bloque_codigo(codigo, codigo_vigencia, codigo_copiar_url, codigo_rotulo) if codigo else ""}
+                {bloque_codigo(codigo, codigo_vigencia, codigo_rotulo) if codigo else ""}
                 {bloque_escala}
                 {_detalles(detalles or [])}
                 {bloque_boton}

@@ -138,7 +138,11 @@ class SQLAlchemyTrazabilidadRepository(ITrazabilidadRepository):
             stmt = stmt.where(TraceabilityRecordModel.timestamp >= desde)
         if hasta is not None:
             stmt = stmt.where(TraceabilityRecordModel.timestamp <= hasta)
-        stmt = stmt.order_by(TraceabilityRecordModel.created_at.desc()).limit(limite).offset(offset)
+        stmt = (
+            stmt.order_by(TraceabilityRecordModel.created_at.desc(), TraceabilityRecordModel.id.desc())
+            .limit(limite)
+            .offset(offset)
+        )
         result = await self._session.execute(stmt)
         return [_to_entity(m) for m in result.scalars().all()]
 

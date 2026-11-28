@@ -11,7 +11,8 @@
 El manifiesto guarda el número de filas y el SHA-256 de las columnas de evidencia, en orden de
 clave primaria (`src/infrastructure/respaldo/huellas.py`), de estas tablas: `thermal_readings`,
 `traceability_records`, `audit_logs`, `users`, `devices`, `thermal_alerts`, `corrective_actions`,
-`device_config_history` y `ai_model_versions` (registro de versiones del modelo IA). En
+`device_config_history`, `roles`, `ai_model_versions` y `predicciones_preventivas`. Se comparan todas
+las columnas de estas once tablas, incluidas las métricas y las particiones de aprobación. En
 `traceability_records` entra el contenido de cada eslabón (`payload`, `timestamp`, `chain_seq`,
 `hash_version`, `usuario_id`, `created_at`), no solo sus hashes, y en `thermal_readings` también la
 evidencia de la inferencia (clase, probabilidades, versión del modelo, vector de entrada). La huella se calcula dentro de la misma transacción REPEATABLE READ cuyo
@@ -23,7 +24,9 @@ En `audit_logs` la huella incluye `resultado` (exitoso, fallido, denegado o bloq
 manifiesto declara en `columnas` las tablas y columnas con las que se calculó. Un manifiesto
 anterior, sin `columnas`, se verifica con las tres tablas originales y sin `resultado`, así que
 sigue siendo verificable. Del mismo modo, un manifiesto de HU-29 v2 (ocho tablas, eslabones solo
-con sus hashes) se verifica con las columnas que declara.
+con sus hashes) se verifica con las columnas que declara. El campo `version_huella` identifica
+la normalización. La versión 2 conserva toda la precisión de los números de punto flotante.
+Los manifiestos anteriores se verifican con la precisión y las columnas que usaron al generarse.
 
 ## Railway
 
@@ -43,10 +46,9 @@ sirve para el cron: su `CMD` levanta uvicorn y en producción exige todos los se
   `respaldos.estado = "fallido"`. Una contraseña errónea no sirve: no puede escribir
   `RESPALDO_FALLIDO`.
 
-## Pendiente de ejecutar en el entorno desplegado
+## Simulacro documentado
 
-Las pruebas automáticas cubren la huella, la comparación, la alerta crítica y un respaldo y una
-restauración reales con `pg_dump` y `pg_restore` sobre PostgreSQL (pgserver):
-`tests/integration/test_hu29_respaldo_restauracion.py` y
-`tests/integration/test_hu29_snapshot_postgres.py`. Falta crear el cron en Railway y hacer el
-simulacro contra el respaldo de producción (RESPALDO_RAILWAY.md).
+El [informe del 15/11/2026](../evidencias/HU-29/2026-11-15_cron_simulacro_y_fallo.md)
+registra la restauración aislada de las nueve tablas incluidas en aquel manifiesto y el aviso de
+fallo del cron. La próxima prueba operativa debe generar un manifiesto de once tablas y registrar
+la comparación de cada tabla.

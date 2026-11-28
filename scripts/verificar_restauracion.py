@@ -10,11 +10,11 @@ Uso:
    ser una base distinta de DATABASE_URL (el script se niega si coinciden).
 3. Calcula la huella de las tablas que declara el manifiesto en la base
    restaurada y la compara con la del manifiesto, que se calculó en el mismo
-   snapshot que el volcado. Un respaldo actual declara 9 tablas:
+   snapshot que el volcado. Un respaldo actual declara 11 tablas:
    thermal_readings, traceability_records, audit_logs, users, devices,
-   thermal_alerts, corrective_actions, device_config_history y
-   ai_model_versions. Uno de HU-29 v2 declara las 8 primeras, y uno antiguo,
-   sin `columnas`, solo las tres primeras.
+   thermal_alerts, corrective_actions, device_config_history, ai_model_versions,
+   predicciones_preventivas y roles. Los históricos se verifican con su
+   selección y normalización originales.
 4. Escribe el informe JSON junto al manifiesto (`.restauracion.json`) como
    evidencia de HU-29, y sale con 0 solo si todo coincide.
 """
@@ -32,7 +32,7 @@ from pathlib import Path
 
 from scripts.respaldo_postgres import CODIGO_FALLO, _huellas, sha256_archivo, url_libpq
 from src.infrastructure.config import normalizar_database_url
-from src.infrastructure.respaldo.huellas import columnas_de_manifiesto, comparar_huellas
+from src.infrastructure.respaldo.huellas import VERSION_HUELLA, columnas_de_manifiesto, comparar_huellas
 
 logger = logging.getLogger("restauracion")
 
@@ -61,9 +61,12 @@ def verificar(manifiesto_ruta: Path, url_destino: str, url_produccion: str | Non
     }
     if not integro:
         return {**informe, "coincide": False, "motivo": "el SHA-256 del respaldo no coincide con el manifiesto"}
+    version = manifiesto.get("version_huella", 1)
+    if version not in (1, VERSION_HUELLA):
+        raise ValueError(f"Versión de huella desconocida: {version}")
     restaurar(archivo, url_destino)
     restaurada = asyncio.run(
-        _huellas(normalizar_database_url(url_destino), columnas_de_manifiesto(manifiesto))
+        _huellas(normalizar_database_url(url_destino), columnas_de_manifiesto(manifiesto), version=version)
     )
     comparacion = comparar_huellas(manifiesto["huellas"], restaurada)
     return {**informe, **comparacion}

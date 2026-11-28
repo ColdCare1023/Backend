@@ -43,7 +43,6 @@ def test_health_detalle_informa_la_cabeza_de_migraciones_del_codigo(client, toke
     cuerpo = client.get("/health/detalle", headers=auth_header(token_admin)).json()
 
     assert esperada and cuerpo["alembic_head"] == esperada
-    assert cuerpo["alembic_head"].startswith("0042")
 
 
 def test_health_detalle_degradado_si_la_api_del_broker_fallo(client, token_admin, app):

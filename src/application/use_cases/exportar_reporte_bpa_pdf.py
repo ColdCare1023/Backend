@@ -26,6 +26,7 @@ from src.infrastructure.pdf.generador_pdf import GeneradorReporteBPAPDF
 # (Manual de BPA, RM N.º 132-2015/MINSA).
 TEMP_MIN_RANGO = 2.0
 TEMP_MAX_RANGO = 8.0
+VERIFICACIONES_POR_PAGINA = 200
 
 
 def _como_utc(valor: datetime) -> datetime:
@@ -255,24 +256,29 @@ class ExportarReporteBPAPDFUseCase:
     async def _ultima_verificacion(self, device_id: str | None, desde: datetime, hasta: datetime) -> dict | None:
         """HU-38 esc. 2: la verificación HU-37 más reciente cuyo periodo
         verificado se solapa con el del reporte (del dispositivo, si lo hay)."""
-        eventos = await self._trazabilidad_repository.listar(
-            tipo_evento="VERIFICACION_INTEGRIDAD", device_id=device_id, limite=200
-        )
         desde, hasta = _como_utc(desde), _como_utc(hasta)
-        for evento in eventos:  # más reciente primero
-            if not _solapa(evento.payload, desde, hasta):
-                continue
-            payload = evento.payload
-            return {
-                "realizada_en": _como_utc(evento.timestamp).strftime("%Y-%m-%d %H:%M UTC"),
-                "device_id": payload.get("device_id"),
-                "desde": payload.get("desde"),
-                "hasta": payload.get("hasta"),
-                "resultado": payload.get("resultado") or ("integra" if payload.get("integra") else "corrupta"),
-                "total_bloques_verificados": payload.get("total_bloques_verificados"),
-                "hash_eslabon": evento.hash_actual,
-            }
-        return None
+        offset = 0
+        while True:
+            eventos = await self._trazabilidad_repository.listar(
+                tipo_evento="VERIFICACION_INTEGRIDAD", device_id=device_id,
+                limite=VERIFICACIONES_POR_PAGINA, offset=offset,
+            )
+            for evento in eventos:  # más reciente primero
+                if not _solapa(evento.payload, desde, hasta):
+                    continue
+                payload = evento.payload
+                return {
+                    "realizada_en": _como_utc(evento.timestamp).strftime("%Y-%m-%d %H:%M UTC"),
+                    "device_id": payload.get("device_id"),
+                    "desde": payload.get("desde"),
+                    "hasta": payload.get("hasta"),
+                    "resultado": payload.get("resultado") or ("integra" if payload.get("integra") else "corrupta"),
+                    "total_bloques_verificados": payload.get("total_bloques_verificados"),
+                    "hash_eslabon": evento.hash_actual,
+                }
+            if len(eventos) < VERIFICACIONES_POR_PAGINA:
+                return None
+            offset += len(eventos)
 
     async def execute(
         self,

@@ -16,6 +16,7 @@ from pydantic import (
 
 from src.domain.entities.checklist_bpa import DIAS_RETROACTIVOS_MAXIMOS
 from src.domain.value_objects.device_id import PATRON_DEVICE_ID
+from src.domain.value_objects.intervalo_reporte import INTERVALO_REPORTE_POR_DEFECTO
 from src.domain.value_objects.nivel_riesgo import NivelRiesgo
 from src.domain.value_objects.rol import Rol
 
@@ -556,7 +557,7 @@ class DispositivoResponse(BaseModel):
     # (desafío firmado) que tiene el token nuevo.
     posesion_pendiente: bool = False
     # HU-54: intervalo de captura del nodo y último latido (`estado_nodo`).
-    intervalo_reporte_segundos: int = 30
+    intervalo_reporte_segundos: int = INTERVALO_REPORTE_POR_DEFECTO
     ultimo_latido_en: datetime | None = None
 
 
