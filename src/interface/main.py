@@ -82,9 +82,9 @@ from src.infrastructure.mqtt import contrato_v1
 from src.infrastructure.mqtt.broker_admin import BrokerAdmin
 from src.infrastructure.mqtt.mqtt_client import ESTADO_CONEXION, mqtt_session
 from src.infrastructure.mqtt.payload_schema import (
+    MAX_BYTES_PAYLOAD_MQTT,
     SCHEMA_VERSION_ACTUAL,
     SCHEMA_VERSIONS_SOPORTADAS,
-    MAX_BYTES_PAYLOAD_MQTT,
     EventoDispositivoPayload,
     LecturaPayload,
     TipoEventoDispositivo,
