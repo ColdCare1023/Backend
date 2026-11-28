@@ -14,7 +14,11 @@ from src.infrastructure.ai.prediccion_preventiva.configuracion import (
     CALIDAD_OK,
     CALIDAD_SENSOR_FAULT,
 )
-from src.infrastructure.ai.prediccion_preventiva.servicio import MODO_ACTIVO, ServicioPrediccionPreventiva
+from src.infrastructure.ai.prediccion_preventiva.servicio import (
+    MODO_ACTIVO,
+    MODO_SOMBRA,
+    ServicioPrediccionPreventiva,
+)
 from src.infrastructure.ai.random_forest_service import (
     ESTADO_COMPLETADA,
     ESTADO_OMITIDA,
@@ -96,8 +100,21 @@ class PredecirRiesgoPreventivoUseCase:
 
     def aplicar_a_lectura(self, lectura: LecturaTermica, prediccion: PrediccionPreventiva | None) -> bool:
         """Solo en modo activo. Devuelve True si la predicción reemplazó la
-        clasificación legada de la lectura."""
-        if self.modo != MODO_ACTIVO or prediccion is None:
+        clasificación legada de la lectura.
+
+        HU-34 esc. 2: en modo sombra la clase NO cambia el riesgo efectivo ni
+        abre alertas; solo viaja rotulada (`ia_sombra` en la evidencia) para
+        que el tablero la muestre como «IA en modo sombra»."""
+        if prediccion is None:
+            return False
+        if self.modo == MODO_SOMBRA:
+            if prediccion.estado == CALIDAD_OK and prediccion.clase is not None:
+                lectura.payload = {
+                    **(lectura.payload or {}),
+                    "ia_sombra": {"clase": prediccion.clase.value, "modelo_version": prediccion.modelo_version},
+                }
+            return False
+        if self.modo != MODO_ACTIVO:
             return False
         if prediccion.estado == CALIDAD_OK:
             lectura.nivel_riesgo = prediccion.clase

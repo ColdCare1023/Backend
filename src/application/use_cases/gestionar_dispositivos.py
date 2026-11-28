@@ -586,6 +586,7 @@ class ConfirmarOperacionBrokerUseCase:
     ) -> None:
         self._device_repository = device_repository
         self._registrar_hash = registrar_hash
+        self.ventana_s: float | None = None
 
     async def execute(self, device_id: str, admin_id: UUID, nota: str | None) -> tuple[dict, str]:
         dispositivo = await self._device_repository.obtener(device_id)
@@ -597,12 +598,22 @@ class ConfirmarOperacionBrokerUseCase:
         pendiente_desde = dispositivo.get("broker_pendiente_desde")
         cuando = datetime.now(tz=timezone.utc)
         actualizado = await self._device_repository.confirmar_broker(device_id, admin_id, cuando)
+        # HU-44 esc. 1: ventana medida entre la operación en el backend y su
+        # confirmación en el broker (segundos), para la evidencia.
+        desde_utc = (
+            pendiente_desde.replace(tzinfo=timezone.utc)
+            if pendiente_desde is not None and pendiente_desde.tzinfo is None
+            else pendiente_desde
+        )
+        ventana_s = round((cuando - desde_utc).total_seconds(), 1) if desde_utc is not None else None
+        self.ventana_s = ventana_s
         await self._registrar_hash.execute(
             tipo_evento="BROKER_CONSOLA_CONFIRMADA",
             payload={
                 "device_id": device_id,
                 "operacion": operacion,
                 "pendiente_desde": pendiente_desde.isoformat() if pendiente_desde else None,
+                "ventana_s": ventana_s,
                 "admin_id": str(admin_id),
                 "nota": nota,
             },
@@ -642,6 +653,50 @@ class ActualizarIntervaloReporteUseCase:
             campo=f"intervalo_reporte_segundos ({origen})",
             valor_anterior=str(anterior) if anterior is not None else None,
             valor_nuevo=str(segundos),
+            actor_id=actor_id,
+        )
+        return actualizado
+
+
+def _modelo_sensor(nombre: str) -> str:
+    """«ds18b20» → «DS18B20»; «mc38» → «MC-38»."""
+    modelo = str(nombre).strip().upper()
+    return "MC-38" if modelo in ("MC38", "MC-38") else modelo
+
+
+class ActualizarSensoresHabilitadosUseCase:
+    """HU-49 esc. 1: cambio de los sensores habilitados del nodo (p. ej. se
+    instala o se retira el MC-38). Queda en el historial de configuración con
+    valor anterior, valor nuevo, actor y hora; la telemetría previa no cambia."""
+
+    SENSORES_VALIDOS = ("DS18B20", "SHT31", "MC-38")
+
+    def __init__(self, device_repository: IDeviceRepository) -> None:
+        self._device_repository = device_repository
+
+    async def execute(self, device_id: str, sensores: list[str], actor_id: UUID | None) -> dict | None:
+        """Devuelve el dispositivo actualizado, o None si no cambió nada."""
+        # El alta histórica guardaba los modelos en minúsculas («ds18b20»).
+        sensores = [_modelo_sensor(s) for s in sensores]
+        desconocidos = sorted(set(sensores) - set(self.SENSORES_VALIDOS))
+        if desconocidos:
+            raise DomainError(f"Sensores no reconocidos: {', '.join(desconocidos)}")
+        if "DS18B20" not in sensores:
+            # La regla 2-8 °C depende de la temperatura interna: no se puede deshabilitar.
+            raise DomainError("El DS18B20 (temperatura interna) es obligatorio")
+        nuevos = [s for s in self.SENSORES_VALIDOS if s in sensores]
+        dispositivo = await self._device_repository.obtener(device_id)
+        if dispositivo is None:
+            raise RecursoNoEncontradoError(f"Dispositivo {device_id} no encontrado")
+        anteriores = list(dispositivo.get("sensores_habilitados") or [])
+        if sorted(_modelo_sensor(s) for s in anteriores) == sorted(nuevos):
+            return None
+        actualizado = await self._device_repository.actualizar_sensores_habilitados(device_id, nuevos)
+        await self._device_repository.registrar_evento_config(
+            device_id,
+            campo="sensores_habilitados (administrador)",
+            valor_anterior=", ".join(anteriores) if anteriores else "ninguno",
+            valor_nuevo=", ".join(nuevos),
             actor_id=actor_id,
         )
         return actualizado
