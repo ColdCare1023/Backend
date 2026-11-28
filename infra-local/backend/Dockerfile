@@ -4,6 +4,12 @@
 FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+# HU-34 esc. 2 / HU-46 (criterios del 20/11/2026): el modelo preventivo opera en
+# modo sombra (predice y deja evidencia rotulada, sin cambiar el riesgo ni abrir
+# alertas). Las variables del servicio en Railway, si existen, prevalecen.
+ENV IA_PREVENTIVO_MODO=sombra \
+    IA_PREVENTIVO_VERSION=rf-preventivo-h30-termico-puerta-1.0.0 \
+    IA_PREVENTIVO_SHA256=6d5c81c0403f5c96b70accc1b079f6ff6760e45e7cf83abdc12f4c7d49f6aaa6
 # HU-29: pg_dump/pg_restore para el respaldo programado (scripts.respaldo_postgres)
 # y la prueba de restauración. Cliente 17 (Debian trixie): compatible con
 # servidores PostgreSQL ≤ 17.
